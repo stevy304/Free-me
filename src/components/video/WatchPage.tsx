@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import {
   ThumbsUp,
-  ThumbsDown,
   Share2,
-  Bookmark,
   Flag,
   DollarSign,
   CheckCircle2,
@@ -77,10 +75,13 @@ export const WatchPage: React.FC<WatchPageProps> = ({
     setReplyingToId(null);
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard?.writeText(window.location.href);
-    setCopiedShareLink(true);
-    setTimeout(() => setCopiedShareLink(false), 2000);
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopiedShareLink(true);
+    } catch {
+      document.querySelector<HTMLInputElement>('#watch-share-url')?.select();
+    }
   };
 
   const handleReportSubmit = (e: React.FormEvent) => {
@@ -98,10 +99,10 @@ export const WatchPage: React.FC<WatchPageProps> = ({
   const estimatedCreatorEarningsRwf = Math.round(estimatedGrossRwf * 0.6);
 
   return (
-    <div className="max-w-[1600px] mx-auto px-4 lg:px-8 py-6">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div className="mx-auto max-w-[1800px] px-3 py-4 sm:px-5 lg:px-8 lg:py-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(290px,30%)]">
         {/* Main Column: Player, Info, Monetization Breakdown & Comments */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="min-w-0 space-y-4">
           {/* Custom HLS & Pre-Roll Video Player */}
           <VideoPlayer
             video={video}
@@ -127,7 +128,7 @@ export const WatchPage: React.FC<WatchPageProps> = ({
                   <span aria-hidden="true">·</span>
                   <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
                     <DollarSign className="w-3 h-3" />
-                    Verified Monetized Creator Pool
+                    Demo monetization
                   </span>
                 </>
               )}
@@ -160,7 +161,7 @@ export const WatchPage: React.FC<WatchPageProps> = ({
                   )}
                 </button>
                 <div className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-                  {channel ? `${(channel.subscriberCount / 1000).toFixed(1)}K subscribers` : 'Verified Creator'}
+                  {channel ? `${(channel.subscriberCount / 1000).toFixed(1)}K subscribers` : 'Local video upload'}
                 </div>
               </div>
 
@@ -192,17 +193,12 @@ export const WatchPage: React.FC<WatchPageProps> = ({
                   <ThumbsUp className="w-4 h-4" />
                   <span className="tabular-nums">{video.likeCount.toLocaleString()}</span>
                 </button>
-                <div className="h-4 w-px bg-slate-200 dark:bg-slate-700" />
-                <button
-                  className="px-2.5 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white rounded-md transition-colors"
-                >
-                  <ThumbsDown className="w-4 h-4" />
-                </button>
+
               </div>
 
               {/* Share */}
               <button
-                onClick={() => setShowShareModal(true)}
+                onClick={() => { setCopiedShareLink(false); setShowShareModal(true); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors"
               >
                 <Share2 className="w-3.5 h-3.5" />
@@ -221,7 +217,8 @@ export const WatchPage: React.FC<WatchPageProps> = ({
           </div>
 
           {/* TRANSPARENT CREATOR MONETIZATION AUDIT CARD */}
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 text-xs">
+          <details className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 text-xs">
+            <summary className="cursor-pointer font-semibold">Creator revenue estimate · demo</summary>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <DollarSign className="w-4 h-4 text-emerald-500" />
@@ -239,7 +236,7 @@ export const WatchPage: React.FC<WatchPageProps> = ({
               Estimated gross ad pool: <span className="font-mono tabular-nums font-semibold text-slate-800 dark:text-slate-200">{formatCurrency(estimatedGrossRwf, currency)}</span>,
               yielding an estimated <span className="font-mono tabular-nums font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(estimatedCreatorEarningsRwf, currency)}</span> directly to the creator’s Mobile Money / Bank balance.
             </p>
-          </div>
+          </details>
 
           {/* Description Section */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-sm">
@@ -395,27 +392,28 @@ export const WatchPage: React.FC<WatchPageProps> = ({
         </div>
 
         {/* Right Sidebar: Related Videos Column */}
-        <div className="space-y-4">
-          <h3 className="font-display font-semibold text-sm text-slate-900 dark:text-slate-100">
-            Up Next · African Stories
+        <aside aria-label="Up next" className="min-w-0 space-y-3">
+          <h3 className="font-display font-bold text-base text-slate-900 dark:text-slate-100">
+            Up next
           </h3>
 
           <div className="space-y-3">
             {relatedVideos.map((rel) => (
-              <div
+              <button
+                type="button"
                 key={rel.id}
                 onClick={() => onSelectVideo(rel)}
-                className="group flex gap-3 cursor-pointer p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
+                className="group flex w-full items-start gap-3 text-left rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
               >
-                <div className="relative w-40 aspect-video rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 shrink-0 border border-slate-200/80 dark:border-slate-800">
+                <div className="relative w-[44%] aspect-video rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 shrink-0 border border-slate-200/80 dark:border-slate-800">
                   <img
-                    src={rel.thumbnailUrl}
+                    src={rel.thumbnailUrl || '/free-me.svg'}
                     alt={rel.title}
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                   />
                   <div className="absolute bottom-1 right-1 rounded bg-black/80 px-1 py-0.2 font-mono text-[10px] text-white">
-                    {Math.floor(rel.durationSeconds / 60)}:{(rel.durationSeconds % 60).toString().padStart(2, '0')}
+                    {Math.floor(rel.durationSeconds / 60)}:{Math.floor(rel.durationSeconds % 60).toString().padStart(2, '0')}
                   </div>
                 </div>
 
@@ -430,10 +428,10 @@ export const WatchPage: React.FC<WatchPageProps> = ({
                     <span>{rel.createdAt}</span>
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
-        </div>
+        </aside>
       </div>
 
       {/* SHARE MODAL */}
@@ -450,6 +448,8 @@ export const WatchPage: React.FC<WatchPageProps> = ({
               <input
                 type="text"
                 readOnly
+                id="watch-share-url"
+                aria-label="Video link"
                 value={window.location.href}
                 className="flex-1 bg-transparent text-xs text-slate-700 dark:text-slate-300 font-mono focus:outline-none"
               />
