@@ -502,6 +502,10 @@ export default function App() {
         }}
       />
 
+      <p className="bg-amber-50 px-4 py-2 text-center text-xs text-amber-950 dark:bg-amber-950 dark:text-amber-100">
+        Free Me prototype. Accounts, uploads and earnings shown here are demo data.
+      </p>
+
       <div className="flex-1 flex">
         {/* Desktop Sidebar Navigation */}
         <Sidebar
