@@ -34,7 +34,8 @@ import { toCatalogVideo, type ReadyUpload } from './services/videoCatalog';
 import { DISCOVERY_VIDEOS } from './services/discoveryCatalog';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
-import { VideoCard } from './components/video/VideoCard';
+import { DiscoveryPage } from './pages/DiscoveryPage';
+import { pageUrl, readRoute } from './services/routes';
 import { WatchPage } from './components/video/WatchPage';
 import { ShortsFeed } from './components/shorts/ShortsFeed';
 import { CreatorStudio } from './components/studio/CreatorStudio';
@@ -101,11 +102,53 @@ export default function App() {
   const [subscribedChannelIds, setSubscribedChannelIds] = useState<string[]>(['chan_clarisse']);
 
   // Navigation & View
-  const [currentView, setCurrentView] = useState<string>('home');
-  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
-  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<string>('All Categories');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [route, setRoute] = useState(() => readRoute(window.location));
+  const currentView = route.view;
+  const selectedVideoId = route.view === 'watch' ? route.id : null;
+  const selectedVideo = videos.find((video) => video.id === selectedVideoId);
+  const selectedChannelId = route.view === 'channel' ? route.id : null;
+  const [selectedCategory, setSelectedCategory] = useState('All Categories');
+  const [searchQuery, setSearchQuery] = useState(() => route.view === 'search' ? route.query : '');
+  const [unavailableId, setUnavailableId] = useState<string | null>(null);
+
+  useEffect(() => {
+    function restoreRoute() {
+      const next = readRoute(window.location);
+      setRoute(next);
+      setSelectedCategory('All Categories');
+      setSearchQuery(next.view === 'search' ? next.query : '');
+    }
+    window.addEventListener('popstate', restoreRoute);
+    return () => window.removeEventListener('popstate', restoreRoute);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedVideoId || selectedVideo) return;
+    if (!/^[a-f0-9-]{36}$/.test(selectedVideoId)) {
+      setUnavailableId(selectedVideoId);
+      return;
+    }
+    setUnavailableId(null);
+    const controller = new AbortController();
+    async function loadVideo(id: string) {
+      try {
+        const response = await fetch('/api/videos/' + encodeURIComponent(id), { signal: controller.signal });
+        if (!response.ok) throw new Error('Video unavailable');
+        const upload: ReadyUpload = await response.json();
+        if (upload.status !== 'ready' || !upload.playlistUrl) throw new Error('Video unavailable');
+        setVideos((current) => current.some((video) => video.id === id) ? current : [toCatalogVideo(upload), ...current]);
+      } catch {
+        if (!controller.signal.aborted) setUnavailableId(id);
+      }
+    }
+    void loadVideo(selectedVideoId);
+    return () => controller.abort();
+  }, [selectedVideoId, selectedVideo]);
+
+  useEffect(() => {
+    const title = selectedVideo?.title || (route.view === 'search' ? 'Search' : route.view === 'home' ? 'Discover' : route.view.replaceAll('-', ' '));
+    document.title = title.charAt(0).toUpperCase() + title.slice(1) + ' · Free Me';
+  }, [route, selectedVideo?.title]);
 
   // Modals
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
@@ -126,42 +169,18 @@ export default function App() {
   const toggleDarkMode = () => setDarkMode((prev) => !prev);
   const toggleCurrency = () => setCurrency((prev) => (prev === 'RWF' ? 'USD' : 'RWF'));
 
-  // Navigation router helper
-  const handleNavigate = (view: string, param?: string) => {
-    if (view === 'watch' && param) {
-      const v = videos.find((item) => item.id === param);
-      if (v) {
-        setSelectedVideo(v);
-        setCurrentView('watch');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        return;
-      }
-    }
-    if (view === 'channel' && param) {
-      setSelectedChannelId(param);
-      setCurrentView('channel');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-    if (view === 'home' || view === 'explore') {
-      setSelectedCategory('All Categories');
-      setSearchQuery('');
-    }
-    setCurrentView(view);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  const handleNavigate = (view: string, value?: string) => {
+    const url = pageUrl(view, value);
+    if (window.location.pathname + window.location.search !== url) window.history.pushState(null, '', url);
+    setRoute(readRoute(window.location));
+    setSelectedCategory('All Categories');
+    setSearchQuery(view === 'search' ? value || '' : '');
+    window.scrollTo({ top: 0 });
   };
 
-  const handleSelectVideo = (video: Video) => {
-    setSelectedVideo(video);
-    setCurrentView('watch');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
+  const handleSelectVideo = (video: Video) => handleNavigate('watch', video.id);
   const handleSelectChannel = (channelId: string) => {
-    if (!channels.some((channel) => channel.id === channelId)) return;
-    setSelectedChannelId(channelId);
-    setCurrentView('channel');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (channels.some((channel) => channel.id === channelId)) handleNavigate('channel', channelId);
   };
 
   // Video Actions
@@ -180,17 +199,7 @@ export default function App() {
       })
     );
 
-    if (selectedVideo?.id === videoId) {
-      setSelectedVideo((prev) =>
-        prev
-          ? {
-              ...prev,
-              isLiked: !prev.isLiked,
-              likeCount: !prev.isLiked ? prev.likeCount + 1 : Math.max(0, prev.likeCount - 1),
-            }
-          : null
-      );
-    }
+
   };
 
   const handleToggleSubscribe = (channelId: string) => {
@@ -462,8 +471,8 @@ export default function App() {
     const isTravel = ['Kigali Life', 'Wildlife & Safari'].includes(v.category);
     if (selectedCategory === 'Travel' && !isTravel) return false;
     if (selectedCategory !== 'Travel' && selectedCategory !== 'All Categories' && v.category !== selectedCategory) return false;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+    if (route.view === 'search' && route.query.trim()) {
+      const q = route.query.trim().toLowerCase();
       const matchTitle = v.title.toLowerCase().includes(q);
       const matchChannel = v.channelName.toLowerCase().includes(q);
       const matchCat = v.category.toLowerCase().includes(q);
@@ -477,7 +486,7 @@ export default function App() {
   const activeAdCampaign = campaigns.find((c) => c.status === 'ACTIVE' && c.adFormat === 'PRE_ROLL');
 
   // Channel lookup for watch page or channel page
-  const currentChannel = channels.find((c) => c.id === selectedChannelId) || channels[0];
+  const currentChannel = channels.find((c) => c.id === selectedChannelId);
 
   return (
     <div className="min-h-screen discovery-shell text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
@@ -488,9 +497,9 @@ export default function App() {
         users={users}
         onSelectUser={(u) => {
           setCurrentUser(u);
-          if (u.role === 'CREATOR') setCurrentView('studio');
-          else if (u.role === 'ADVERTISER') setCurrentView('advertiser');
-          else if (u.role === 'ADMIN') setCurrentView('admin');
+          if (u.role === 'CREATOR') handleNavigate('studio');
+          else if (u.role === 'ADVERTISER') handleNavigate('advertiser');
+          else if (u.role === 'ADMIN') handleNavigate('admin');
         }}
         currency={currency}
         onToggleCurrency={toggleCurrency}
@@ -502,49 +511,37 @@ export default function App() {
         onSearchChange={setSearchQuery}
         onSearchSubmit={(e) => {
           e.preventDefault();
-          setSelectedCategory('All Categories');
-          setCurrentView('home');
+          const query = searchQuery.trim();
+          if (query) handleNavigate('search', query);
         }}
       />
 
-      <div className="flex-1 flex">
+      <div className={`flex-1 flex ${currentView === 'watch' ? 'watch-layout' : ''}`}>
         <Sidebar currentView={currentView} onNavigate={handleNavigate} />
         <main className="flex-1 min-w-0 pb-16">
-          {/* VIEW: HOME FEED */}
-          {(currentView === 'home' || currentView === 'explore') && (
-            <section className="discovery-feed">
-              <h1>{searchQuery.trim() ? `Search results for “${searchQuery.trim()}”` : currentView === 'explore' ? 'Explore Free Me' : 'Discover Free Me'}</h1>
-              <div className="discovery-categories" aria-label="Video categories">
-                {[
-                  ['All Categories', 'For you'],
-                  ['Music & Performance', 'Music'],
-                  ['Culinary & Coffee', 'Culture'],
-                  ['Tech & Innovation', 'Tech'],
-                  ['Travel', 'Travel'],
-                ].map(([category, label]) => (
-                  <button type="button" key={category} aria-pressed={selectedCategory === category}
-                    onClick={() => setSelectedCategory(category)}>{label}</button>
-                ))}
-              </div>
-              {filteredVideos.length ? (
-                <div className="discovery-grid">
-                  {filteredVideos.map((video) => (
-                    <VideoCard key={video.id} video={video} onSelect={handleSelectVideo}
-                      onSelectChannel={handleSelectChannel} />
-                  ))}
-                </div>
-              ) : <p className="py-12 text-slate-500" role="status">No videos match this search.</p>}
-              <p className="mt-8 text-xs text-slate-500 dark:text-slate-400">Preview catalog. Featured videos and engagement figures are sample content.</p>
+          {(currentView === 'home' || currentView === 'explore' || route.view === 'search') && (
+            <DiscoveryPage
+              title={route.view === 'search' ? `Search results for “${route.query}”` : currentView === 'explore' ? 'Explore Free Me' : 'Discover Free Me'}
+              category={selectedCategory} onCategory={setSelectedCategory}
+              videos={filteredVideos} onSelectVideo={handleSelectVideo} onSelectChannel={handleSelectChannel}
+            />
+          )}
+
+          {((currentView === 'watch' && !selectedVideo) || (currentView === 'channel' && !currentChannel) || currentView === 'not-found') && (
+            <section className="discovery-feed" role="status">
+              <h1>{currentView === 'watch' ? unavailableId === selectedVideoId ? 'Video unavailable' : 'Loading video…' : 'Page unavailable'}</h1>
+              <a href="/" className="mt-5 inline-block underline">Back to Free Me</a>
             </section>
           )}
 
           {/* VIEW: WATCH PAGE */}
           {currentView === 'watch' && selectedVideo && (
             <WatchPage
+              key={selectedVideo.id}
               video={selectedVideo}
               channel={channels.find((c) => c.id === selectedVideo.channelId)}
               comments={comments.filter((c) => c.videoId === selectedVideo.id)}
-              relatedVideos={videos.filter((v) => v.id !== selectedVideo.id && !v.isShort)}
+              relatedVideos={videos.filter((v) => v.id !== selectedVideo.id && !v.isShort && v.status === 'READY' && v.visibility === 'PUBLIC').sort((a, b) => Number(b.category === selectedVideo.category) - Number(a.category === selectedVideo.category)).slice(0, 12)}
               activeAdCampaign={activeAdCampaign}
               currentUser={currentUser}
               currency={currency}
@@ -611,7 +608,13 @@ export default function App() {
           )}
 
           {/* VIEW: ADMIN GOVERNANCE DESK */}
-          {currentView === 'admin' && (
+          {currentView === 'admin' && currentUser.role !== 'ADMIN' && (
+            <section className="discovery-feed">
+              <h1>Admin access required</h1>
+              <p className="mt-4">Select the administrator preview account to open this page.</p>
+            </section>
+          )}
+          {currentView === 'admin' && currentUser.role === 'ADMIN' && (
             <AdminDashboard
               campaigns={campaigns}
               payouts={payouts}
@@ -630,7 +633,7 @@ export default function App() {
           )}
 
           {/* VIEW: CHANNEL VIEW */}
-          {currentView === 'channel' && (
+          {currentView === 'channel' && currentChannel && (
             <ChannelView
               channel={currentChannel}
               videos={videos.filter((v) => v.channelId === currentChannel.id || v.channelName === currentChannel.name)}
@@ -640,25 +643,10 @@ export default function App() {
             />
           )}
 
-          {/* VIEW: SUBSCRIPTIONS */}
           {currentView === 'subscriptions' && (
-            <div className="max-w-[1520px] mx-auto px-4 md:px-8 py-6 space-y-6">
-              <h2 className="font-display font-bold text-xl text-slate-900 dark:text-white">
-                Your Subscribed African Channels
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {videos
-                  .filter((v) => subscribedChannelIds.includes(v.channelId))
-                  .map((vid) => (
-                    <VideoCard
-                      key={vid.id}
-                      video={vid}
-                      onSelect={handleSelectVideo}
-                      onSelectChannel={handleSelectChannel}
-                    />
-                  ))}
-              </div>
-            </div>
+            <DiscoveryPage title="Subscriptions" videos={videos.filter((video) => subscribedChannelIds.includes(video.channelId))}
+              onSelectVideo={handleSelectVideo} onSelectChannel={handleSelectChannel}
+              emptyMessage="New videos from channels you subscribe to will appear here." />
           )}
         </main>
       </div>

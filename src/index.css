@@ -132,3 +132,7 @@ h1, h2, h3, h4, h5, h6, .font-display {
 .discovery-card-menu > div { position: absolute; z-index: 10; right: 0; width: max-content; display: grid; padding: 4px; border: 1px solid var(--line); background: var(--paper); border-radius: 8px; }
 .discovery-card-menu button { padding: 6px 10px; text-align: left; font-size: 12px; }
 .discovery-card-menu button:hover { background: var(--active); }
+
+@media (min-width: 768px) {
+  .watch-layout > .discovery-nav { display: none; }
+}

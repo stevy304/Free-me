@@ -36,3 +36,13 @@ The current prototype starts without backend secrets. Phase 1 needs a PostgreSQL
 The local backend now streams incoming MP4s to disk, stores catalog metadata in SQLite, generates a JPEG poster and an adaptive HLS playlist, and reprocesses interrupted jobs whose source files survived. Discovery reads ready videos from the backend. Local restart and playback checks cover the new path.
 
 Phase 2 remains open for resumable uploads, object storage, a separate queue and worker, caption support, and access checks for private media. Phase 1 identity and authorization work is still open and gates private uploads.
+
+### Backend requirements before a public release
+
+1. **Identity and permissions.** Persist sessions, creator ownership and visibility. Enforce those permissions for every upload, manifest, segment and studio mutation.
+2. **Media pipeline.** Move originals and renditions to object storage. Add resumable uploads, a durable job queue, isolated FFmpeg workers, retry limits, resource caps and cleanup. Serve published media through a CDN.
+3. **Shared product data.** Move comments, subscriptions, likes, watch history and reports into the database. Add indexed, paginated APIs for discovery, search and recommendations.
+4. **Trust and finances.** Add moderation and audit trails, verified ad events, idempotent accounting and payout reconciliation before enabling real money.
+5. **Operations.** Verify backups and restores, alerts, rollbacks, and concurrent playback under representative traffic. Measure startup time, buffering, errors, and cache performance before stating a capacity.
+
+Use a frontend history fallback for page URLs in deployment, keeping API and media paths on their designated upstreams. Local watch links require access to the same instance that holds the video.
