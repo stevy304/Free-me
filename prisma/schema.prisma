@@ -552,3 +552,41 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
 }
+
+// The current video service uses these tables. The models above describe the
+// broader product schema and can be integrated as those services are built.
+model MediaAccount {
+  id       String         @id
+  email    String         @unique
+  password String
+  sessions MediaSession[]
+  videos   MediaUpload[]
+
+  @@map("accounts")
+}
+
+model MediaSession {
+  token     String       @id
+  accountId String       @map("account_id")
+  expires   BigInt
+  account   MediaAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([expires])
+  @@map("sessions")
+}
+
+model MediaUpload {
+  id              String        @id
+  sequence        BigInt        @unique @default(autoincrement())
+  status          String
+  metadata        Json          @default("{}")
+  durationSeconds Float?        @map("duration_seconds")
+  ownerId         String?       @map("owner_id")
+  visibility      String        @default("public")
+  owner           MediaAccount? @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+
+  @@index([status, visibility, sequence])
+  @@index([ownerId, sequence])
+  @@map("videos")
+}

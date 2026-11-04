@@ -11,7 +11,10 @@
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test tests/revenue.test.ts",
     "dev:web": "vite --port=3000 --host=0.0.0.0",
-    "test:ownership": "node --test tests/video-ownership.test.mjs"
+    "test:ownership": "node --test tests/video-ownership.test.mjs",
+    "db:migrate": "prisma migrate deploy",
+    "db:status": "prisma migrate status",
+    "db:import": "node scripts/import-media-db.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -22,6 +25,7 @@
     "hls.js": "^1.7.4",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "pg": "^8.23.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "vite": "^8.3.0"
