@@ -33,6 +33,6 @@ The current prototype starts without backend secrets. Phase 1 needs a PostgreSQL
 
 ### Phase 2 progress
 
-The local backend now streams incoming MP4s to disk, stores catalog metadata in SQLite, generates a JPEG poster and one HLS rendition, and reprocesses interrupted jobs whose source files survived. Discovery reads ready videos from the backend. Local restart and playback checks cover the new path.
+The local backend now streams incoming MP4s to disk, stores catalog metadata in SQLite, generates a JPEG poster and an adaptive HLS playlist, and reprocesses interrupted jobs whose source files survived. Discovery reads ready videos from the backend. Local restart and playback checks cover the new path.
 
-Phase 2 remains open for resumable uploads, object storage, a separate queue and worker, multiple renditions, caption support, and access checks for private media. Phase 1 identity and authorization work is still open and gates private uploads.
+Phase 2 remains open for resumable uploads, object storage, a separate queue and worker, caption support, and access checks for private media. Phase 1 identity and authorization work is still open and gates private uploads.

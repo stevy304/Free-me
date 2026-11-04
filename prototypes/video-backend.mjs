@@ -3,7 +3,7 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, unlink, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, unlink, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -15,7 +15,7 @@ const run = promisify(execFile);
 const root = resolve(process.env.FREEME_DATA_DIR || join(homedir(), '.free-me-video'));
 const port = Number(process.env.PORT || 4400);
 const maxBytes = 25 * 1024 * 1024;
-await run('ffmpeg', ['-version']);
+await Promise.all([run('ffmpeg', ['-version']), run('ffprobe', ['-version'])]);
 await mkdir(root, { recursive: true });
 const db = new DatabaseSync(join(root, 'videos.sqlite'));
 db.exec(`
@@ -53,28 +53,77 @@ function json(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
+const playbackProfiles = [
+  { height: 240, bitrate: 320 },
+  { height: 360, bitrate: 720 },
+  { height: 720, bitrate: 2100 },
+];
+
+async function encodeRendition(source, directory, { height, bitrate }) {
+  const name = String(height) + 'p';
+  const manifest = name + '.m3u8';
+  await run('ffmpeg', [
+    '-nostdin', '-y', '-loglevel', 'error', '-protocol_whitelist', 'file',
+    '-f', 'mov', '-i', source, '-map', '0:v:0', '-map', '0:a:0?',
+    '-t', '60', '-vf', `scale=-2:min(${height}\\,ih)`, '-threads', '2',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-b:v', bitrate + 'k', '-maxrate', bitrate + 'k', '-bufsize', (bitrate * 2) + 'k',
+    '-c:a', 'aac', '-b:a', '96k', '-flags', '+cgop',
+    '-force_key_frames', 'expr:gte(t,n_forced*4)', '-f', 'hls',
+    '-hls_time', '4', '-hls_playlist_type', 'vod', '-hls_flags', 'independent_segments+temp_file',
+    '-hls_segment_filename', join(directory, name + '-%03d.ts'),
+    join(directory, manifest),
+  ], { timeout: 120_000 });
+
+  const playlist = await readFile(join(directory, manifest), 'utf8');
+  const segments = await Promise.all([...playlist.matchAll(/^#EXTINF:([\d.]+),\r?\n([^\r\n]+)/gm)]
+    .map(async ([, seconds, filename]) => ({
+      duration: Number(seconds),
+      bits: (await stat(join(directory, filename))).size * 8,
+    })));
+  const duration = segments.reduce((total, segment) => total + segment.duration, 0);
+  if (!(duration > 0) || segments.some((segment) => segment.duration <= 0 || segment.bits <= 0)) {
+    throw new Error('HLS playlist contains an invalid segment');
+  }
+  const bandwidth = Math.ceil(Math.max(...segments.map((segment) => segment.bits / segment.duration)));
+  const average = Math.ceil(segments.reduce((total, segment) => total + segment.bits, 0) / duration);
+  return { manifest, bandwidth, average, duration };
+}
+
 async function transcode(id, directory, source) {
   try {
-    await run('ffmpeg', [
-      '-nostdin', '-y', '-loglevel', 'error', '-protocol_whitelist', 'file',
-      '-f', 'mov', '-i', source, '-map', '0:v:0', '-map', '0:a:0?',
-      '-t', '60', '-vf', 'scale=-2:min(360\\,ih)', '-threads', '2',
-      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
-      '-force_key_frames', 'expr:gte(t,n_forced*4)', '-f', 'hls',
-      '-hls_time', '4', '-hls_playlist_type', 'vod',
-      '-hls_segment_filename', join(directory, 'segment-%03d.ts'),
-      join(directory, 'index.m3u8'),
-    ], { timeout: 120_000 });
+    const { stdout } = await run('ffprobe', [
+      '-v', 'error', '-protocol_whitelist', 'file', '-f', 'mov', '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height:stream_side_data=rotation', '-of', 'json', source,
+    ], { timeout: 15_000 });
+    const [video] = JSON.parse(stdout).streams;
+    if (!video?.height || !video.width) throw new Error('Missing video stream dimensions');
+    const rotation = video.side_data_list?.[0]?.rotation ?? 0;
+    const sourceHeight = Math.abs(rotation % 180) === 90 ? video.width : video.height;
+    const profiles = playbackProfiles.filter((profile) => profile.height <= sourceHeight);
+    if (profiles.length === 0) profiles.push(playbackProfiles[0]);
+    const renditions = [];
+    for (const profile of profiles) {
+      renditions.push(await encodeRendition(source, directory, profile));
+    }
     await run('ffmpeg', [
       '-nostdin', '-y', '-loglevel', 'error', '-protocol_whitelist', 'file',
       '-f', 'mov', '-i', source, '-map', '0:v:0', '-frames:v', '1',
       '-vf', 'scale=-2:min(360\\,ih)', '-threads', '1', '-update', '1', join(directory, 'poster.jpg'),
     ], { timeout: 30_000 });
-    const playlist = await readFile(join(directory, 'index.m3u8'), 'utf8');
-    const duration = [...playlist.matchAll(/^#EXTINF:([\d.]+),/gm)]
-      .reduce((seconds, match) => seconds + Number(match[1]), 0);
-    if (!(duration > 0)) throw new Error('HLS playlist contains no playable segments');
-    update.run('ready', duration, id);
+    const master = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:6',
+      '#EXT-X-INDEPENDENT-SEGMENTS',
+      ...renditions.flatMap(({ manifest, bandwidth, average }) => [
+        `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},AVERAGE-BANDWIDTH=${average}`,
+        manifest,
+      ]),
+      '',
+    ].join('\n');
+    await writeFile(join(directory, 'index.m3u8.tmp'), master);
+    await rename(join(directory, 'index.m3u8.tmp'), join(directory, 'index.m3u8'));
+    update.run('ready', renditions[0].duration, id);
   } catch (error) {
     console.error('Transcode failed', id, error.message);
     update.run('failed', null, id);
@@ -128,10 +177,10 @@ async function handle(request, response) {
   if (request.method === 'GET' && path === '/videos') return json(response, 200, { videos: catalog.all().map(describe) });
   if (request.method === 'GET' && path === '/health') return json(response, 200, { status: 'ok' });
   const status = /^\/videos\/([a-f0-9-]{36})$/.exec(path);
-  const media = /^\/media\/([a-f0-9-]{36})\/(index\.m3u8|poster\.jpg|segment-\d{3}\.ts)$/.exec(path);
+  const media = /^\/media\/([a-f0-9-]{36})\/(index\.m3u8|poster\.jpg|segment-\d{3}\.ts|(?:240|360|720)p(?:\.m3u8|-\d{3}\.ts))$/.exec(path);
   const match = status || media;
   const video = match && find.get(match[1]);
-  if (request.method !== 'GET' || !video) return json(response, 404, { error: 'Not found' });
+  if ((request.method !== 'GET' && !(media && request.method === 'HEAD')) || !video) return json(response, 404, { error: 'Not found' });
   const id = match[1];
   if (status) return json(response, 200, describe(video));
   if (video.status !== 'ready') return json(response, 404, { error: 'Video unavailable' });
@@ -140,7 +189,10 @@ async function handle(request, response) {
   response.writeHead(200, {
     'Content-Type': file.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : file.endsWith('.jpg') ? 'image/jpeg' : 'video/mp2t',
     'Content-Length': size,
+    'Cache-Control': 'private, max-age=300',
+    'X-Content-Type-Options': 'nosniff',
   });
+  if (request.method === 'HEAD') return response.end();
   await pipeline(createReadStream(file), response);
 }
 
