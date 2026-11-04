@@ -1,0 +1,554 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  VIEWER
+  CREATOR
+  ADVERTISER
+  ADMIN
+  MODERATOR
+}
+
+enum VideoStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+  FLAGGED
+  SUSPENDED
+}
+
+enum Visibility {
+  PUBLIC
+  UNLISTED
+  PRIVATE
+}
+
+enum CampaignStatus {
+  DRAFT
+  PENDING_REVIEW
+  ACTIVE
+  PAUSED
+  COMPLETED
+  REJECTED
+}
+
+enum AdFormat {
+  PRE_ROLL
+  MID_ROLL
+  BANNER_DISPLAY
+  SPONSORED_CARD
+}
+
+enum PayoutStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  PAID
+  REJECTED
+}
+
+enum PayoutMethod {
+  MTN_MOMO_RWANDA
+  AIRTEL_MONEY_RWANDA
+  BANK_TRANSFER_BK
+  MPESA_KENYA
+  AIRTEL_MONEY_UGANDA
+  STRIPE_AFRICA
+}
+
+enum ModerationStatus {
+  PENDING
+  INVESTIGATING
+  RESOLVED
+  DISMISSED
+}
+
+enum ModerationActionType {
+  WARNING_ISSUED
+  VIDEO_TAKEDOWN
+  MONETIZATION_REVOKED
+  ACCOUNT_SUSPENSION
+  DISMISSED
+}
+
+model User {
+  id                    String            @id @default(uuid())
+  email                 String            @unique
+  passwordHash          String
+  role                  Role              @default(VIEWER)
+  isEmailVerified       Boolean           @default(false)
+  twoFactorEnabled      Boolean           @default(false)
+  twoFactorSecret       String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  profile               Profile?
+  channel               Channel?
+  advertiser            Advertiser?
+  subscriptions         Subscription[]
+  videoLikes            Like[]
+  comments              Comment[]
+  playlists             Playlist[]
+  watchHistories        WatchHistory[]
+  reportsFiled          Report[]          @relation("UserReportsFiled")
+  moderatorActions      ModerationAction[]
+  auditLogs             AuditLog[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model Profile {
+  id                    String            @id @default(uuid())
+  userId                String            @unique
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName           String
+  avatarUrl             String?
+  bio                   String?
+  country               String            @default("RW") // ISO 3166-1 alpha-2, default Rwanda
+  city                  String?           @default("Kigali")
+  preferredLanguage     String            @default("en") // en, fr, rw (Kinyarwanda), sw (Swahili)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([country])
+}
+
+model Channel {
+  id                    String            @id @default(uuid())
+  userId                String            @unique
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  handle                String            @unique
+  name                  String
+  description           String?
+  avatarUrl             String?
+  bannerUrl             String?
+  isVerified            Boolean           @default(false)
+  subscriberCount       Int               @default(0)
+  totalViews            BigInt            @default(0)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  videos                Video[]
+  subscriptions         Subscription[]
+  eligibility           CreatorEligibility?
+  balance               CreatorBalance?
+  payouts               Payout[]
+  revenueRecords        RevenueLedger[]
+
+  @@index([handle])
+  @@index([isVerified])
+}
+
+model Video {
+  id                    String            @id @default(uuid())
+  channelId             String
+  channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  title                 String
+  description           String?
+  categoryId            String
+  category              Category          @relation(fields: [categoryId], references: [id])
+  status                VideoStatus       @default(UPLOADING)
+  visibility            Visibility        @default(PUBLIC)
+  durationSeconds       Int               @default(0)
+  thumbnailUrl          String?
+  animatedPreviewUrl    String?
+  isShort               Boolean           @default(false)
+  monetizationEnabled   Boolean           @default(false)
+  viewCount             BigInt            @default(0)
+  monetizedViewCount    BigInt            @default(0)
+  watchTimeSeconds      BigInt            @default(0)
+  likeCount             Int               @default(0)
+  commentCount          Int               @default(0)
+  sourceFileS3Key       String?
+  masterPlaylistUrl     String?           // HLS .m3u8 master playlist
+  publishedAt           DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  renditions            VideoRendition[]
+  videoFiles            VideoFile[]
+  tags                  VideoTag[]
+  likes                 Like[]
+  comments              Comment[]
+  playlistItems         PlaylistItem[]
+  watchHistories        WatchHistory[]
+  adImpressions         AdImpression[]
+  reports               Report[]
+
+  @@index([channelId])
+  @@index([categoryId])
+  @@index([status, visibility])
+  @@index([isShort])
+  @@index([createdAt])
+}
+
+model VideoRendition {
+  id                    String            @id @default(uuid())
+  videoId               String
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  resolution            String            // "1080p", "720p", "480p", "360p"
+  width                 Int
+  height                Int
+  bitrateKbps           Int
+  playlistUrl           String            // Sub-playlist .m3u8
+  fileSizeBytes         BigInt
+  codec                 String            @default("h264")
+  createdAt             DateTime          @default(now())
+
+  @@unique([videoId, resolution])
+  @@index([videoId])
+}
+
+model VideoFile {
+  id                    String            @id @default(uuid())
+  videoId               String
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  s3Key                 String            @unique
+  bucketName            String
+  fileSize              BigInt
+  mimeType              String
+  checksumSha256        String?
+  createdAt             DateTime          @default(now())
+
+  @@index([videoId])
+}
+
+model Category {
+  id                    String            @id @default(uuid())
+  name                  String            @unique
+  slug                  String            @unique
+  description           String?
+  videos                Video[]
+  campaigns             CampaignCategory[]
+
+  @@index([slug])
+}
+
+model Tag {
+  id                    String            @id @default(uuid())
+  name                  String            @unique
+  videos                VideoTag[]
+
+  @@index([name])
+}
+
+model VideoTag {
+  videoId               String
+  tagId                 String
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  tag                   Tag               @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([videoId, tagId])
+  @@index([tagId])
+}
+
+model Subscription {
+  id                    String            @id @default(uuid())
+  userId                String
+  channelId             String
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdAt             DateTime          @default(now())
+
+  @@unique([userId, channelId])
+  @@index([channelId])
+  @@index([userId])
+}
+
+model Like {
+  id                    String            @id @default(uuid())
+  userId                String
+  videoId               String
+  isLike                Boolean           @default(true) // true for like, false for dislike
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  createdAt             DateTime          @default(now())
+
+  @@unique([userId, videoId])
+  @@index([videoId])
+}
+
+model Comment {
+  id                    String            @id @default(uuid())
+  videoId               String
+  userId                String
+  parentId              String?           // For nested replies
+  content               String
+  likeCount             Int               @default(0)
+  isPinned              Boolean           @default(false)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent                Comment?          @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies               Comment[]         @relation("CommentReplies")
+
+  @@index([videoId])
+  @@index([userId])
+}
+
+model Playlist {
+  id                    String            @id @default(uuid())
+  userId                String
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title                 String
+  description           String?
+  visibility            Visibility        @default(PUBLIC)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  items                 PlaylistItem[]
+
+  @@index([userId])
+}
+
+model PlaylistItem {
+  id                    String            @id @default(uuid())
+  playlistId            String
+  videoId               String
+  position              Int               @default(0)
+  addedAt               DateTime          @default(now())
+
+  playlist              Playlist          @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, videoId])
+  @@index([playlistId])
+}
+
+model WatchHistory {
+  id                    String            @id @default(uuid())
+  userId                String
+  videoId               String
+  progressSeconds       Int               @default(0)
+  completed             Boolean           @default(false)
+  lastWatchedAt         DateTime          @default(now())
+
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, videoId])
+  @@index([userId, lastWatchedAt])
+}
+
+// -------------------------------------------------------------
+// ADVERTISING & LOCAL BUSINESS SYSTEM
+// -------------------------------------------------------------
+
+model Advertiser {
+  id                    String            @id @default(uuid())
+  userId                String            @unique
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessName          String
+  tinOrRegistrationNumber String?         // Rwanda RDB/RRA Tax Identification Number
+  businessType          String            // e.g. "Hospitality", "Fintech", "Retail", "Agribusiness"
+  contactPhone          String
+  isVerified            Boolean           @default(false)
+  creditBalanceCents    BigInt            @default(0) // In local currency cents (e.g. RWF or USD cents)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  campaigns             Campaign[]
+
+  @@index([businessName])
+}
+
+model Campaign {
+  id                    String            @id @default(uuid())
+  advertiserId          String
+  advertiser            Advertiser        @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+  name                  String
+  adFormat              AdFormat          @default(PRE_ROLL)
+  status                CampaignStatus    @default(DRAFT)
+  budgetAmountCents     BigInt
+  spentAmountCents      BigInt            @default(0)
+  targetCountry         String            @default("RW") // "RW", "KE", "UG", "ALL"
+  cpmRateCents          Int               // Cost per 1,000 impressions in cents
+  adCreativeUrl         String            // Video or banner asset URL
+  destinationUrl        String            // Advertiser landing page
+  headline              String
+  startDate             DateTime
+  endDate               DateTime
+  impressionsCount      BigInt            @default(0)
+  clicksCount           BigInt            @default(0)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  targetCategories      CampaignCategory[]
+  impressions           AdImpression[]
+
+  @@index([advertiserId])
+  @@index([status])
+  @@index([targetCountry])
+}
+
+model CampaignCategory {
+  campaignId            String
+  categoryId            String
+  campaign              Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  category              Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, categoryId])
+}
+
+model AdImpression {
+  id                    String            @id @default(uuid())
+  campaignId            String
+  campaign              Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  videoId               String
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  viewerCountry         String            @default("RW")
+  watchedDurationMs     Int
+  completed             Boolean           @default(false)
+  costChargedCents      Int
+  creatorShareCents     Int               // 60% of costChargedCents
+  platformShareCents    Int               // 30%
+  reinvestShareCents    Int               // 10%
+  createdAt             DateTime          @default(now())
+
+  events                AdEvent[]
+
+  @@index([campaignId])
+  @@index([videoId])
+  @@index([createdAt])
+}
+
+model AdEvent {
+  id                    String            @id @default(uuid())
+  impressionId          String
+  impression            AdImpression      @relation(fields: [impressionId], references: [id], onDelete: Cascade)
+  eventType             String            // "START", "FIRST_QUARTILE", "MIDPOINT", "COMPLETE", "CLICK", "SKIP"
+  timestampMs           Int
+  createdAt             DateTime          @default(now())
+
+  @@index([impressionId])
+}
+
+// -------------------------------------------------------------
+// CREATOR MONETIZATION & AUDITABLE FINANCIAL LEDGER
+// -------------------------------------------------------------
+
+model CreatorEligibility {
+  id                    String            @id @default(uuid())
+  channelId             String            @unique
+  channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  isEligible            Boolean           @default(false)
+  appliedForMonetization Boolean          @default(false)
+  subscribersRequired   Int               @default(1000)
+  watchHoursRequired    Int               @default(4000)
+  currentSubscribers    Int               @default(0)
+  currentWatchHours     Float             @default(0.0)
+  approvedAt            DateTime?
+  rejectionReason       String?
+  updatedAt             DateTime          @updatedAt
+}
+
+model CreatorBalance {
+  id                    String            @id @default(uuid())
+  channelId             String            @unique
+  channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  currency              String            @default("RWF") // Rwandan Francs default
+  pendingBalanceCents   BigInt            @default(0)
+  confirmedBalanceCents BigInt            @default(0)
+  lifetimeEarningsCents BigInt            @default(0)
+  withdrawnCents        BigInt            @default(0)
+  updatedAt             DateTime          @updatedAt
+}
+
+model RevenueLedger {
+  id                    String            @id @default(uuid())
+  channelId             String
+  channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  sourceType            String            // "AD_SHARE_PRE_ROLL", "AD_SHARE_BANNER", "PLATFORM_BONUS", "PAYOUT_DEDUCTION"
+  referenceId           String?           // Reference to AdImpression or Payout
+  grossAmountCents      BigInt
+  creatorShareCents     BigInt            // Exactly 60%
+  platformShareCents    BigInt            // Exactly 30%
+  reinvestShareCents    BigInt            // Exactly 10%
+  balanceAfterCents     BigInt
+  description           String
+  isReconciled          Boolean           @default(false)
+  createdAt             DateTime          @default(now())
+
+  @@index([channelId])
+  @@index([createdAt])
+}
+
+model Payout {
+  id                    String            @id @default(uuid())
+  channelId             String
+  channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  amountCents           BigInt
+  currency              String            @default("RWF")
+  method                PayoutMethod      @default(MTN_MOMO_RWANDA)
+  accountIdentifier     String            // e.g. Phone number +250788... or BK Account
+  accountHolderName     String
+  status                PayoutStatus      @default(REQUESTED)
+  referenceTransactionId String?
+  requestedAt           DateTime          @default(now())
+  processedAt           DateTime?
+  rejectionReason       String?
+
+  @@index([channelId])
+  @@index([status])
+}
+
+// -------------------------------------------------------------
+// MODERATION, COMPLIANCE & SECURITY AUDIT
+// -------------------------------------------------------------
+
+model Report {
+  id                    String            @id @default(uuid())
+  reporterId            String
+  reporter              User              @relation("UserReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  videoId               String
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  reason                String            // "COPYRIGHT", "HARASSMENT", "INAPPROPRIATE_CONTENT", "MISINFORMATION", "SPAM"
+  details               String?
+  status                ModerationStatus  @default(PENDING)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  moderationActions     ModerationAction[]
+
+  @@index([videoId])
+  @@index([status])
+}
+
+model ModerationAction {
+  id                    String            @id @default(uuid())
+  reportId              String?
+  report                Report?           @relation(fields: [reportId], references: [id], onDelete: SetNull)
+  moderatorId           String
+  moderator             User              @relation(fields: [moderatorId], references: [id], onDelete: Cascade)
+  action                ModerationActionType
+  notes                 String?
+  createdAt             DateTime          @default(now())
+
+  @@index([moderatorId])
+}
+
+model AuditLog {
+  id                    String            @id @default(uuid())
+  userId                String?
+  user                  User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action                String            // "USER_LOGIN", "CAMPAIGN_APPROVED", "PAYOUT_APPROVED", "REVENUE_SPLIT_CHANGE", "VIDEO_DELETED"
+  entityType            String            // "User", "Campaign", "Payout", "Video", "SystemSetting"
+  entityId              String?
+  ipAddress             String?
+  detailsJson           String?           // Detailed payload diff
+  createdAt             DateTime          @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
