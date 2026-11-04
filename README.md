@@ -91,3 +91,14 @@ To bootstrap an empty PostgreSQL development database, set `DATABASE_URL` to its
 ## License
 
 Proprietary — All rights reserved by Free Me Platform Ltd. (Rwanda).
+
+## Try real upload and playback locally
+
+Install FFmpeg, then run the video service in one terminal and the web app in another.
+
+```bash
+node prototypes/video-backend.mjs
+npm run dev
+```
+
+The **Upload** button accepts a raw MP4 of up to 25 MiB. On mobile, open the account menu to find it. The backend processes the first 60 seconds into a single HLS rendition, stores media on disk, and records status in SQLite. The browser saves uploaded titles and descriptions locally. The discovery fixtures, persona switching, and monetization screens use sample data.

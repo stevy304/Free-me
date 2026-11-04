@@ -188,6 +188,40 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+  const source = isPlayingAd && activeAdCampaign ? activeAdCampaign.adCreativeUrl : video.videoUrl;
+  const [playbackError, setPlaybackError] = useState(false);
+  useEffect(() => {
+    const element = videoRef.current;
+    setPlaybackError(false);
+    if (!element || !source.endsWith('.m3u8')) return;
+    if (element.canPlayType('application/vnd.apple.mpegurl')) {
+      element.src = source;
+      return;
+    }
+    let disposed = false;
+    let destroy = () => {};
+    void import('hls.js').then(({ default: Hls }) => {
+      if (disposed) return;
+      if (!Hls.isSupported()) {
+        setPlaybackError(true);
+        return;
+      }
+      const hls = new Hls();
+      destroy = () => hls.destroy();
+      hls.on(Hls.Events.ERROR, (_event, detail) => {
+        if (detail.fatal) setPlaybackError(true);
+      });
+      hls.loadSource(source);
+      hls.attachMedia(element);
+    }).catch(() => {
+      if (!disposed) setPlaybackError(true);
+    });
+    return () => {
+      disposed = true;
+      destroy();
+    };
+  }, [source]);
+
   return (
     <div
       ref={containerRef}
@@ -198,7 +232,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* Video Element */}
       <video
         ref={videoRef}
-        src={isPlayingAd && activeAdCampaign ? activeAdCampaign.adCreativeUrl : video.videoUrl}
+        src={source.endsWith('.m3u8') ? undefined : source}
+        onLoadedMetadata={(event) => {
+          if (Number.isFinite(event.currentTarget.duration)) setDuration(event.currentTarget.duration);
+        }}
+        onError={() => setPlaybackError(true)}
         poster={video.thumbnailUrl}
         onTimeUpdate={handleTimeUpdate}
         onEnded={() => {
@@ -210,6 +248,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         playsInline
         className="w-full h-full object-cover"
       />
+
+      {playbackError && <p role="alert" className="absolute inset-x-4 top-4 z-30 rounded-lg bg-black/85 p-3 text-sm text-white">This video could not be played. Check that the media service is running.</p>}
 
       {/* AD OVERLAY (When local Rwandan ad is actively running) */}
       {isPlayingAd && activeAdCampaign && (
