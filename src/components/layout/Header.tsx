@@ -92,6 +92,7 @@ export const Header: React.FC<HeaderProps> = ({
           {showUserDropdown && (
             <div className="discovery-account-menu">
               <strong>{currentUser.displayName}</strong>
+              <button onClick={() => { setShowUserDropdown(false); onNavigate('account'); }}>Creator account & uploads</button>
               <button className="md:hidden" onClick={() => { setShowUserDropdown(false); onOpenUpload(); }}>Upload video</button>
               <button onClick={onToggleDarkMode}>{darkMode ? 'Light appearance' : 'Dark appearance'}</button>
               <button onClick={onToggleCurrency}>Currency · {currency}</button>

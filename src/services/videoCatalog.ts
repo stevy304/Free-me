@@ -3,6 +3,7 @@ import type { Video } from '../types';
 export interface ReadyUpload {
   id: string;
   status: 'ready';
+  visibility: 'private' | 'public';
   title: string;
   description: string;
   category: string;
@@ -25,7 +26,7 @@ export function toCatalogVideo(upload: ReadyUpload): Video {
     category: upload.category,
     tags: [],
     status: 'READY',
-    visibility: 'PUBLIC',
+    visibility: upload.visibility === 'private' ? 'PRIVATE' : 'PUBLIC',
     durationSeconds: upload.durationSeconds ?? 0,
     thumbnailUrl: upload.thumbnailUrl ? '/api' + upload.thumbnailUrl : '',
     videoUrl: '/api' + upload.playlistUrl,

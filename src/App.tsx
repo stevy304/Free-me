@@ -39,6 +39,7 @@ import { pageUrl, readRoute } from './services/routes';
 import { WatchPage } from './components/video/WatchPage';
 import { ShortsFeed } from './components/shorts/ShortsFeed';
 import { CreatorStudio } from './components/studio/CreatorStudio';
+import { AccountPage, type Account } from './pages/AccountPage';
 import { UploadPage } from './pages/UploadPage';
 import { AdvertiserStudio } from './components/advertiser/AdvertiserStudio';
 import { AdminDashboard } from './components/admin/AdminDashboard';
@@ -70,6 +71,16 @@ export default function App() {
 
   // Domain State
   const [channels, setChannels] = useState<Channel[]>(INITIAL_CHANNELS);
+  const [account, setAccount] = useState<Account | null | undefined>();
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/api/account/session', { signal: controller.signal })
+      .then(async (response) => response.ok ? (await response.json()).account : null)
+      .then((session) => { if (!controller.signal.aborted) setAccount(session); })
+      .catch(() => { if (!controller.signal.aborted) setAccount(null); });
+    return () => controller.abort();
+  }, []);
   const [videos, setVideos] = useState<Video[]>(DISCOVERY_VIDEOS);
   useEffect(() => {
     const controller = new AbortController();
@@ -88,7 +99,7 @@ export default function App() {
     }
     void loadCatalog();
     return () => controller.abort();
-  }, []);
+  }, [catalogRevision]);
   const [campaigns, setCampaigns] = useState<Campaign[]>(INITIAL_CAMPAIGNS);
   const [balances, setBalances] = useState<Record<string, CreatorBalance>>(INITIAL_CREATOR_BALANCES);
   const [ledger, setLedger] = useState<RevenueLedgerEntry[]>(INITIAL_LEDGER);
@@ -321,6 +332,11 @@ export default function App() {
     setLedger((prev) => [newEntry, ...prev]);
   };
 
+  function refreshCatalog() {
+    setVideos((current) => current.filter((video) => !video.videoUrl.startsWith('/api/media/')));
+    setCatalogRevision((revision) => revision + 1);
+  }
+
   // Upload Video Flow
   const handleUploadComplete = (upload: ReadyUpload) => {
     const newVideo = toCatalogVideo(upload);
@@ -481,7 +497,7 @@ export default function App() {
 
   // Category & Search Filtering
   const filteredVideos = videos.filter((v) => {
-    if (v.isShort) return false; // Shorts have dedicated reel & page
+    if (v.visibility !== 'PUBLIC' || v.isShort) return false; // Shorts have dedicated reel & page
     const isTravel = ['Kigali Life', 'Wildlife & Safari'].includes(v.category);
     if (selectedCategory === 'Travel' && !isTravel) return false;
     if (selectedCategory !== 'Travel' && selectedCategory !== 'All Categories' && v.category !== selectedCategory) return false;
@@ -509,7 +525,7 @@ export default function App() {
         currentUser={currentUser}
         navigationExpanded={navigationExpanded}
         onToggleNavigation={() => setNavigationExpanded((expanded) => !expanded)}
-        recentUploads={videos.filter((video) => video.videoUrl.startsWith('/api/media/')).slice(0, 3).map((video) => video.title)}
+        recentUploads={videos.filter((video) => video.visibility === 'PUBLIC' && video.videoUrl.startsWith('/api/media/')).slice(0, 3).map((video) => video.title)}
         users={users}
         onSelectUser={(u) => {
           setCurrentUser(u);
@@ -665,9 +681,19 @@ export default function App() {
             />
           )}
 
-          {currentView === 'upload' && (
+          {currentView === 'account' && <AccountPage account={account ?? null} onChange={(next) => {
+            setAccount(next);
+            refreshCatalog();
+          }} onVideoChange={refreshCatalog} />}
+          {currentView === 'upload' && (account ? (
             <UploadPage onBack={() => handleNavigate('studio')} onUploadComplete={handleUploadComplete} />
-          )}
+          ) : (
+            <section className="workspace-page">
+              <h1 className="workspace-title">Upload a video</h1>
+              <p className="mt-4">{account === undefined ? 'Checking your session…' : 'Sign in to upload a video and choose who can watch it.'}</p>
+              {account === null && <button className="workspace-primary mt-4" onClick={() => handleNavigate('account')}>Sign in or create an account</button>}
+            </section>
+          ))}
           {currentView === 'subscriptions' && (
             <DiscoveryPage title="Subscriptions" videos={videos.filter((video) => subscribedChannelIds.includes(video.channelId))}
               onSelectVideo={handleSelectVideo} onSelectChannel={handleSelectChannel}

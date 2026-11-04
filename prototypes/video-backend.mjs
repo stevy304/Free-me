@@ -10,6 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream/promises';
 import { DatabaseSync } from 'node:sqlite';
+import { createAccounts, readJson } from './accounts.mjs';
 
 const run = promisify(execFile);
 const root = resolve(process.env.FREEME_DATA_DIR || join(homedir(), '.free-me-video'));
@@ -24,11 +25,16 @@ db.exec(`
 const columns = new Set(db.prepare('PRAGMA table_info(videos)').all().map((column) => column.name));
 if (!columns.has('metadata')) db.exec("ALTER TABLE videos ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'");
 if (!columns.has('duration_seconds')) db.exec('ALTER TABLE videos ADD COLUMN duration_seconds REAL');
+if (!columns.has('owner_id')) db.exec('ALTER TABLE videos ADD COLUMN owner_id TEXT');
+if (!columns.has('visibility')) db.exec("ALTER TABLE videos ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'");
+const accounts = createAccounts(db, json);
 db.exec('CREATE INDEX IF NOT EXISTS videos_status ON videos (status)');
-const insert = db.prepare("INSERT INTO videos (id, status, metadata) VALUES (?, 'processing', ?)");
+const insert = db.prepare("INSERT INTO videos (id, status, metadata, owner_id, visibility) VALUES (?, 'processing', ?, ?, ?)");
 const update = db.prepare('UPDATE videos SET status = ?, duration_seconds = ? WHERE id = ?');
 const find = db.prepare('SELECT * FROM videos WHERE id = ?');
-const catalog = db.prepare("SELECT * FROM videos WHERE status = 'ready' ORDER BY rowid DESC LIMIT 100");
+const catalog = db.prepare("SELECT * FROM videos WHERE status = 'ready' AND visibility = 'public' ORDER BY rowid DESC LIMIT 100");
+const owned = db.prepare('SELECT * FROM videos WHERE owner_id = ? ORDER BY rowid DESC LIMIT 100');
+const edit = db.prepare('UPDATE videos SET metadata = ?, visibility = ? WHERE id = ? AND owner_id = ?');
 const categories = new Set(['Kigali Life', 'Tech & Innovation', 'Wildlife & Safari', 'Music & Performance', 'Culinary & Coffee']);
 let busy = false;
 
@@ -37,7 +43,7 @@ function describe(video) {
   const ready = video.status === 'ready';
   const base = '/media/' + video.id + '/';
   return {
-    id: video.id, status: video.status,
+    id: video.id, status: video.status, visibility: video.visibility,
     title: metadata.title || 'Untitled video',
     description: metadata.description || '',
     category: metadata.category || 'Kigali Life',
@@ -132,7 +138,10 @@ async function transcode(id, directory, source) {
   }
 }
 
-async function upload(request, response) {
+async function upload(request, response, account) {
+  if (!account) return json(response, 401, { error: 'Sign in to upload.' });
+  const visibility = request.headers['x-video-visibility'] || 'private';
+  if (!['public', 'private'].includes(visibility)) return json(response, 400, { error: 'Invalid visibility' });
   if (request.headers['content-type'] !== 'video/mp4') {
     return json(response, 415, { error: 'Send a raw video/mp4 body' });
   }
@@ -161,7 +170,7 @@ async function upload(request, response) {
   try {
     await mkdir(directory);
     await pipeline(request, createWriteStream(source, { flags: 'wx' }));
-    insert.run(id, JSON.stringify(metadata));
+    insert.run(id, JSON.stringify(metadata), account.id, visibility);
   } catch (error) {
     await unlink(source).catch(() => {});
     busy = false;
@@ -173,23 +182,44 @@ async function upload(request, response) {
 
 async function handle(request, response) {
   const path = new URL(request.url, 'http://localhost').pathname;
-  if (request.method === 'POST' && path === '/videos') return upload(request, response);
+  if (['POST', 'PATCH'].includes(request.method) && ['cross-site', 'same-site'].includes(request.headers['sec-fetch-site'])) {
+    return json(response, 403, { error: 'Cross-origin request denied' });
+  }
+  if (path.startsWith('/account/')) return accounts.handle(request, response, path);
+  const account = accounts.viewer(request);
+  if (request.method === 'POST' && path === '/videos') return upload(request, response, account);
+  if (request.method === 'GET' && path === '/videos/mine') {
+    if (!account) return json(response, 401, { error: 'Sign in to manage uploads.' });
+    return json(response, 200, { videos: owned.all(account.id).map(describe) });
+  }
   if (request.method === 'GET' && path === '/videos') return json(response, 200, { videos: catalog.all().map(describe) });
   if (request.method === 'GET' && path === '/health') return json(response, 200, { status: 'ok' });
   const status = /^\/videos\/([a-f0-9-]{36})$/.exec(path);
   const media = /^\/media\/([a-f0-9-]{36})\/(index\.m3u8|poster\.jpg|segment-\d{3}\.ts|(?:240|360|720)p(?:\.m3u8|-\d{3}\.ts))$/.exec(path);
   const match = status || media;
   const video = match && find.get(match[1]);
-  if ((request.method !== 'GET' && !(media && request.method === 'HEAD')) || !video) return json(response, 404, { error: 'Not found' });
+  if (!video || (video.visibility === 'private' && (!account || account.id !== video.owner_id))) {
+    return json(response, 404, { error: 'Not found' });
+  }
   const id = match[1];
-  if (status) return json(response, 200, describe(video));
+  if (status && request.method === 'PATCH') {
+    if (!account || account.id !== video.owner_id) return json(response, 404, { error: 'Not found' });
+    const { title, visibility } = await readJson(request);
+    if (typeof title !== 'string' || !title.trim() || title.trim().length > 120 || !['public', 'private'].includes(visibility)) {
+      return json(response, 400, { error: 'Enter a title and valid visibility.' });
+    }
+    edit.run(JSON.stringify({ ...JSON.parse(video.metadata), title: title.trim() }), visibility, id, account.id);
+    return json(response, 200, describe(find.get(id)));
+  }
+  if (status && request.method === 'GET') return json(response, 200, describe(video));
+  if (!media || !['GET', 'HEAD'].includes(request.method)) return json(response, 404, { error: 'Not found' });
   if (video.status !== 'ready') return json(response, 404, { error: 'Video unavailable' });
   const file = join(root, id, media[2]);
   const { size } = await stat(file);
   response.writeHead(200, {
     'Content-Type': file.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : file.endsWith('.jpg') ? 'image/jpeg' : 'video/mp2t',
     'Content-Length': size,
-    'Cache-Control': 'private, max-age=300',
+    'Cache-Control': 'private, no-store',
     'X-Content-Type-Options': 'nosniff',
   });
   if (request.method === 'HEAD') return response.end();
@@ -211,10 +241,11 @@ if (interrupted.length) {
   })();
 }
 
-createServer({ requestTimeout: 120_000 }, (request, response) => {
+const server = createServer({ requestTimeout: 120_000 }, (request, response) => {
   handle(request, response).catch((error) => {
     if (response.headersSent || response.destroyed) return response.destroy();
     console.error(error.message);
-    json(response, error.code === 'ENOENT' ? 404 : 500, { error: 'Request failed' });
+    json(response, error.status || (error.code === 'ENOENT' ? 404 : 500), { error: error.status ? error.message : 'Request failed' });
   });
-}).listen(port, '127.0.0.1', () => console.log('Free Me prototype at http://localhost:' + port));
+});
+server.listen(port, '127.0.0.1', () => console.log('Free Me prototype at http://127.0.0.1:' + server.address().port));

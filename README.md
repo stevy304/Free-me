@@ -101,3 +101,12 @@ npm run dev
 ```
 
 The **Create** button opens the upload page. The page accepts a raw MP4 of up to 25 MiB. On mobile, open the account menu and select **Upload video**. Use `npm run dev:web` for the frontend alone, or set `FREEME_VIDEO_ORIGIN` to use an existing video service. The backend processes the first 60 seconds into an adaptive HLS playlist with up to three quality levels, stores media on disk, and records status in SQLite. SQLite stores the upload catalog, and FFmpeg generates a thumbnail. The backend serves ready videos to any browser connected to the same local instance. Data defaults to `~/.free-me-video`. To reopen an earlier prototype catalog, set `FREEME_DATA_DIR` to its previous directory before starting the backend. The discovery fixtures, persona switching, and monetization screens use sample data.
+
+
+## Creator accounts and private uploads
+
+Open **Creator account & uploads** from the account menu. Register or sign in, then use **Create** to upload. New uploads default to Private. From **Your videos**, the owner can edit the title, change visibility, or open the watch page. Existing local uploads remain public with no owner and are read-only through the new account API.
+
+Accounts and sessions are stored in the local SQLite database. Serve the app and API on the same origin with HTTPS when testing behind a trusted proxy, and set `FREEME_SECURE_COOKIES=1` for HTTPS-only session cookies. The creator account is separate from the sample studio persona controls. Email verification and password recovery are pending.
+
+Run `npm run test:ownership` with FFmpeg installed to verify the two-account privacy and editing flow.
