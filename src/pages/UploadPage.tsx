@@ -5,24 +5,7 @@ import type { ReadyUpload } from '../services/videoCatalog';
 
 import { defaultUploadLimit, formatUploadLimit } from '../services/uploadLimits.mjs';
 
-function sendVideo(file: File, headers: Record<string, string>, signal: AbortSignal, onProgress: (percent: number) => void) {
-  return new Promise<{ status: number; result: { error?: string; statusUrl?: string } | null }>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/videos');
-    xhr.responseType = 'json';
-    for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
-    const cancel = () => xhr.abort();
-    signal.addEventListener('abort', cancel, { once: true });
-    xhr.addEventListener('loadend', () => signal.removeEventListener('abort', cancel), { once: true });
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(Math.floor(event.loaded / event.total * 100));
-    };
-    xhr.onload = () => resolve({ status: xhr.status, result: xhr.response });
-    xhr.onerror = () => reject(new Error('The connection ended during upload. Check your connection and the server terminal before retrying.'));
-    xhr.onabort = () => reject(new DOMException('Upload cancelled', 'AbortError'));
-    xhr.send(file);
-  });
-}
+import { sendResumableVideo } from '../services/resumableUpload';
 
 export function UploadPage({ onBack, onUploadComplete }: {
   onBack: () => void;
@@ -30,6 +13,7 @@ export function UploadPage({ onBack, onUploadComplete }: {
 }) {
   const request = useRef<AbortController | null>(null);
   const [maxBytes, setMaxBytes] = useState(defaultUploadLimit);
+  const [chunkBytes, setChunkBytes] = useState(1024 * 1024);
   const [percent, setPercent] = useState(0);
   const limit = formatUploadLimit(maxBytes);
   const [status, setStatus] = useState<'uploading' | 'processing' | ''>('');
@@ -39,8 +23,12 @@ export function UploadPage({ onBack, onUploadComplete }: {
   useEffect(() => {
     const controller = new AbortController();
     void fetch('/api/videos/upload-limits', { signal: controller.signal })
-      .then(async (response) => response.ok ? (await response.json()).maxBytes : null)
-      .then((limit) => { if (!controller.signal.aborted && Number.isSafeInteger(limit) && limit > 0) setMaxBytes(limit); })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((limits) => {
+        if (controller.signal.aborted) return;
+        if (Number.isSafeInteger(limits?.maxBytes) && limits.maxBytes > 0) setMaxBytes(limits.maxBytes);
+        if (Number.isSafeInteger(limits?.chunkBytes) && limits.chunkBytes > 0) setChunkBytes(limits.chunkBytes);
+      })
       .catch(() => {});
     return () => { controller.abort(); request.current?.abort(); };
   }, []);
@@ -69,22 +57,12 @@ export function UploadPage({ onBack, onUploadComplete }: {
     setPercent(0);
     setStatus('uploading');
     try {
-      const { status: httpStatus, result } = await sendVideo(file, {
-        'Content-Type': 'video/mp4',
-        'X-Video-Visibility': String(form.get('visibility')),
-        'X-Video-Title': encodeURIComponent(title),
-        'X-Video-Description': encodeURIComponent(String(form.get('description') || '').trim()),
-        'X-Video-Category': encodeURIComponent(String(form.get('category'))),
-      }, signal, setPercent);
-      if (httpStatus !== 202 || !result?.statusUrl || !/^\/videos\/[a-f0-9-]{36}$/.test(result.statusUrl)) {
-        const errorMessage = httpStatus === 413
-          ? `The server or web proxy rejected this file as too large. The app limit is ${limit}.`
-          : httpStatus === 401 || httpStatus === 403
-            ? 'Upload authorization failed. Check your Free Me sign-in and reopen the preview.'
-            : `Upload failed (HTTP ${httpStatus}). Check the video service log before retrying.`;
-        throw new Error(result?.error || errorMessage);
-      }
-      const { statusUrl } = result;
+      const statusUrl = await sendResumableVideo(file, {
+        title,
+        description: String(form.get('description') || '').trim(),
+        category: String(form.get('category')),
+        visibility: String(form.get('visibility')),
+      }, chunkBytes, signal, setPercent);
       setStatus('processing');
       while (!signal.aborted) {
         const result = await fetch('/api' + statusUrl, { signal, cache: 'no-store' });
@@ -140,7 +118,7 @@ export function UploadPage({ onBack, onUploadComplete }: {
             </label>
           </section>
           {status && <p className="upload-status" role="status"><LoaderCircle size={18} className="animate-spin" />{status === 'uploading' ? `Uploading file… ${percent}%` : 'Preparing video for playback…'}</p>}
-          {error && <p className="upload-error" role="alert">{error}</p>}
+          {error && <p className="upload-error" role="alert">{error} {status !== 'processing' && 'Retry with the same file to resume any saved transfer.'}</p>}
           <button type="submit" className="workspace-primary"><CloudUpload size={19} /> Upload video</button>
         </fieldset>
         <aside className="workspace-panel upload-guide" aria-label="Upload guide">

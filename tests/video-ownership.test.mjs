@@ -68,13 +68,28 @@ test('private playback and editing require the owning account', { timeout: 30_00
   const rejected = await request('/videos', { ...uploadOptions, cookie: owner, body: oversized(), streaming: true });
   assert.equal(rejected.status, 413);
   assert.match((await rejected.json()).error, /25 MiB/);
-  async function* chunks() {
-    yield uploadOptions.body.subarray(0, 100);
-    yield uploadOptions.body.subarray(100);
+  const details = { title: 'Owner clip', description: '', category: 'Kigali Life', visibility: 'private' };
+  const created = await request('/uploads', { method: 'POST', cookie: owner, data: { ...details, size: uploadOptions.body.length } });
+  assert.equal(created.status, 201);
+  const { id } = await created.json();
+  const path = '/uploads/' + id;
+  function sendChunk(offset, body) {
+    return request(path, { method: 'PATCH', cookie: owner, body, headers: {
+      'Content-Type': 'application/octet-stream', 'X-Upload-Offset': String(offset), 'X-Upload-Length': String(body.length),
+    } });
   }
-  const upload = await request('/videos', { ...uploadOptions, cookie: owner, body: chunks(), streaming: true });
+  assert.equal((await request(path, { cookie: outsider })).status, 404);
+  assert.equal((await request(path + '/complete', { method: 'POST', cookie: owner, data: details })).status, 409);
+  assert.equal((await sendChunk(0, uploadOptions.body.subarray(0, 100))).status, 200);
+  assert.equal((await sendChunk(0, uploadOptions.body.subarray(0, 100))).status, 409);
+  const resumed = await (await request(path, { cookie: owner })).json();
+  assert.equal(resumed.offset, 100);
+  assert.equal((await sendChunk(resumed.offset, uploadOptions.body.subarray(resumed.offset))).status, 200);
+  const finalize = () => request(path + '/complete', { method: 'POST', cookie: owner, data: details });
+  const upload = await finalize();
   assert.equal(upload.status, 202);
   const { statusUrl } = await upload.json();
+  assert.equal((await (await finalize()).json()).statusUrl, statusUrl);
   let video;
   for (let attempt = 0; attempt < 80; attempt++) {
     video = await (await request(statusUrl, { cookie: owner })).json();
