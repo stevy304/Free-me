@@ -1,3 +1,5 @@
+import { Film, ShieldCheck } from 'lucide-react';
+import { EmptyState } from '../components/layout/EmptyState';
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { pageUrl } from '../services/routes';
@@ -72,8 +74,9 @@ export function AccountPage({ account, onChange, onVideoChange }: {
   }
 
   return (
-    <section className="workspace-page upload-page">
+    <section className={`workspace-page upload-page ${account ? '' : 'account-signin'}`}>
       <header className="workspace-heading">
+        {!account && <span className="app-empty-icon"><ShieldCheck size={24} aria-hidden="true" /></span>}
         <p className="workspace-eyebrow">Creator account</p>
         <h1>{account ? 'Your videos' : register ? 'Create an account' : 'Sign in to Free Me'}</h1>
         <p>{account ? account.email : 'Sign in to upload and manage your videos.'}</p>
@@ -81,7 +84,7 @@ export function AccountPage({ account, onChange, onVideoChange }: {
       {error && <p role="alert" className="upload-error mb-4">{error}</p>}
       {notice && <p role="status" className="upload-status mb-4">{notice}</p>}
       {!account ? (
-        <form onSubmit={authenticate} className="workspace-panel upload-details max-w-md">
+        <form onSubmit={authenticate} className="workspace-panel upload-details">
           <label>Email<input name="email" type="email" autoComplete="email" required /></label>
           <label>Password<input name="password" type="password" autoComplete={register ? 'new-password' : 'current-password'} minLength={12} maxLength={128} required /></label>
           <button disabled={busy} className="workspace-primary" type="submit">{register ? 'Create account' : 'Sign in'}</button>
@@ -98,7 +101,7 @@ export function AccountPage({ account, onChange, onVideoChange }: {
               onChange(null);
             })}>Sign out</button>
           </div>
-          {uploads.length === 0 && <p>No uploads yet.</p>}
+          {uploads.length === 0 && <EmptyState icon={Film} title="Your library is empty" description="Videos you upload will appear here. You can manage their titles and visibility from this page." />}
           {uploads.map((video) => (
             <form key={video.id} onSubmit={(event) => edit(event, video.id)} className="workspace-panel upload-details">
               <p className="capitalize">{video.status}</p>

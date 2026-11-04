@@ -521,6 +521,7 @@ export default function App() {
   return (
     <div className="min-h-screen discovery-shell text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
       {/* Top Bar adhering to Top Bar Contract */}
+      <a className="app-skip-link" href="#main-content">Skip to content</a>
       <Header
         currentUser={currentUser}
         navigationExpanded={navigationExpanded}
@@ -555,11 +556,11 @@ export default function App() {
             document.getElementById('navigation-toggle')?.focus();
           }} />}
         <Sidebar currentView={currentView} expanded={navigationExpanded} onNavigate={handleNavigate} />
-        <main className="flex-1 min-w-0 pb-16">
+        <main id="main-content" tabIndex={-1} className="app-main flex-1 min-w-0">
           {(currentView === 'home' || currentView === 'explore' || route.view === 'search') && (
             <DiscoveryPage
               title={route.view === 'search' ? `Search results for “${route.query}”` : currentView === 'explore' ? 'Explore Free Me' : 'Discover Free Me'}
-              compactHeading={currentView === 'home'}
+              compactHeading={currentView === 'home'} featured={currentView === 'explore'}
               category={selectedCategory} onCategory={setSelectedCategory}
               videos={filteredVideos} onSelectVideo={handleSelectVideo} onSelectChannel={handleSelectChannel}
             />
