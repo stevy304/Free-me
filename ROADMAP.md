@@ -30,3 +30,9 @@ Phase 1 is in progress. Later phases have prototype screens or design documents 
 ## Configuration inventory
 
 The current prototype starts without backend secrets. Phase 1 needs a PostgreSQL connection string, session configuration, allowed web origin and email delivery configuration. Phase 2 adds Redis, object storage endpoint, region, bucket and credentials, plus the CDN base URL and media worker limits. Keep production values in the deployment secret store. Track exact variable names as services consume them, with examples in [ENVIRONMENT.md](ENVIRONMENT.md).
+
+### Phase 2 progress
+
+The local backend now streams incoming MP4s to disk, stores catalog metadata in SQLite, generates a JPEG poster and one HLS rendition, and reprocesses interrupted jobs whose source files survived. Discovery reads ready videos from the backend. Local restart and playback checks cover the new path.
+
+Phase 2 remains open for resumable uploads, object storage, a separate queue and worker, multiple renditions, caption support, and access checks for private media. Phase 1 identity and authorization work is still open and gates private uploads.
