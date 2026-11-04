@@ -7,7 +7,6 @@ import React, { useState, useEffect } from 'react';
 import {
   INITIAL_USERS,
   INITIAL_CHANNELS,
-  INITIAL_VIDEOS,
   INITIAL_CAMPAIGNS,
   INITIAL_CREATOR_BALANCES,
   INITIAL_LEDGER,
@@ -31,6 +30,7 @@ import {
   PayoutMethod,
 } from './types';
 import { DEFAULT_PLATFORM_SETTINGS, calculateRevenueSplit } from './services/revenue';
+import { DISCOVERY_VIDEOS } from './services/discoveryCatalog';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { VideoCard } from './components/video/VideoCard';
@@ -58,7 +58,7 @@ import {
 export default function App() {
   // Theme & Currency
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true;
+    return localStorage.getItem('free-me-theme') === 'dark';
   });
   const [currency, setCurrency] = useState<'RWF' | 'USD'>('RWF');
 
@@ -68,7 +68,14 @@ export default function App() {
 
   // Domain State
   const [channels, setChannels] = useState<Channel[]>(INITIAL_CHANNELS);
-  const [videos, setVideos] = useState<Video[]>(INITIAL_VIDEOS);
+  const [videos, setVideos] = useState<Video[]>(() => {
+    try {
+      const uploads: unknown = JSON.parse(localStorage.getItem('free-me-uploads') || '[]');
+      return Array.isArray(uploads) ? [...uploads, ...DISCOVERY_VIDEOS] : DISCOVERY_VIDEOS;
+    } catch {
+      return DISCOVERY_VIDEOS;
+    }
+  });
   const [campaigns, setCampaigns] = useState<Campaign[]>(INITIAL_CAMPAIGNS);
   const [balances, setBalances] = useState<Record<string, CreatorBalance>>(INITIAL_CREATOR_BALANCES);
   const [ledger, setLedger] = useState<RevenueLedgerEntry[]>(INITIAL_LEDGER);
@@ -101,6 +108,7 @@ export default function App() {
     } else {
       document.documentElement.classList.remove('dark');
     }
+    localStorage.setItem('free-me-theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
   const toggleDarkMode = () => setDarkMode((prev) => !prev);
@@ -122,6 +130,10 @@ export default function App() {
       setCurrentView('channel');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
+    }
+    if (view === 'home' || view === 'explore') {
+      setSelectedCategory('All Categories');
+      setSearchQuery('');
     }
     setCurrentView(view);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -277,24 +289,24 @@ export default function App() {
   const handleUploadComplete = (newVidData: Partial<Video>) => {
     const defaultChannel = channels[0];
     const newVideo: Video = {
-      id: `vid_${Date.now()}`,
+      id: newVidData.id || `vid_${Date.now()}`,
       channelId: currentUser.channelId || defaultChannel.id,
       channelName: currentUser.channelId ? currentUser.displayName : defaultChannel.name,
       channelHandle: currentUser.channelId ? `@${currentUser.displayName.toLowerCase().replace(/\s+/g, '_')}` : defaultChannel.handle,
       channelAvatarUrl: currentUser.avatarUrl,
-      channelVerified: true,
+      channelVerified: false,
       title: newVidData.title || 'Untitled African Story',
       description: newVidData.description || '',
       category: newVidData.category || 'Kigali Life',
       tags: ['FreeMe', 'AfricanCreators', 'Rwanda'],
       status: 'READY',
       visibility: 'PUBLIC',
-      durationSeconds: newVidData.durationSeconds || 320,
-      thumbnailUrl: newVidData.thumbnailUrl || '/src/assets/images/hero_african_creator_1793734955093.jpg',
+      durationSeconds: newVidData.durationSeconds ?? 0,
+      thumbnailUrl: newVidData.thumbnailUrl ?? '',
       videoUrl: newVidData.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
       isShort: Boolean(newVidData.isShort),
       monetizationEnabled: Boolean(newVidData.monetizationEnabled),
-      viewCount: 1,
+      viewCount: 0,
       likeCount: 0,
       commentCount: 0,
       createdAt: 'Just now',
@@ -302,6 +314,13 @@ export default function App() {
     };
 
     setVideos((prev) => [newVideo, ...prev]);
+    try {
+      const uploads = videos.filter((item) => item.videoUrl.startsWith('/api/media/'));
+      localStorage.setItem('free-me-uploads', JSON.stringify([newVideo, ...uploads]));
+    } catch (error) {
+      console.warn('Could not save uploaded video to the local catalog', error);
+    }
+    handleSelectVideo(newVideo);
 
     // Audit log
     setAuditLogs((prev) => [
@@ -312,7 +331,7 @@ export default function App() {
         action: 'VIDEO_TRANSCODED',
         entityType: 'Video',
         entityId: newVideo.id,
-        details: `HLS ladder generated on Media Node 4 for "${newVideo.title}"`,
+        details: `Local HLS stream generated for "${newVideo.title}"`,
       },
       ...prev,
     ]);
@@ -457,8 +476,10 @@ export default function App() {
 
   // Category & Search Filtering
   const filteredVideos = videos.filter((v) => {
-    if (v.isShort && currentView === 'home') return false; // Shorts have dedicated reel & page
-    if (selectedCategory !== 'All Categories' && v.category !== selectedCategory) return false;
+    if (v.isShort) return false; // Shorts have dedicated reel & page
+    const isTravel = ['Kigali Life', 'Wildlife & Safari'].includes(v.category);
+    if (selectedCategory === 'Travel' && !isTravel) return false;
+    if (selectedCategory !== 'Travel' && selectedCategory !== 'All Categories' && v.category !== selectedCategory) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const matchTitle = v.title.toLowerCase().includes(q);
@@ -477,10 +498,11 @@ export default function App() {
   const currentChannel = channels.find((c) => c.id === selectedChannelId) || channels[0];
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
+    <div className="min-h-screen discovery-shell text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
       {/* Top Bar adhering to Top Bar Contract */}
       <Header
         currentUser={currentUser}
+        recentUploads={videos.filter((video) => video.videoUrl.startsWith('/api/media/')).slice(0, 3).map((video) => video.title)}
         users={users}
         onSelectUser={(u) => {
           setCurrentUser(u);
@@ -498,228 +520,40 @@ export default function App() {
         onSearchChange={setSearchQuery}
         onSearchSubmit={(e) => {
           e.preventDefault();
+          setSelectedCategory('All Categories');
           setCurrentView('home');
         }}
       />
 
       <div className="flex-1 flex">
-        {/* Desktop Sidebar Navigation */}
-        <Sidebar
-          currentView={currentView}
-          onNavigate={handleNavigate}
-          selectedCategory={selectedCategory}
-          onSelectCategory={(cat) => {
-            setSelectedCategory(cat);
-            setCurrentView('home');
-          }}
-          currentUser={currentUser}
-        />
-
-        {/* Main Content Area */}
+        <Sidebar currentView={currentView} onNavigate={handleNavigate} />
         <main className="flex-1 min-w-0 pb-16">
           {/* VIEW: HOME FEED */}
-          {currentView === 'home' && (
-            <div className="max-w-[1520px] mx-auto px-4 md:px-8 py-6 space-y-8">
-              {/* Category Filter Bar (Functional segmented buttons as allowed by Section 1.A) */}
-              <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+          {(currentView === 'home' || currentView === 'explore') && (
+            <section className="discovery-feed">
+              <h1>{searchQuery.trim() ? `Search results for “${searchQuery.trim()}”` : currentView === 'explore' ? 'Explore Free Me' : 'Discover Free Me'}</h1>
+              <div className="discovery-categories" aria-label="Video categories">
                 {[
-                  'All Categories',
-                  'Kigali Life',
-                  'Tech & Innovation',
-                  'Wildlife & Safari',
-                  'Music & Performance',
-                  'Culinary & Coffee',
-                ].map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`px-3.5 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${
-                      selectedCategory === cat
-                        ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-sm'
-                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700/80 hover:bg-slate-100 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    {cat}
-                  </button>
+                  ['All Categories', 'For you'],
+                  ['Music & Performance', 'Music'],
+                  ['Culinary & Coffee', 'Culture'],
+                  ['Tech & Innovation', 'Tech'],
+                  ['Travel', 'Travel'],
+                ].map(([category, label]) => (
+                  <button type="button" key={category} aria-pressed={selectedCategory === category}
+                    onClick={() => setSelectedCategory(category)}>{label}</button>
                 ))}
               </div>
-
-              {/* Hero Spotlight (When on All Categories and no search) */}
-              {selectedCategory === 'All Categories' && !searchQuery && (
-                <div className="relative rounded-3xl overflow-hidden bg-slate-900 text-white border border-slate-800 shadow-xl">
-                  <div className="grid grid-cols-1 lg:grid-cols-12 items-stretch min-h-[380px]">
-                    <div className="lg:col-span-7 p-6 sm:p-10 flex flex-col justify-between space-y-6">
-                      <div className="space-y-3">
-                        <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-mono">
-                          <Sparkles className="w-3.5 h-3.5" />
-                          <span>African Creator Renaissance · Rwanda Hub</span>
-                        </div>
-                        <h2 className="font-display font-extrabold text-2xl sm:text-4xl leading-tight tracking-tight text-white max-w-xl text-balance">
-                          Your content. Your freedom. Your opportunity.
-                        </h2>
-                        <p className="text-sm text-slate-300 leading-relaxed max-w-lg">
-                          Free Me empowers African digital storytellers with a guaranteed{' '}
-                          <span className="text-amber-400 font-semibold">60% creator share</span> of local advertising, instant Mobile Money payouts, and high-performance HLS video streaming.
-                        </p>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-3 pt-2">
-                        <button
-                          onClick={() => handleSelectVideo(videos[0])}
-                          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition-colors shadow-lg"
-                        >
-                          <Play className="w-4 h-4 fill-current" />
-                          <span>Watch Featured Video</span>
-                        </button>
-                        <button
-                          onClick={() => handleNavigate('studio')}
-                          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/20 transition-colors"
-                        >
-                          <span>Explore Creator Studio</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="lg:col-span-5 relative min-h-[260px] lg:min-h-full">
-                      <img
-                        src="/src/assets/images/hero_african_creator_1793734955093.jpg"
-                        alt="Clarisse Uwase in studio"
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover lg:absolute lg:inset-0"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-transparent lg:bg-gradient-to-r lg:from-slate-900 lg:to-transparent" />
-                      <div className="absolute bottom-4 left-4 right-4 p-3 rounded-xl bg-black/60 backdrop-blur-md border border-white/10 text-xs flex items-center justify-between">
-                        <div>
-                          <div className="font-semibold text-white">Clarisse Media — Kigali Stories</div>
-                          <div className="text-[11px] text-amber-400 font-mono">Top Rwandan Creator Partner</div>
-                        </div>
-                        <CheckCircle2 className="w-4 h-4 text-amber-500" />
-                      </div>
-                    </div>
-                  </div>
+              {filteredVideos.length ? (
+                <div className="discovery-grid">
+                  {filteredVideos.map((video) => (
+                    <VideoCard key={video.id} video={video} onSelect={handleSelectVideo}
+                      onSelectChannel={handleSelectChannel} />
+                  ))}
                 </div>
-              )}
-
-              {/* Videos Grid */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-display font-bold text-lg text-slate-900 dark:text-white">
-                    {searchQuery ? `Search Results for "${searchQuery}"` : selectedCategory}
-                  </h3>
-                  <span className="text-xs font-mono text-slate-400">
-                    {filteredVideos.length} videos available
-                  </span>
-                </div>
-
-                {filteredVideos.length === 0 ? (
-                  <div className="text-center py-12 text-slate-400 text-sm">
-                    No videos found matching your filter. Try another category or search term.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {filteredVideos.map((vid) => (
-                      <VideoCard
-                        key={vid.id}
-                        video={vid}
-                        onSelect={handleSelectVideo}
-                        onSelectChannel={handleSelectChannel}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Shorts Spotlight Reel */}
-              {shortsList.length > 0 && !searchQuery && (
-                <div className="pt-6 border-t border-slate-200 dark:border-slate-800 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Flame className="w-5 h-5 text-orange-500" />
-                      <h3 className="font-display font-bold text-lg text-slate-900 dark:text-white">
-                        Free Me Shorts
-                      </h3>
-                    </div>
-                    <button
-                      onClick={() => handleNavigate('shorts')}
-                      className="text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1"
-                    >
-                      <span>View All Shorts</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                    {shortsList.slice(0, 6).map((short) => (
-                      <div
-                        key={short.id}
-                        onClick={() => handleNavigate('shorts')}
-                        className="group cursor-pointer rounded-2xl overflow-hidden bg-slate-900 aspect-[9/16] relative shadow-md"
-                      >
-                        <img
-                          src={short.thumbnailUrl}
-                          alt={short.title}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-3 text-white">
-                          <p className="text-xs font-semibold line-clamp-2 leading-snug">{short.title}</p>
-                          <div className="text-[10px] text-white/70 font-mono mt-1">
-                            {(short.viewCount / 1000).toFixed(1)}K views
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Clean Local Advertiser Showcase Banner (Anti-Slop compliant, clear disclosure) */}
-              <div className="pt-4">
-                <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center font-bold">
-                      BK
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold">
-                          Sponsored by Local Partner
-                        </span>
-                        <span className="text-slate-300 dark:text-slate-700">·</span>
-                        <span className="text-xs font-bold text-slate-900 dark:text-white">
-                          Bank of Kigali MoMo Integration
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-600 dark:text-slate-400">
-                        Zero transaction fees for Rwandan digital merchants and creator businesses.
-                      </p>
-                    </div>
-                  </div>
-
-                  <a
-                    href="https://bk.rw/merchants"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-100 dark:text-slate-900 text-xs font-semibold transition-colors shrink-0"
-                  >
-                    <span>Learn More</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                </div>
-              </div>
-
-              {/* Verification & Test Suite Status Indicator */}
-              <div className="pt-6 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 font-mono">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                  <span>
-                    Revenue Invariants & Mathematical Split Tests: {testResults.filter((r) => r.passed).length}/{testResults.length} Passed
-                  </span>
-                </div>
-                <div>Free Me Platform v1.0 · Kigali Hub</div>
-              </div>
-            </div>
+              ) : <p className="py-12 text-slate-500" role="status">No videos match this search.</p>}
+              <p className="mt-8 text-xs text-slate-500 dark:text-slate-400">Preview catalog. Featured videos and engagement figures are sample content.</p>
+            </section>
           )}
 
           {/* VIEW: WATCH PAGE */}
