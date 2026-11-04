@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Upload, X } from 'lucide-react';
-import type { Video } from '../../types';
+import type { ReadyUpload } from '../../services/videoCatalog';
 
 export function VideoUploadModal({ onClose, onUploadComplete }: {
   onClose: () => void;
-  onUploadComplete: (video: Partial<Video>) => void;
+  onUploadComplete: (video: ReadyUpload) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const request = useRef<AbortController | null>(null);
@@ -32,12 +32,17 @@ export function VideoUploadModal({ onClose, onUploadComplete }: {
     setError('');
     setStatus('Uploading video…');
     try {
-      const response = await fetch('/api/videos', { method: 'POST', headers: { 'Content-Type': 'video/mp4' }, body: file, signal });
+      const response = await fetch('/api/videos', { method: 'POST', headers: {
+        'Content-Type': 'video/mp4',
+        'X-Video-Title': encodeURIComponent(title),
+        'X-Video-Description': encodeURIComponent(String(form.get('description') || '').trim()),
+        'X-Video-Category': encodeURIComponent(String(form.get('category'))),
+      }, body: file, signal });
       if (!response.ok) {
         const details = await response.json().catch(() => ({}));
         throw new Error(details.error || 'The video service is unavailable. Start the local backend and try again.');
       }
-      const { id, statusUrl } = await response.json();
+      const { statusUrl } = await response.json();
       setStatus('Processing video…');
       const deadline = Date.now() + 125_000;
       while (Date.now() < deadline && !signal.aborted) {
@@ -46,11 +51,7 @@ export function VideoUploadModal({ onClose, onUploadComplete }: {
         const video = await result.json();
         if (video.status === 'failed') throw new Error('FFmpeg could not process this file. Try another MP4.');
         if (video.status === 'ready' && video.playlistUrl) {
-          onUploadComplete({
-            id, title, description: String(form.get('description') || '').trim(),
-            category: String(form.get('category')),
-            videoUrl: '/api' + video.playlistUrl, thumbnailUrl: '',
-          });
+          onUploadComplete(video);
           onClose();
           return;
         }

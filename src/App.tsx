@@ -30,6 +30,7 @@ import {
   PayoutMethod,
 } from './types';
 import { DEFAULT_PLATFORM_SETTINGS, calculateRevenueSplit } from './services/revenue';
+import { toCatalogVideo, type ReadyUpload } from './services/videoCatalog';
 import { DISCOVERY_VIDEOS } from './services/discoveryCatalog';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
@@ -68,14 +69,25 @@ export default function App() {
 
   // Domain State
   const [channels, setChannels] = useState<Channel[]>(INITIAL_CHANNELS);
-  const [videos, setVideos] = useState<Video[]>(() => {
-    try {
-      const uploads: unknown = JSON.parse(localStorage.getItem('free-me-uploads') || '[]');
-      return Array.isArray(uploads) ? [...uploads, ...DISCOVERY_VIDEOS] : DISCOVERY_VIDEOS;
-    } catch {
-      return DISCOVERY_VIDEOS;
+  const [videos, setVideos] = useState<Video[]>(DISCOVERY_VIDEOS);
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadCatalog() {
+      try {
+        const response = await fetch('/api/videos', { signal: controller.signal });
+        if (!response.ok) return;
+        const { videos: uploads }: { videos: ReadyUpload[] } = await response.json();
+        setVideos((current) => {
+          const known = new Set(current.map((video) => video.id));
+          return [...uploads.filter((video) => !known.has(video.id)).map(toCatalogVideo), ...current];
+        });
+      } catch (error) {
+        if (!controller.signal.aborted) console.warn('Local video catalog is unavailable', error);
+      }
     }
-  });
+    void loadCatalog();
+    return () => controller.abort();
+  }, []);
   const [campaigns, setCampaigns] = useState<Campaign[]>(INITIAL_CAMPAIGNS);
   const [balances, setBalances] = useState<Record<string, CreatorBalance>>(INITIAL_CREATOR_BALANCES);
   const [ledger, setLedger] = useState<RevenueLedgerEntry[]>(INITIAL_LEDGER);
@@ -146,6 +158,7 @@ export default function App() {
   };
 
   const handleSelectChannel = (channelId: string) => {
+    if (!channels.some((channel) => channel.id === channelId)) return;
     setSelectedChannelId(channelId);
     setCurrentView('channel');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -286,40 +299,9 @@ export default function App() {
   };
 
   // Upload Video Flow
-  const handleUploadComplete = (newVidData: Partial<Video>) => {
-    const defaultChannel = channels[0];
-    const newVideo: Video = {
-      id: newVidData.id || `vid_${Date.now()}`,
-      channelId: currentUser.channelId || defaultChannel.id,
-      channelName: currentUser.channelId ? currentUser.displayName : defaultChannel.name,
-      channelHandle: currentUser.channelId ? `@${currentUser.displayName.toLowerCase().replace(/\s+/g, '_')}` : defaultChannel.handle,
-      channelAvatarUrl: currentUser.avatarUrl,
-      channelVerified: false,
-      title: newVidData.title || 'Untitled African Story',
-      description: newVidData.description || '',
-      category: newVidData.category || 'Kigali Life',
-      tags: ['FreeMe', 'AfricanCreators', 'Rwanda'],
-      status: 'READY',
-      visibility: 'PUBLIC',
-      durationSeconds: newVidData.durationSeconds ?? 0,
-      thumbnailUrl: newVidData.thumbnailUrl ?? '',
-      videoUrl: newVidData.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      isShort: Boolean(newVidData.isShort),
-      monetizationEnabled: Boolean(newVidData.monetizationEnabled),
-      viewCount: 0,
-      likeCount: 0,
-      commentCount: 0,
-      createdAt: 'Just now',
-      renditions: newVidData.renditions || [],
-    };
-
-    setVideos((prev) => [newVideo, ...prev]);
-    try {
-      const uploads = videos.filter((item) => item.videoUrl.startsWith('/api/media/'));
-      localStorage.setItem('free-me-uploads', JSON.stringify([newVideo, ...uploads]));
-    } catch (error) {
-      console.warn('Could not save uploaded video to the local catalog', error);
-    }
+  const handleUploadComplete = (upload: ReadyUpload) => {
+    const newVideo = toCatalogVideo(upload);
+    setVideos((current) => [newVideo, ...current.filter((video) => video.id !== newVideo.id)]);
     handleSelectVideo(newVideo);
 
     // Audit log
