@@ -69,7 +69,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="discovery-actions">
         <button className="discovery-search-toggle" aria-label="Toggle search" aria-expanded={mobileSearch}
           onClick={() => setMobileSearch(!mobileSearch)}><Search size={23} /></button>
-        <button className="discovery-upload" onClick={onOpenUpload}><Plus size={21} aria-hidden="true" /> Create</button>
+        <button className="discovery-upload" aria-label="Create" onClick={onOpenUpload}><Plus size={21} aria-hidden="true" /> <span>Create</span></button>
         <div className="relative hidden md:block">
           <button aria-label="Notifications" aria-expanded={showNotifications} className="relative"
             onClick={() => { setShowNotifications(!showNotifications); setShowUserDropdown(false); }}>

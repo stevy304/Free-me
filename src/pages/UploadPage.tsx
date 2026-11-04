@@ -10,8 +10,16 @@ export function UploadPage({ onBack, onUploadComplete }: {
   const request = useRef<AbortController | null>(null);
   const [status, setStatus] = useState<'uploading' | 'processing' | ''>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState('');
   const [error, setError] = useState('');
   useEffect(() => () => request.current?.abort(), []);
+
+  useEffect(() => {
+    if (!selectedFile) { setPreview(''); return; }
+    const url = URL.createObjectURL(selectedFile);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [selectedFile]);
 
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -78,7 +86,7 @@ export function UploadPage({ onBack, onUploadComplete }: {
             <p>Choose an MP4 from your device.</p>
             <label className="upload-picker">
               <input className="sr-only" name="video" type="file" accept="video/mp4,.mp4" required
-                onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
+                onChange={(event) => { setSelectedFile(event.target.files?.[0] ?? null); setError(''); }} />
               {selectedFile ? <FileVideo aria-hidden="true" size={32} /> : <CloudUpload aria-hidden="true" size={32} />}
               <strong>{selectedFile?.name || 'Select video'}</strong>
               <span>{selectedFile ? (selectedFile.size / 1024 / 1024).toFixed(1) + ' MiB · Click to replace' : 'MP4 · Up to 25 MiB'}</span>
@@ -102,6 +110,12 @@ export function UploadPage({ onBack, onUploadComplete }: {
           <button type="submit" className="workspace-primary"><CloudUpload size={19} /> Upload video</button>
         </fieldset>
         <aside className="workspace-panel upload-guide" aria-label="Upload guide">
+          {preview && (
+            <div className="upload-preview">
+              <h2>Video preview</h2>
+              <video src={preview} controls playsInline preload="metadata" aria-label="Selected video preview" />
+            </div>
+          )}
           <p className="workspace-eyebrow">Publishing</p>
           <h2>From file to playback</h2>
           <ol>
