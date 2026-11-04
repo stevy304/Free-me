@@ -3,16 +3,47 @@ import type { FormEvent } from 'react';
 import { ArrowLeft, CircleCheck, CloudUpload, FileVideo, LoaderCircle } from 'lucide-react';
 import type { ReadyUpload } from '../services/videoCatalog';
 
+import { defaultUploadLimit, formatUploadLimit } from '../services/uploadLimits.mjs';
+
+function sendVideo(file: File, headers: Record<string, string>, signal: AbortSignal, onProgress: (percent: number) => void) {
+  return new Promise<{ status: number; result: { error?: string; statusUrl?: string } | null }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/videos');
+    xhr.responseType = 'json';
+    for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
+    const cancel = () => xhr.abort();
+    signal.addEventListener('abort', cancel, { once: true });
+    xhr.addEventListener('loadend', () => signal.removeEventListener('abort', cancel), { once: true });
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(Math.floor(event.loaded / event.total * 100));
+    };
+    xhr.onload = () => resolve({ status: xhr.status, result: xhr.response });
+    xhr.onerror = () => reject(new Error('The connection ended during upload. Check your connection and the server terminal before retrying.'));
+    xhr.onabort = () => reject(new DOMException('Upload cancelled', 'AbortError'));
+    xhr.send(file);
+  });
+}
+
 export function UploadPage({ onBack, onUploadComplete }: {
   onBack: () => void;
   onUploadComplete: (video: ReadyUpload) => void;
 }) {
   const request = useRef<AbortController | null>(null);
+  const [maxBytes, setMaxBytes] = useState(defaultUploadLimit);
+  const [percent, setPercent] = useState(0);
+  const limit = formatUploadLimit(maxBytes);
   const [status, setStatus] = useState<'uploading' | 'processing' | ''>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState('');
   const [error, setError] = useState('');
-  useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/api/videos/upload-limits', { signal: controller.signal })
+      .then(async (response) => response.ok ? (await response.json()).maxBytes : null)
+      .then((limit) => { if (!controller.signal.aborted && Number.isSafeInteger(limit) && limit > 0) setMaxBytes(limit); })
+      .catch(() => {});
+    return () => { controller.abort(); request.current?.abort(); };
+  }, []);
 
   useEffect(() => {
     if (!selectedFile) { setPreview(''); return; }
@@ -27,39 +58,35 @@ export function UploadPage({ onBack, onUploadComplete }: {
     const form = new FormData(event.currentTarget);
     const file = form.get('video');
     const title = String(form.get('title') || '').trim();
-    if (!title || !(file instanceof File) || !file.size || !/\.mp4$/i.test(file.name) || file.size > 25 * 1024 * 1024) {
-      setError('Enter a title and select an MP4 file up to 25 MiB.');
+    if (!title || !(file instanceof File) || !file.size || !/\.mp4$/i.test(file.name) || file.size > maxBytes) {
+      setError(`Enter a title and select an MP4 file up to ${limit}.`);
       return;
     }
     const controller = new AbortController();
     request.current = controller;
     const { signal } = controller;
     setError('');
+    setPercent(0);
     setStatus('uploading');
     try {
-      const response = await fetch('/api/videos', { method: 'POST', headers: {
+      const { status: httpStatus, result } = await sendVideo(file, {
         'Content-Type': 'video/mp4',
         'X-Video-Visibility': String(form.get('visibility')),
         'X-Video-Title': encodeURIComponent(title),
         'X-Video-Description': encodeURIComponent(String(form.get('description') || '').trim()),
         'X-Video-Category': encodeURIComponent(String(form.get('category'))),
-      }, body: file, signal });
-      const result = await response.json().catch(() => null);
-      if (!response.ok) {
-        const errorMessage = response.status === 413
-          ? 'The video exceeds the upload limit. Choose an MP4 up to 25 MiB.'
-          : response.status === 401 || response.status === 403
-            ? 'Upload authorization failed. Check your Free Me sign-in and reopen the Codespaces preview.'
-            : `The upload request failed (HTTP ${response.status}). Check the npm run dev terminal for backend errors.`;
+      }, signal, setPercent);
+      if (httpStatus !== 202 || !result?.statusUrl || !/^\/videos\/[a-f0-9-]{36}$/.test(result.statusUrl)) {
+        const errorMessage = httpStatus === 413
+          ? `The server or web proxy rejected this file as too large. The app limit is ${limit}.`
+          : httpStatus === 401 || httpStatus === 403
+            ? 'Upload authorization failed. Check your Free Me sign-in and reopen the preview.'
+            : `Upload failed (HTTP ${httpStatus}). Check the video service log before retrying.`;
         throw new Error(result?.error || errorMessage);
-      }
-      if (response.status !== 202 || !/^\/videos\/[a-f0-9-]{36}$/.test(result?.statusUrl)) {
-        throw new Error('The web server did not reach the video API. Start Free Me with npm run dev and reopen the port it prints.');
       }
       const { statusUrl } = result;
       setStatus('processing');
-      const deadline = Date.now() + 420_000;
-      while (Date.now() < deadline && !signal.aborted) {
+      while (!signal.aborted) {
         const result = await fetch('/api' + statusUrl, { signal, cache: 'no-store' });
         if (!result.ok) throw new Error('Could not check video status.');
         const video = await result.json();
@@ -68,9 +95,8 @@ export function UploadPage({ onBack, onUploadComplete }: {
           onUploadComplete(video);
           return;
         }
-        await new Promise((resolve) => setTimeout(resolve, 700));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
-      if (!signal.aborted) throw new Error('The video is taking longer than expected to process.');
     } catch (cause) {
       if (!signal.aborted) setError(cause instanceof Error ? cause.message : 'Upload failed.');
     } finally {
@@ -97,7 +123,7 @@ export function UploadPage({ onBack, onUploadComplete }: {
                 onChange={(event) => { setSelectedFile(event.target.files?.[0] ?? null); setError(''); }} />
               {selectedFile ? <FileVideo aria-hidden="true" size={32} /> : <CloudUpload aria-hidden="true" size={32} />}
               <strong>{selectedFile?.name || 'Select video'}</strong>
-              <span>{selectedFile ? (selectedFile.size / 1024 / 1024).toFixed(1) + ' MiB · Click to replace' : 'MP4 · Up to 25 MiB'}</span>
+              <span>{selectedFile ? (selectedFile.size / 1024 / 1024).toFixed(1) + ' MiB · Click to replace' : `MP4 · Up to ${limit}`}</span>
             </label>
           </section>
           <section className="workspace-panel upload-details">
@@ -113,7 +139,7 @@ export function UploadPage({ onBack, onUploadComplete }: {
               </select>
             </label>
           </section>
-          {status && <p className="upload-status" role="status"><LoaderCircle size={18} className="animate-spin" />{status === 'uploading' ? 'Uploading file…' : 'Preparing video for playback…'}</p>}
+          {status && <p className="upload-status" role="status"><LoaderCircle size={18} className="animate-spin" />{status === 'uploading' ? `Uploading file… ${percent}%` : 'Preparing video for playback…'}</p>}
           {error && <p className="upload-error" role="alert">{error}</p>}
           <button type="submit" className="workspace-primary"><CloudUpload size={19} /> Upload video</button>
         </fieldset>
@@ -127,8 +153,8 @@ export function UploadPage({ onBack, onUploadComplete }: {
           <p className="workspace-eyebrow">Publishing</p>
           <h2>From file to playback</h2>
           <ol>
-            <li><FileVideo size={18} /><div><strong>Choose your file</strong><p>Use an MP4 up to 25 MiB.</p></div></li>
-            <li><LoaderCircle size={18} /><div><strong>Process the video</strong><p>The local service prepares the first 60 seconds for streaming.</p></div></li>
+            <li><FileVideo size={18} /><div><strong>Choose your file</strong><p>Use an MP4 up to {limit}.</p></div></li>
+            <li><LoaderCircle size={18} /><div><strong>Process the video</strong><p>The service prepares the full video for streaming. You can check processing later in Your videos.</p></div></li>
             <li><CircleCheck size={18} /><div><strong>Watch on Free Me</strong><p>When processing finishes, the video opens on its watch page.</p></div></li>
           </ol>
 

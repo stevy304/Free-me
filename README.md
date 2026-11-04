@@ -100,7 +100,7 @@ Install Node.js 24 and FFmpeg. In Codespaces, install FFmpeg with `sudo apt-get 
 npm run dev
 ```
 
-The **Create** button opens the upload page. The page accepts a raw MP4 of up to 25 MiB. On mobile, open the account menu and select **Upload video**. Use `npm run dev:web` for the frontend alone, or set `FREEME_VIDEO_ORIGIN` to use an existing video service. The backend processes the first 60 seconds into an adaptive HLS playlist with up to three quality levels, stores media on disk, and records status in SQLite. SQLite stores the upload catalog, and FFmpeg generates a thumbnail. The backend serves ready videos to any browser connected to the same local instance. Data defaults to `~/.free-me-video`. To reopen an earlier prototype catalog, set `FREEME_DATA_DIR` to its previous directory before starting the backend. The discovery fixtures, persona switching, and monetization screens use sample data.
+The **Create** button opens the upload page. The page accepts a raw MP4 of up to 100 GB. On mobile, open the account menu and select **Upload video**. Use `npm run dev:web` for the frontend alone, or set `FREEME_VIDEO_ORIGIN` to use an existing video service. The backend processes the full video into an adaptive HLS playlist with up to three quality levels, stores media on disk, and records status in SQLite. SQLite stores the upload catalog, and FFmpeg generates a thumbnail. The backend serves ready videos to any browser connected to the same local instance. Data defaults to `~/.free-me-video`. To reopen an earlier prototype catalog, set `FREEME_DATA_DIR` to its previous directory before starting the backend. The discovery fixtures, persona switching, and monetization screens use sample data.
 
 
 ## Creator accounts and private uploads
@@ -140,3 +140,17 @@ Run `npm run test:ownership` against a fresh disposable database with FFmpeg
 installed to exercise PostgreSQL registration, video ownership, and playback.
 The active media service uses the three new media tables. The broader campaign,
 community, and payout schema still needs service integration.
+
+
+### Large uploads
+
+The default MP4 limit is 100 GB (100,000,000,000 bytes). Set
+`FREEME_MAX_UPLOAD_BYTES` to a smaller positive byte count for constrained hosts.
+The upload streams to disk and checks free space. Leave room for both the source
+and all HLS renditions. Browser upload progress measures bytes sent, then the
+page switches to processing status. Once accepted, processing continues on the
+server and can be checked in **Creator account & uploads**.
+
+This is one streamed request, so a dropped connection requires restarting the
+upload. Your host and reverse proxy must allow the body size and transfer time,
+and the media volume must have enough space. A 100 GB file was not exercised in CI.
