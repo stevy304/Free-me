@@ -81,31 +81,33 @@ export const AdvertiserStudio: React.FC<AdvertiserStudioProps> = ({
   };
 
   return (
-    <div className="max-w-[1440px] mx-auto px-4 md:px-8 py-6 space-y-6">
+    <div className="workspace-page studio-page space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+      <div className="workspace-hero">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center text-blue-600">
             <Megaphone className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="font-display font-extrabold text-xl text-slate-900 dark:text-white">
-              Local Advertising Hub · Rwanda
+            <h1 className="workspace-title">
+              Advertiser Studio
             </h1>
             <p className="text-xs text-slate-500 font-mono">
-              Direct Local Business Advertising with 60% Creator Economic Return
+              Create and review local advertising campaigns
             </p>
           </div>
         </div>
 
         <button
           onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-colors"
+          className="workspace-primary"
         >
           <Plus className="w-4 h-4" />
           <span>Create New Campaign</span>
         </button>
       </div>
+
+      <p className="workspace-preview">Preview workspace · Financial and account activity shown here uses sample data.</p>
 
       {/* KPI Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

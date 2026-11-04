@@ -64,7 +64,7 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
   const [showPayoutModal, setShowPayoutModal] = useState(false);
   const [payoutAmount, setPayoutAmount] = useState<string>('50000');
   const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>('MTN_MOMO_RWANDA');
-  const [accountIdentifier, setAccountIdentifier] = useState('+250 788 412 890');
+  const [accountIdentifier, setAccountIdentifier] = useState('');
   const [accountHolderName, setAccountHolderName] = useState(currentUser.displayName);
   const [payoutError, setPayoutError] = useState<string | null>(null);
   const [payoutSuccess, setPayoutSuccess] = useState(false);
@@ -101,9 +101,9 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
   };
 
   return (
-    <div className="max-w-[1440px] mx-auto px-4 md:px-8 py-6 space-y-6">
+    <div className="workspace-page studio-page space-y-6">
       {/* Studio Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+      <div className="workspace-hero">
         <div className="flex items-center gap-3">
           <img
             src={channel.avatarUrl}
@@ -113,13 +113,13 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
           />
           <div>
             <div className="flex items-center gap-1.5">
-              <h1 className="font-display font-extrabold text-xl text-slate-900 dark:text-white">
-                {channel.name}
+              <h1 className="workspace-title">
+                Creator Studio
               </h1>
               {channel.isVerified && <CheckCircle2 className="w-4 h-4 text-amber-500" />}
             </div>
             <p className="text-xs text-slate-500 font-mono">
-              {channel.handle} · African Creator Studio (Kigali Node)
+              {channel.name} · {channel.handle}
             </p>
           </div>
         </div>
@@ -136,13 +136,15 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
 
           <button
             onClick={onOpenUpload}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition-colors"
+            className="workspace-primary"
           >
             <Plus className="w-4 h-4" />
             <span>Upload Video</span>
           </button>
         </div>
       </div>
+
+      <p className="workspace-preview">Preview workspace · Financial and account activity shown here uses sample data.</p>
 
       {/* KPI Stats Strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -204,7 +206,7 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
       </div>
 
       {/* Studio Navigation Tabs */}
-      <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 text-xs font-medium">
+      <div className="workspace-tabs">
         {[
           { id: 'OVERVIEW', label: 'Channel Overview' },
           { id: 'VIDEOS', label: `Manage Videos (${creatorVideos.length})` },
@@ -294,7 +296,7 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
                     <Smartphone className="w-4 h-4 text-amber-500" />
                     <div>
                       <div className="font-semibold text-slate-900 dark:text-white">MTN Mobile Money</div>
-                      <div className="text-[11px] text-slate-500 font-mono">+250 788 412 890</div>
+                      <div className="text-[11px] text-slate-500 font-mono">Demo mobile wallet</div>
                     </div>
                   </div>
                   <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
@@ -307,7 +309,7 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
                     <Building className="w-4 h-4 text-blue-500" />
                     <div>
                       <div className="font-semibold text-slate-900 dark:text-white">Bank of Kigali</div>
-                      <div className="text-[11px] text-slate-500 font-mono">BK-0091829384-RW</div>
+                      <div className="text-[11px] text-slate-500 font-mono">Demo bank account</div>
                     </div>
                   </div>
                   <span className="text-[10px] text-slate-400">Backup</span>
