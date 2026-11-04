@@ -110,3 +110,33 @@ Open **Creator account & uploads** from the account menu. Register or sign in, t
 Accounts and sessions are stored in the local SQLite database. Serve the app and API on the same origin with HTTPS when testing behind a trusted proxy, and set `FREEME_SECURE_COOKIES=1` for HTTPS-only session cookies. The creator account is separate from the sample studio persona controls. Email verification and password recovery are pending.
 
 Run `npm run test:ownership` with FFmpeg installed to verify the two-account privacy and editing flow.
+
+## PostgreSQL for the video service
+
+Set `DATABASE_URL` in the process environment. Apply migrations with
+`npm run db:migrate`, then verify migration status with `npm run db:status`.
+Start the video service with `node prototypes/video-backend.mjs`. It checks the
+schema at startup and reports database availability through `GET /health`
+(`/api/health` through the web proxy). With `NODE_ENV=production` the service
+requires PostgreSQL. Local development without `DATABASE_URL` uses SQLite.
+
+Use a migration role for DDL and a separate runtime login with access to
+`accounts`, `sessions`, `videos` and the video sequence. Use verified TLS for
+remote database connections and keep database credentials in the deployment
+secret store. Configure database backups and verify restoration in staging.
+Keep one video service instance per database until the local media worker is
+replaced with a distributed queue and shared storage.
+
+For a local cutover, stop the SQLite service and back up the SQLite database and
+media directory together. Migrate an empty PostgreSQL target and run
+`npm run db:import -- /path/to/videos.sqlite` with the target `DATABASE_URL`.
+The import preserves account and video IDs, passwords as existing hashes, and
+visibility. Sessions are intentionally omitted, so users must sign in again.
+Start the service with `FREEME_DATA_DIR` pointing to the existing media directory.
+The import changes neither the SQLite file nor media files. Keep both backups
+until you verify playback, private access, and a restart.
+
+Run `npm run test:ownership` against a fresh disposable database with FFmpeg
+installed to exercise PostgreSQL registration, video ownership, and playback.
+The active media service uses the three new media tables. The broader campaign,
+community, and payout schema still needs service integration.

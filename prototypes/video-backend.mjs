@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream/promises';
-import { DatabaseSync } from 'node:sqlite';
+import { openDatabase } from './database.mjs';
 import { boundedBody } from './request-body.mjs';
 import { createAccounts, readJson } from './accounts.mjs';
 
@@ -19,28 +19,23 @@ const port = Number(process.env.PORT || 4400);
 const maxBytes = 25 * 1024 * 1024;
 await Promise.all([run('ffmpeg', ['-version']), run('ffprobe', ['-version'])]);
 await mkdir(root, { recursive: true });
-const db = new DatabaseSync(join(root, 'videos.sqlite'));
-db.exec(`
-  CREATE TABLE IF NOT EXISTS videos (id TEXT PRIMARY KEY, status TEXT NOT NULL);
-`);
-const columns = new Set(db.prepare('PRAGMA table_info(videos)').all().map((column) => column.name));
-if (!columns.has('metadata')) db.exec("ALTER TABLE videos ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'");
-if (!columns.has('duration_seconds')) db.exec('ALTER TABLE videos ADD COLUMN duration_seconds REAL');
-if (!columns.has('owner_id')) db.exec('ALTER TABLE videos ADD COLUMN owner_id TEXT');
-if (!columns.has('visibility')) db.exec("ALTER TABLE videos ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'");
+const db = await openDatabase(join(root, 'videos.sqlite'));
 const accounts = createAccounts(db, json);
-db.exec('CREATE INDEX IF NOT EXISTS videos_status ON videos (status)');
 const insert = db.prepare("INSERT INTO videos (id, status, metadata, owner_id, visibility) VALUES (?, 'processing', ?, ?, ?)");
 const update = db.prepare('UPDATE videos SET status = ?, duration_seconds = ? WHERE id = ?');
 const find = db.prepare('SELECT * FROM videos WHERE id = ?');
-const catalog = db.prepare("SELECT * FROM videos WHERE status = 'ready' AND visibility = 'public' ORDER BY rowid DESC LIMIT 100");
-const owned = db.prepare('SELECT * FROM videos WHERE owner_id = ? ORDER BY rowid DESC LIMIT 100');
+const catalog = db.prepare(`SELECT * FROM videos WHERE status = 'ready' AND visibility = 'public' ORDER BY ${db.orderColumn} DESC LIMIT 100`);
+const owned = db.prepare(`SELECT * FROM videos WHERE owner_id = ? ORDER BY ${db.orderColumn} DESC LIMIT 100`);
 const edit = db.prepare('UPDATE videos SET metadata = ?, visibility = ? WHERE id = ? AND owner_id = ?');
 const categories = new Set(['Kigali Life', 'Tech & Innovation', 'Wildlife & Safari', 'Music & Performance', 'Culinary & Coffee']);
 let busy = false;
 
+function metadataFor(video) {
+  return typeof video.metadata === 'string' ? JSON.parse(video.metadata) : video.metadata;
+}
+
 function describe(video) {
-  const metadata = JSON.parse(video.metadata);
+  const metadata = metadataFor(video);
   const ready = video.status === 'ready';
   const base = '/media/' + video.id + '/';
   return {
@@ -130,10 +125,10 @@ async function transcode(id, directory, source) {
     ].join('\n');
     await writeFile(join(directory, 'index.m3u8.tmp'), master);
     await rename(join(directory, 'index.m3u8.tmp'), join(directory, 'index.m3u8'));
-    update.run('ready', renditions[0].duration, id);
+    await update.run('ready', renditions[0].duration, id);
   } catch (error) {
     console.error('Transcode failed', id, error.message);
-    update.run('failed', null, id);
+    await update.run('failed', null, id);
   } finally {
     await unlink(source).catch((error) => { if (error.code !== 'ENOENT') console.error(error.message); });
   }
@@ -169,7 +164,7 @@ async function upload(request, response, account) {
   try {
     await mkdir(directory);
     await pipeline(boundedBody(request, maxBytes, 'Upload limit is 25 MiB'), createWriteStream(source, { flags: 'wx' }));
-    insert.run(id, JSON.stringify(metadata), account.id, visibility);
+    await insert.run(id, JSON.stringify(metadata), account.id, visibility);
   } catch (error) {
     await unlink(source).catch(() => {});
     busy = false;
@@ -185,18 +180,25 @@ async function handle(request, response) {
     return json(response, 403, { error: 'Cross-origin request denied' });
   }
   if (path.startsWith('/account/')) return accounts.handle(request, response, path);
-  const account = accounts.viewer(request);
+  const account = await accounts.viewer(request);
   if (request.method === 'POST' && path === '/videos') return upload(request, response, account);
   if (request.method === 'GET' && path === '/videos/mine') {
     if (!account) return json(response, 401, { error: 'Sign in to manage uploads.' });
-    return json(response, 200, { videos: owned.all(account.id).map(describe) });
+    return json(response, 200, { videos: (await owned.all(account.id)).map(describe) });
   }
-  if (request.method === 'GET' && path === '/videos') return json(response, 200, { videos: catalog.all().map(describe) });
-  if (request.method === 'GET' && path === '/health') return json(response, 200, { status: 'ok' });
+  if (request.method === 'GET' && path === '/videos') return json(response, 200, { videos: (await catalog.all()).map(describe) });
+  if (request.method === 'GET' && path === '/health') {
+    try {
+      await db.health();
+      return json(response, 200, { status: 'ok' });
+    } catch {
+      return json(response, 503, { error: 'Database unavailable' });
+    }
+  }
   const status = /^\/videos\/([a-f0-9-]{36})$/.exec(path);
   const media = /^\/media\/([a-f0-9-]{36})\/(index\.m3u8|poster\.jpg|segment-\d{3}\.ts|(?:240|360|720)p(?:\.m3u8|-\d{3}\.ts))$/.exec(path);
   const match = status || media;
-  const video = match && find.get(match[1]);
+  const video = match && await find.get(match[1]);
   if (!video || (video.visibility === 'private' && (!account || account.id !== video.owner_id))) {
     return json(response, 404, { error: 'Not found' });
   }
@@ -207,8 +209,8 @@ async function handle(request, response) {
     if (typeof title !== 'string' || !title.trim() || title.trim().length > 120 || !['public', 'private'].includes(visibility)) {
       return json(response, 400, { error: 'Enter a title and valid visibility.' });
     }
-    edit.run(JSON.stringify({ ...JSON.parse(video.metadata), title: title.trim() }), visibility, id, account.id);
-    return json(response, 200, describe(find.get(id)));
+    await edit.run(JSON.stringify({ ...metadataFor(video), title: title.trim() }), visibility, id, account.id);
+    return json(response, 200, describe(await find.get(id)));
   }
   if (status && request.method === 'GET') return json(response, 200, describe(video));
   if (!media || !['GET', 'HEAD'].includes(request.method)) return json(response, 404, { error: 'Not found' });
@@ -234,26 +236,29 @@ const server = createServer({ requestTimeout: 120_000 }, (request, response) => 
     json(response, error.status || (error.code === 'ENOENT' ? 404 : 500), { error: error.status ? error.message : 'Request failed' });
   });
 });
-server.on('error', (error) => {
+server.on('error', async (error) => {
   console.error(error.code === 'EADDRINUSE'
     ? `Video backend port ${port} is already in use. Stop the old Free Me server or run npm run dev with a different PORT.`
     : error.message);
   process.exitCode = 1;
+  await db.close?.();
 });
+const pending = db.prepare(`SELECT id FROM videos WHERE status = 'processing' ORDER BY ${db.orderColumn}`);
 server.listen(port, '127.0.0.1', () => {
-  console.log('Free Me prototype at http://127.0.0.1:' + server.address().port);
-  const interrupted = db.prepare("SELECT id FROM videos WHERE status = 'processing' ORDER BY rowid").all();
-  if (interrupted.length) {
-    busy = true;
-    void (async () => {
-      try {
-        for (const { id } of interrupted) {
-          const directory = join(root, id);
-          await transcode(id, directory, join(directory, 'source.mp4'));
-        }
-      } finally {
-        busy = false;
+  busy = true;
+  void (async () => {
+    try {
+      const interrupted = await pending.all();
+      console.log('Free Me prototype at http://127.0.0.1:' + server.address().port);
+      for (const { id } of interrupted) {
+        const directory = join(root, id);
+        await transcode(id, directory, join(directory, 'source.mp4'));
       }
-    })();
-  }
+    } catch (error) {
+      console.error('Video recovery failed:', error.code || error.message);
+      process.exit(1);
+    } finally {
+      busy = false;
+    }
+  })();
 });

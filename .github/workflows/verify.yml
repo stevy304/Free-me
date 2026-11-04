@@ -40,3 +40,9 @@ jobs:
       - run: npx prisma validate
       - run: npx prisma migrate deploy
       - run: npx prisma migrate status
+      - name: Install media tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Verify SQLite development path
+        run: env -u DATABASE_URL npm run test:ownership
+      - name: Verify PostgreSQL media service
+        run: npm run test:ownership
