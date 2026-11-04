@@ -10,6 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream/promises';
 import { DatabaseSync } from 'node:sqlite';
+import { boundedBody } from './request-body.mjs';
 import { createAccounts, readJson } from './accounts.mjs';
 
 const run = promisify(execFile);
@@ -145,11 +146,9 @@ async function upload(request, response, account) {
   if (request.headers['content-type'] !== 'video/mp4') {
     return json(response, 415, { error: 'Send a raw video/mp4 body' });
   }
-  const length = Number(request.headers['content-length']);
-  if (!Number.isSafeInteger(length) || length < 1) {
-    return json(response, 411, { error: 'A positive Content-Length is required' });
+  if (Number(request.headers['content-length']) > maxBytes) {
+    return json(response, 413, { error: 'Upload limit is 25 MiB' });
   }
-  if (length > maxBytes) return json(response, 413, { error: 'Upload limit is 25 MiB' });
   if (busy) return json(response, 503, { error: 'A video is already being processed' });
 
   let metadata;
@@ -169,7 +168,7 @@ async function upload(request, response, account) {
   const source = join(directory, 'source.mp4');
   try {
     await mkdir(directory);
-    await pipeline(request, createWriteStream(source, { flags: 'wx' }));
+    await pipeline(boundedBody(request, maxBytes, 'Upload limit is 25 MiB'), createWriteStream(source, { flags: 'wx' }));
     insert.run(id, JSON.stringify(metadata), account.id, visibility);
   } catch (error) {
     await unlink(source).catch(() => {});
@@ -226,26 +225,35 @@ async function handle(request, response) {
   await pipeline(createReadStream(file), response);
 }
 
-const interrupted = db.prepare("SELECT id FROM videos WHERE status = 'processing' ORDER BY rowid").all();
-if (interrupted.length) {
-  busy = true;
-  void (async () => {
-    try {
-      for (const { id } of interrupted) {
-        const directory = join(root, id);
-        await transcode(id, directory, join(directory, 'source.mp4'));
-      }
-    } finally {
-      busy = false;
-    }
-  })();
-}
 
 const server = createServer({ requestTimeout: 120_000 }, (request, response) => {
   handle(request, response).catch((error) => {
     if (response.headersSent || response.destroyed) return response.destroy();
+    if (error.status === 413) response.setHeader('Connection', 'close');
     console.error(error.message);
     json(response, error.status || (error.code === 'ENOENT' ? 404 : 500), { error: error.status ? error.message : 'Request failed' });
   });
 });
-server.listen(port, '127.0.0.1', () => console.log('Free Me prototype at http://127.0.0.1:' + server.address().port));
+server.on('error', (error) => {
+  console.error(error.code === 'EADDRINUSE'
+    ? `Video backend port ${port} is already in use. Stop the old Free Me server or run npm run dev with a different PORT.`
+    : error.message);
+  process.exitCode = 1;
+});
+server.listen(port, '127.0.0.1', () => {
+  console.log('Free Me prototype at http://127.0.0.1:' + server.address().port);
+  const interrupted = db.prepare("SELECT id FROM videos WHERE status = 'processing' ORDER BY rowid").all();
+  if (interrupted.length) {
+    busy = true;
+    void (async () => {
+      try {
+        for (const { id } of interrupted) {
+          const directory = join(root, id);
+          await transcode(id, directory, join(directory, 'source.mp4'));
+        }
+      } finally {
+        busy = false;
+      }
+    })();
+  }
+});

@@ -33,7 +33,7 @@ test('private playback and editing require the owning account', { timeout: 30_00
     })(),
     exited.then(() => { throw Error('Video API stopped'); }),
   ]);
-  function request(path, { method = 'GET', cookie, data, headers = {}, body } = {}) {
+  function request(path, { method = 'GET', cookie, data, headers = {}, body, streaming = false } = {}) {
     return fetch(origin + path, {
       method,
       headers: {
@@ -42,6 +42,7 @@ test('private playback and editing require the owning account', { timeout: 30_00
         ...headers,
       },
       body: data ? JSON.stringify(data) : body,
+      ...(streaming ? { duplex: 'half' } : {}),
     });
   }
   async function register(email) {
@@ -61,7 +62,17 @@ test('private playback and editing require the owning account', { timeout: 30_00
     headers: { 'Content-Type': 'video/mp4', 'X-Video-Title': 'Owner clip' },
   };
   assert.equal((await request('/videos', uploadOptions)).status, 401);
-  const upload = await request('/videos', { ...uploadOptions, cookie: owner });
+  async function* oversized() {
+    for (let i = 0; i < 26; i++) yield Buffer.alloc(1024 * 1024);
+  }
+  const rejected = await request('/videos', { ...uploadOptions, cookie: owner, body: oversized(), streaming: true });
+  assert.equal(rejected.status, 413);
+  assert.match((await rejected.json()).error, /25 MiB/);
+  async function* chunks() {
+    yield uploadOptions.body.subarray(0, 100);
+    yield uploadOptions.body.subarray(100);
+  }
+  const upload = await request('/videos', { ...uploadOptions, cookie: owner, body: chunks(), streaming: true });
   assert.equal(upload.status, 202);
   const { statusUrl } = await upload.json();
   let video;

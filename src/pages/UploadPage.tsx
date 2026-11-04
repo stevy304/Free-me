@@ -44,18 +44,26 @@ export function UploadPage({ onBack, onUploadComplete }: {
         'X-Video-Description': encodeURIComponent(String(form.get('description') || '').trim()),
         'X-Video-Category': encodeURIComponent(String(form.get('category'))),
       }, body: file, signal });
+      const result = await response.json().catch(() => null);
       if (!response.ok) {
-        const details = await response.json().catch(() => ({}));
-        throw new Error(details.error || 'The video service is unavailable. Restart Free Me with npm run dev, then try again.');
+        const errorMessage = response.status === 413
+          ? 'The video exceeds the upload limit. Choose an MP4 up to 25 MiB.'
+          : response.status === 401 || response.status === 403
+            ? 'Upload authorization failed. Check your Free Me sign-in and reopen the Codespaces preview.'
+            : `The upload request failed (HTTP ${response.status}). Check the npm run dev terminal for backend errors.`;
+        throw new Error(result?.error || errorMessage);
       }
-      const { statusUrl } = await response.json();
+      if (response.status !== 202 || !/^\/videos\/[a-f0-9-]{36}$/.test(result?.statusUrl)) {
+        throw new Error('The web server did not reach the video API. Start Free Me with npm run dev and reopen the port it prints.');
+      }
+      const { statusUrl } = result;
       setStatus('processing');
       const deadline = Date.now() + 420_000;
       while (Date.now() < deadline && !signal.aborted) {
         const result = await fetch('/api' + statusUrl, { signal, cache: 'no-store' });
         if (!result.ok) throw new Error('Could not check video status.');
         const video = await result.json();
-        if (video.status === 'failed') throw new Error('FFmpeg could not process this file. Try another MP4.');
+        if (video.status === 'failed') throw new Error('The video was received but could not be processed. Try an MP4 encoded as H.264, or check the video backend log.');
         if (video.status === 'ready' && video.playlistUrl) {
           onUploadComplete(video);
           return;
