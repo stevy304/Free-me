@@ -108,10 +108,10 @@ export const ShortsFeed: React.FC<ShortsFeedProps> = ({
   const isSubscribed = subscribedChannelIds.includes(currentShort.channelId);
 
   return (
-    <div className="flex items-center justify-center min-h-[calc(100vh-5rem)] py-4 px-2">
+    <div className="shorts-page flex items-center justify-center py-4 px-2">
       <div className="relative flex items-center gap-4">
         {/* Main 9:16 Vertical Video Frame */}
-        <div className="relative w-[340px] md:w-[380px] h-[640px] md:h-[680px] rounded-3xl overflow-hidden bg-black shadow-2xl border border-slate-800">
+        <div className="relative shorts-frame rounded-3xl overflow-hidden bg-black shadow-2xl border border-slate-800">
           <video
             ref={videoRef}
             key={currentShort.id}

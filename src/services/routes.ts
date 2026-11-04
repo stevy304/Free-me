@@ -1,4 +1,4 @@
-const pages = ['explore', 'search', 'shorts', 'subscriptions', 'studio', 'advertiser', 'admin'] as const;
+const pages = ['explore', 'search', 'shorts', 'subscriptions', 'studio', 'upload', 'advertiser', 'admin'] as const;
 type Page = typeof pages[number];
 
 export type Route =

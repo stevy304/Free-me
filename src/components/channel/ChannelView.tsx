@@ -32,9 +32,9 @@ export const ChannelView: React.FC<ChannelViewProps> = ({
   const channelShorts = videos.filter((v) => v.isShort);
 
   return (
-    <div className="max-w-[1440px] mx-auto px-4 md:px-8 py-6 space-y-6">
+    <div className="workspace-page channel-page space-y-6">
       {/* Channel Banner */}
-      <div className="relative w-full h-44 md:h-64 rounded-2xl overflow-hidden bg-slate-200 dark:bg-slate-800 border border-slate-200 dark:border-slate-800">
+      <div className="relative w-full h-36 sm:h-48 lg:h-60 rounded-2xl overflow-hidden bg-slate-200 dark:bg-slate-800 border border-slate-200 dark:border-slate-800">
         <img
           src={channel.bannerUrl}
           alt={channel.name}
@@ -55,7 +55,7 @@ export const ChannelView: React.FC<ChannelViewProps> = ({
           />
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="font-display font-extrabold text-xl md:text-2xl text-slate-900 dark:text-white">
+              <h1 className="workspace-title">
                 {channel.name}
               </h1>
               {channel.isVerified && <CheckCircle2 className="w-5 h-5 text-amber-500" />}
@@ -84,7 +84,7 @@ export const ChannelView: React.FC<ChannelViewProps> = ({
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 text-xs font-semibold">
+      <div className="workspace-tabs">
         <button
           onClick={() => setActiveTab('VIDEOS')}
           className={`px-4 py-2.5 border-b-2 transition-colors flex items-center gap-1.5 ${

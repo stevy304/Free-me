@@ -39,7 +39,7 @@ import { pageUrl, readRoute } from './services/routes';
 import { WatchPage } from './components/video/WatchPage';
 import { ShortsFeed } from './components/shorts/ShortsFeed';
 import { CreatorStudio } from './components/studio/CreatorStudio';
-import { VideoUploadModal } from './components/studio/VideoUploadModal';
+import { UploadPage } from './pages/UploadPage';
 import { AdvertiserStudio } from './components/advertiser/AdvertiserStudio';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { ChannelView } from './components/channel/ChannelView';
@@ -164,7 +164,7 @@ export default function App() {
   }, [route, selectedVideo?.title]);
 
   // Modals
-  const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
+
 
   // Run automated unit tests silently on load
   const [testResults, setTestResults] = useState(() => runRevenueTests());
@@ -521,7 +521,7 @@ export default function App() {
         onToggleCurrency={toggleCurrency}
         darkMode={darkMode}
         onToggleDarkMode={toggleDarkMode}
-        onOpenUpload={() => setShowUploadModal(true)}
+        onOpenUpload={() => handleNavigate('upload')}
         onNavigate={handleNavigate}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -607,7 +607,7 @@ export default function App() {
               payouts={payouts.filter((p) => p.channelId === channels[0].id)}
               currency={currency}
               currentUser={currentUser}
-              onOpenUpload={() => setShowUploadModal(true)}
+              onOpenUpload={() => handleNavigate('upload')}
               onDeleteVideo={(vidId) => setVideos((prev) => prev.filter((v) => v.id !== vidId))}
               onToggleMonetization={(vidId) =>
                 setVideos((prev) =>
@@ -665,6 +665,9 @@ export default function App() {
             />
           )}
 
+          {currentView === 'upload' && (
+            <UploadPage onBack={() => handleNavigate('studio')} onUploadComplete={handleUploadComplete} />
+          )}
           {currentView === 'subscriptions' && (
             <DiscoveryPage title="Subscriptions" videos={videos.filter((video) => subscribedChannelIds.includes(video.channelId))}
               onSelectVideo={handleSelectVideo} onSelectChannel={handleSelectChannel}
@@ -673,13 +676,6 @@ export default function App() {
         </main>
       </div>
 
-      {/* Video Upload Modal */}
-      {showUploadModal && (
-        <VideoUploadModal
-          onClose={() => setShowUploadModal(false)}
-          onUploadComplete={handleUploadComplete}
-        />
-      )}
     </div>
   );
 }

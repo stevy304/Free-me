@@ -162,3 +162,78 @@ h1, h2, h3, h4, h5, h6, .font-display {
 @media (min-width: 768px) {
   .watch-layout > .discovery-nav:not(.is-expanded) { display: none; }
 }
+
+.workspace-page {
+  max-width: 1360px;
+  margin-inline: auto;
+  padding: clamp(20px, 3vw, 42px) clamp(16px, 3vw, 42px) 32px;
+}
+.workspace-heading { margin: 14px 0 28px; }
+.workspace-heading h1, .workspace-title {
+  font-size: clamp(25px, 3vw, 36px);
+  font-weight: 760;
+  letter-spacing: -.045em;
+  line-height: 1.15;
+}
+.workspace-heading > p:last-child { margin-top: 8px; color: var(--muted); }
+.workspace-eyebrow { margin-bottom: 8px; font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #16877b; }
+.dark .workspace-eyebrow { color: #67d6c8; }
+.workspace-back { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+.workspace-back:hover { color: var(--ink); }
+.workspace-hero, .workspace-panel {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--paper) 94%, var(--ink));
+  padding: clamp(16px, 2vw, 24px);
+}
+.workspace-hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.workspace-hero p { margin-top: 5px; color: var(--muted); font-family: inherit; font-size: 13px; }
+.workspace-preview { color: var(--muted); font-size: 13px; }
+.workspace-primary {
+  display: inline-flex; justify-content: center; align-items: center; gap: 8px;
+  min-height: 42px; padding: 8px 18px; border-radius: 10px;
+  background: #087568; color: white; font-size: 14px; font-weight: 700;
+}
+.workspace-primary:hover { background: #096359; }
+.workspace-primary:disabled { opacity: .6; cursor: wait; }
+.upload-page { max-width: 1120px; }
+.upload-workspace { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.upload-fields, .upload-details { min-width: 0; display: grid; gap: 16px; }
+.upload-fields > button { justify-self: end; }
+.workspace-panel h2 { margin-bottom: 8px; font-size: 19px; font-weight: 750; letter-spacing: -.02em; }
+.workspace-panel p { color: var(--muted); font-size: 14px; }
+.upload-picker {
+  display: grid; place-items: center; gap: 8px; margin-top: 16px; padding: 25px 12px;
+  min-height: 150px; border: 1px dashed var(--line); border-radius: 13px;
+  background: var(--paper); cursor: pointer; text-align: center;
+}
+.upload-picker:focus-within, .upload-picker:hover { border-color: #25a89a; }
+.upload-picker svg { color: #25a89a; }
+.upload-picker strong { overflow-wrap: anywhere; }
+.upload-picker span, .upload-optional { color: var(--muted); font-size: 12px; }
+.upload-details label { display: block; font-size: 14px; font-weight: 650; }
+.upload-details input, .upload-details textarea, .upload-details select {
+  display: block; width: 100%; min-height: 42px; margin-top: 6px; padding: 9px 11px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--paper); font-weight: 400;
+}
+.upload-details textarea { resize: vertical; }
+.upload-guide ol { display: grid; gap: 16px; margin-top: 16px; }
+.upload-guide li { display: flex; gap: 10px; align-items: flex-start; }
+.upload-guide li svg { flex: none; color: #25a89a; margin-top: 3px; }
+.upload-guide li strong { font-size: 14px; }
+.upload-status, .upload-error { padding: 10px 12px; border-radius: 8px; font-size: 14px; }
+.upload-status { display: flex; gap: 8px; background: var(--surface); }
+.upload-error { color: #a51d25; background: #ffe4e7; }
+.dark .upload-error { color: #ffc2c5; background: #462025; }
+.shorts-page { min-height: calc(100dvh - 112px); }
+.shorts-frame { width: min(380px, calc(100vw - 88px), calc((100dvh - 126px) * .5625)); aspect-ratio: 9 / 16; }
+.watch-page aside[aria-label="Up next"] > div { border-top: 1px solid var(--line); padding-top: 12px; }
+@media (max-width: 900px) {
+  .upload-workspace { grid-template-columns: minmax(0, 1fr); }
+}
+.workspace-tabs {
+  display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--line);
+  font-size: 13px; scrollbar-width: thin;
+}
+.workspace-tabs > button { flex: none; white-space: nowrap; }
+.workspace-page .grid > * { min-width: 0; }

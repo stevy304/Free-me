@@ -99,7 +99,7 @@ export const WatchPage: React.FC<WatchPageProps> = ({
   const estimatedCreatorEarningsRwf = Math.round(estimatedGrossRwf * 0.6);
 
   return (
-    <div className="mx-auto max-w-[1800px] px-3 py-4 sm:px-5 lg:px-8 lg:py-6">
+    <div className="watch-page mx-auto max-w-[1800px] px-3 py-4 sm:px-5 lg:px-8 lg:py-6">
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(290px,30%)]">
         {/* Main Column: Player, Info, Monetization Breakdown & Comments */}
         <div className="min-w-0 space-y-4">

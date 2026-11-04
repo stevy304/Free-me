@@ -84,19 +84,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   return (
-    <div className="max-w-[1440px] mx-auto px-4 md:px-8 py-6 space-y-6">
+    <div className="workspace-page studio-page space-y-6">
       {/* Admin Title */}
-      <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+      <div className="workspace-hero">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl bg-rose-50 dark:bg-rose-950/50 flex items-center justify-center text-rose-600">
             <ShieldAlert className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="font-display font-extrabold text-xl text-slate-900 dark:text-white">
-              Free Me Platform Governance Desk
+            <h1 className="workspace-title">
+              Admin Center
             </h1>
             <p className="text-xs text-slate-500 font-mono">
-              Audit Trails, Advertising Verification & Creator Payout Disbursals
+              Review campaigns, moderation reports and payout requests
             </p>
           </div>
         </div>
@@ -106,6 +106,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <span className="font-bold text-slate-900 dark:text-white">{currentUser.displayName}</span>
         </div>
       </div>
+
+      <p className="workspace-preview">Preview workspace · Financial and account activity shown here uses sample data.</p>
 
       {/* KPI Overview */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -157,7 +159,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 text-xs font-medium">
+      <div className="workspace-tabs">
         {[
           { id: 'CAMPAIGNS', label: `Ad Campaign Review (${pendingCampaigns.length})` },
           { id: 'PAYOUTS', label: `Creator Payout Approvals (${pendingPayouts.length})` },

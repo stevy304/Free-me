@@ -94,11 +94,10 @@ Proprietary — All rights reserved by Free Me Platform Ltd. (Rwanda).
 
 ## Try real upload and playback locally
 
-Install FFmpeg, then run the video service in one terminal and the web app in another.
+Install Node.js 24 and FFmpeg. In Codespaces, install FFmpeg with `sudo apt-get update && sudo apt-get install -y ffmpeg`. The development command starts the web app and local video service together.
 
 ```bash
-node prototypes/video-backend.mjs
 npm run dev
 ```
 
-The **Upload** button accepts a raw MP4 of up to 25 MiB. On mobile, open the account menu to find it. The backend processes the first 60 seconds into an adaptive HLS playlist with up to three quality levels, stores media on disk, and records status in SQLite. SQLite stores the upload catalog, and FFmpeg generates a thumbnail. The backend serves ready videos to any browser connected to the same local instance. Data defaults to `~/.free-me-video`. To reopen an earlier prototype catalog, set `FREEME_DATA_DIR` to its previous directory before starting the backend. The discovery fixtures, persona switching, and monetization screens use sample data.
+The **Create** button opens the upload page. The page accepts a raw MP4 of up to 25 MiB. On mobile, open the account menu and select **Upload video**. Use `npm run dev:web` for the frontend alone, or set `FREEME_VIDEO_ORIGIN` to use an existing video service. The backend processes the first 60 seconds into an adaptive HLS playlist with up to three quality levels, stores media on disk, and records status in SQLite. SQLite stores the upload catalog, and FFmpeg generates a thumbnail. The backend serves ready videos to any browser connected to the same local instance. Data defaults to `~/.free-me-video`. To reopen an earlier prototype catalog, set `FREEME_DATA_DIR` to its previous directory before starting the backend. The discovery fixtures, persona switching, and monetization screens use sample data.
