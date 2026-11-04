@@ -10,6 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream/promises';
 import { defaultUploadLimit, formatUploadLimit } from '../src/services/uploadLimits.mjs';
+import { createUploadSessions, uploadChunkBytes } from './upload-sessions.mjs';
 import { openDatabase } from './database.mjs';
 import { boundedBody } from './request-body.mjs';
 import { createAccounts, readJson } from './accounts.mjs';
@@ -203,14 +204,31 @@ async function upload(request, response, account) {
   void transcode(id, directory, source).catch((error) => console.error('Could not persist processing state:', error.code || error.message)).finally(() => { busy = false; });
 }
 
+const uploads = createUploadSessions({
+  root, maxBytes, limitMessage, categories, json, checkStorage, find: (id) => find.get(id),
+  async complete(response, id, directory, source, { metadata, owner, visibility }) {
+    if (busy) return json(response, 503, { error: 'A video is already being processed. Your file is saved. Retry shortly.' });
+    busy = true;
+    try {
+      await insert.run(id, JSON.stringify(metadata), owner, visibility);
+    } catch (error) {
+      busy = false;
+      throw error;
+    }
+    json(response, 202, { id, statusUrl: '/videos/' + id });
+    void transcode(id, directory, source).catch((error) => console.error('Could not persist processing state:', error.code || error.message)).finally(() => { busy = false; });
+  },
+});
+
 async function handle(request, response) {
   const path = new URL(request.url, 'http://localhost').pathname;
   if (['POST', 'PATCH'].includes(request.method) && ['cross-site', 'same-site'].includes(request.headers['sec-fetch-site'])) {
     return json(response, 403, { error: 'Cross-origin request denied' });
   }
   if (path.startsWith('/account/')) return accounts.handle(request, response, path);
-  if (request.method === 'GET' && path === '/videos/upload-limits') return json(response, 200, { maxBytes });
+  if (request.method === 'GET' && path === '/videos/upload-limits') return json(response, 200, { maxBytes, chunkBytes: uploadChunkBytes });
   const account = await accounts.viewer(request);
+  if (path === '/uploads' || path.startsWith('/uploads/')) return uploads.handle(request, response, path, account);
   if (request.method === 'POST' && path === '/videos') return upload(request, response, account);
   if (request.method === 'GET' && path === '/videos/mine') {
     if (!account) return json(response, 401, { error: 'Sign in to manage uploads.' });

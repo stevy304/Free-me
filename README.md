@@ -146,11 +146,13 @@ community, and payout schema still needs service integration.
 
 The default MP4 limit is 100 GB (100,000,000,000 bytes). Set
 `FREEME_MAX_UPLOAD_BYTES` to a smaller positive byte count for constrained hosts.
-The upload streams to disk and checks free space. Leave room for both the source
-and all HLS renditions. Browser upload progress measures bytes sent, then the
+The browser sends chunks of up to 1 MiB and backs off to smaller requests if the proxy returns HTTP 413. The server writes the chunks to disk and checks free space. Leave room for both the source
+and all HLS renditions. Browser upload progress measures bytes acknowledged by the server, then the
 page switches to processing status. Once accepted, processing continues on the
 server and can be checked in **Creator account & uploads**.
 
-This is one streamed request, so a dropped connection requires restarting the
-upload. Your host and reverse proxy must allow the body size and transfer time,
-and the media volume must have enough space. A 100 GB file was not exercised in CI.
+If a connection drops, reselect the same file in the same browser and submit it
+again. Free Me resumes from the server-confirmed byte offset. The browser stores
+the session ID locally and the server stores partial files on the media volume.
+Keep that volume across restarts. Abandoned sessions currently need operator
+cleanup. A 100 GB file was not exercised in CI.
