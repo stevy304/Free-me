@@ -8,18 +8,19 @@ const destinations = [
   { id: 'studio', label: 'Creator Studio', mobileLabel: 'Studio', icon: BarChart3 },
 ];
 
-export function Sidebar({ currentView, onNavigate }: {
+export function Sidebar({ currentView, expanded, onNavigate }: {
   currentView: string;
+  expanded: boolean;
   onNavigate: (view: string) => void;
 }) {
   return (
-    <nav aria-label="Main navigation" className="discovery-nav">
+    <nav id="main-navigation" aria-label="Main navigation" className={`discovery-nav ${expanded ? 'is-expanded' : ''}`}>
       {destinations.map(({ id, label, mobileLabel, icon: Icon }) => (
         <button key={id} type="button" aria-current={currentView === id ? 'page' : undefined}
           onClick={() => onNavigate(id)}>
           <Icon aria-hidden="true" size={21} />
-          <span className={mobileLabel ? 'hidden md:inline' : undefined}>{label}</span>
-          {mobileLabel && <span className="md:hidden">{mobileLabel}</span>}
+          <span className={mobileLabel ? 'nav-long-label' : undefined}>{label}</span>
+          {mobileLabel && <span className="nav-short-label">{mobileLabel}</span>}
         </button>
       ))}
     </nav>
