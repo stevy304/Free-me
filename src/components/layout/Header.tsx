@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { Bell, ChevronDown, Search, Upload } from 'lucide-react';
+import { Bell, EllipsisVertical, Plus, Search } from 'lucide-react';
 import { User } from '../../types';
 
 interface HeaderProps {
   currentUser: User;
+  navigationExpanded: boolean;
+  onToggleNavigation: () => void;
   recentUploads: string[];
   users: User[];
   onSelectUser: (user: User) => void;
@@ -20,6 +22,8 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   currentUser,
+  navigationExpanded,
+  onToggleNavigation,
   recentUploads,
   users,
   onSelectUser,
@@ -45,22 +49,27 @@ export const Header: React.FC<HeaderProps> = ({
         setShowNotifications(false);
       }
     }}>
-      <button className="discovery-brand" onClick={() => onNavigate('home')} aria-label="Free Me home">
-        <img src="/free-me.svg" alt="" />
-        <span>Free Me</span>
-      </button>
+      <div className="discovery-brand-group">
+        <button type="button" id="navigation-toggle" className="discovery-icon-button"
+          aria-label="Navigation menu" aria-controls="main-navigation" aria-expanded={navigationExpanded}
+          onClick={() => { setMobileSearch(false); onToggleNavigation(); }}><EllipsisVertical size={23} aria-hidden="true" /></button>
+        <button className="discovery-brand" onClick={() => onNavigate('home')} aria-label="Free Me home">
+          <img src="/free-me.svg" alt="" />
+          <span>Free Me</span>
+        </button>
+      </div>
       <form className={`discovery-search ${mobileSearch ? 'is-open' : ''}`} role="search" onSubmit={(event) => {
         onSearchSubmit(event);
         setMobileSearch(false);
       }}>
-        <Search size={21} aria-hidden="true" />
-        <input type="search" aria-label="Search Free Me" placeholder="Search Free Me" value={searchQuery}
+        <input type="search" aria-label="Search Free Me" placeholder="Search" value={searchQuery}
           onChange={(event) => onSearchChange(event.target.value)} />
+        <button type="submit" aria-label="Submit search"><Search size={21} aria-hidden="true" /></button>
       </form>
       <div className="discovery-actions">
         <button className="discovery-search-toggle" aria-label="Toggle search" aria-expanded={mobileSearch}
           onClick={() => setMobileSearch(!mobileSearch)}><Search size={23} /></button>
-        <button className="discovery-upload" onClick={onOpenUpload}><Upload size={19} /> Upload</button>
+        <button className="discovery-upload" onClick={onOpenUpload}><Plus size={21} aria-hidden="true" /> Create</button>
         <div className="relative hidden md:block">
           <button aria-label="Notifications" aria-expanded={showNotifications} className="relative"
             onClick={() => { setShowNotifications(!showNotifications); setShowUserDropdown(false); }}>
@@ -79,7 +88,6 @@ export const Header: React.FC<HeaderProps> = ({
           <button className="discovery-account" aria-label="Account and settings" aria-expanded={showUserDropdown}
             onClick={() => { setShowUserDropdown(!showUserDropdown); setShowNotifications(false); }}>
             <img src={currentUser.avatarUrl} alt="" referrerPolicy="no-referrer" />
-            <ChevronDown size={16} className="hidden md:block" />
           </button>
           {showUserDropdown && (
             <div className="discovery-account-menu">

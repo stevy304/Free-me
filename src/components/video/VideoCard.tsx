@@ -32,23 +32,29 @@ export function VideoCard({ video, onSelect, onSelectChannel }: {
         ) : <Play size={36} aria-hidden="true" />}
         {!position && video.durationSeconds > 0 && <span className="discovery-duration">{duration}</span>}
       </button>
-      <div className="discovery-card-heading">
-        <button className="discovery-title" onClick={() => onSelect(video)}>{video.title}</button>
-        <details className="discovery-card-menu">
-          <summary aria-label={`Options for ${video.title}`}><EllipsisVertical size={17} /></summary>
+      <div className="discovery-card-info">
+        {openChannel ? (
+          <button className="discovery-avatar" onClick={() => openChannel(video.channelId)} aria-label={`Visit ${video.channelName}`}>
+            <img src={video.channelAvatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
+          </button>
+        ) : <img className="discovery-avatar" src={video.channelAvatarUrl} alt="" loading="lazy" />}
+        <div className="discovery-card-heading">
+          <button className="discovery-title" onClick={() => onSelect(video)}>{video.title}</button>
+          <details className="discovery-card-menu">
+            <summary aria-label={`Options for ${video.title}`}><EllipsisVertical size={18} /></summary>
+            <div>
+              <button onClick={() => onSelect(video)}>Watch video</button>
+              {openChannel && <button onClick={() => openChannel(video.channelId)}>Visit channel</button>}
+            </div>
+          </details>
+        </div>
+        <div className="discovery-meta">
           <div>
-            <button onClick={() => onSelect(video)}>Watch video</button>
-            {openChannel && <button onClick={() => openChannel(video.channelId)}>Visit channel</button>}
+            {openChannel ? <button onClick={() => openChannel(video.channelId)}>{video.channelName}</button> : <span>{video.channelName}</span>}
+            {video.channelVerified && <BadgeCheck size={14} className="discovery-verified" aria-label="Verified" />}
           </div>
-        </details>
-      </div>
-      <div className="discovery-meta">
-        {openChannel ? <button onClick={() => openChannel(video.channelId)} aria-label={`Visit ${video.channelName}`}>
-          <img src={video.channelAvatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
-          <span>{video.channelName}</span>
-        </button> : <span>{video.channelName}</span>}
-        {video.channelVerified && <BadgeCheck size={14} className="discovery-verified" aria-label="Verified" />}
-        <span>· {views.format(video.viewCount)} views · {video.createdAt}</span>
+          <div>{views.format(video.viewCount)} views{video.createdAt && ' · ' + video.createdAt}</div>
+        </div>
       </div>
     </article>
   );

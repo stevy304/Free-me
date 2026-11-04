@@ -60,7 +60,7 @@ import {
 export default function App() {
   // Theme & Currency
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem('free-me-theme') === 'dark';
+    return localStorage.getItem('free-me-theme') !== 'light';
   });
   const [currency, setCurrency] = useState<'RWF' | 'USD'>('RWF');
 
@@ -102,6 +102,19 @@ export default function App() {
   const [subscribedChannelIds, setSubscribedChannelIds] = useState<string[]>(['chan_clarisse']);
 
   // Navigation & View
+  const [navigationExpanded, setNavigationExpanded] = useState(false);
+  useEffect(() => {
+    if (!navigationExpanded) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setNavigationExpanded(false);
+        document.getElementById('navigation-toggle')?.focus();
+      }
+    };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [navigationExpanded]);
+
   const [route, setRoute] = useState(() => readRoute(window.location));
   const currentView = route.view;
   const selectedVideoId = route.view === 'watch' ? route.id : null;
@@ -170,6 +183,7 @@ export default function App() {
   const toggleCurrency = () => setCurrency((prev) => (prev === 'RWF' ? 'USD' : 'RWF'));
 
   const handleNavigate = (view: string, value?: string) => {
+    setNavigationExpanded(false);
     const url = pageUrl(view, value);
     if (window.location.pathname + window.location.search !== url) window.history.pushState(null, '', url);
     setRoute(readRoute(window.location));
@@ -493,6 +507,8 @@ export default function App() {
       {/* Top Bar adhering to Top Bar Contract */}
       <Header
         currentUser={currentUser}
+        navigationExpanded={navigationExpanded}
+        onToggleNavigation={() => setNavigationExpanded((expanded) => !expanded)}
         recentUploads={videos.filter((video) => video.videoUrl.startsWith('/api/media/')).slice(0, 3).map((video) => video.title)}
         users={users}
         onSelectUser={(u) => {
@@ -517,11 +533,17 @@ export default function App() {
       />
 
       <div className={`flex-1 flex ${currentView === 'watch' ? 'watch-layout' : ''}`}>
-        <Sidebar currentView={currentView} onNavigate={handleNavigate} />
+        {navigationExpanded && <div className="navigation-backdrop" aria-hidden="true"
+          onClick={() => {
+            setNavigationExpanded(false);
+            document.getElementById('navigation-toggle')?.focus();
+          }} />}
+        <Sidebar currentView={currentView} expanded={navigationExpanded} onNavigate={handleNavigate} />
         <main className="flex-1 min-w-0 pb-16">
           {(currentView === 'home' || currentView === 'explore' || route.view === 'search') && (
             <DiscoveryPage
               title={route.view === 'search' ? `Search results for “${route.query}”` : currentView === 'explore' ? 'Explore Free Me' : 'Discover Free Me'}
+              compactHeading={currentView === 'home'}
               category={selectedCategory} onCategory={setSelectedCategory}
               videos={filteredVideos} onSelectVideo={handleSelectVideo} onSelectChannel={handleSelectChannel}
             />

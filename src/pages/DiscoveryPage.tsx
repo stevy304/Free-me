@@ -2,7 +2,7 @@ import { VideoCard } from '../components/video/VideoCard';
 import type { Video } from '../types';
 
 const categories = [
-  ['All Categories', 'For you'],
+  ['All Categories', 'All'],
   ['Music & Performance', 'Music'],
   ['Culinary & Coffee', 'Culture'],
   ['Tech & Innovation', 'Tech'],
@@ -11,9 +11,10 @@ const categories = [
 
 export function DiscoveryPage({
   title, videos, category, onCategory, onSelectVideo, onSelectChannel,
-  emptyMessage = 'No videos match this search.',
+  compactHeading = false, emptyMessage = 'No videos match this search.',
 }: {
   title: string;
+  compactHeading?: boolean;
   videos: Video[];
   category?: string;
   onCategory?: (category: string) => void;
@@ -23,7 +24,7 @@ export function DiscoveryPage({
 }) {
   return (
     <section className="discovery-feed">
-      <h1>{title}</h1>
+      <h1 className={compactHeading ? 'sr-only' : undefined}>{title}</h1>
       {onCategory && (
         <div className="discovery-categories" aria-label="Video categories">
           {categories.map(([value, label]) => (
