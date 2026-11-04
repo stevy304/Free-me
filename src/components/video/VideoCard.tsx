@@ -18,6 +18,7 @@ export function VideoCard({ video, onSelect, onSelectChannel }: {
   onSelectChannel?: (channelId: string) => void;
 }) {
   const position = artwork[video.id];
+  const openChannel = video.channelId !== 'local-uploads' ? onSelectChannel : undefined;
   const duration = `${Math.floor(video.durationSeconds / 60)}:${String(Math.floor(video.durationSeconds % 60)).padStart(2, '0')}`;
   return (
     <article className="discovery-card">
@@ -37,15 +38,15 @@ export function VideoCard({ video, onSelect, onSelectChannel }: {
           <summary aria-label={`Options for ${video.title}`}><EllipsisVertical size={17} /></summary>
           <div>
             <button onClick={() => onSelect(video)}>Watch video</button>
-            {onSelectChannel && <button onClick={() => onSelectChannel(video.channelId)}>Visit channel</button>}
+            {openChannel && <button onClick={() => openChannel(video.channelId)}>Visit channel</button>}
           </div>
         </details>
       </div>
       <div className="discovery-meta">
-        <button onClick={() => onSelectChannel?.(video.channelId)} aria-label={`Visit ${video.channelName}`}>
+        {openChannel ? <button onClick={() => openChannel(video.channelId)} aria-label={`Visit ${video.channelName}`}>
           <img src={video.channelAvatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
           <span>{video.channelName}</span>
-        </button>
+        </button> : <span>{video.channelName}</span>}
         {video.channelVerified && <BadgeCheck size={14} className="discovery-verified" aria-label="Verified" />}
         <span>· {views.format(video.viewCount)} views · {video.createdAt}</span>
       </div>

@@ -101,4 +101,4 @@ node prototypes/video-backend.mjs
 npm run dev
 ```
 
-The **Upload** button accepts a raw MP4 of up to 25 MiB. On mobile, open the account menu to find it. The backend processes the first 60 seconds into a single HLS rendition, stores media on disk, and records status in SQLite. The browser saves uploaded titles and descriptions locally. The discovery fixtures, persona switching, and monetization screens use sample data.
+The **Upload** button accepts a raw MP4 of up to 25 MiB. On mobile, open the account menu to find it. The backend processes the first 60 seconds into a single HLS rendition, stores media on disk, and records status in SQLite. SQLite stores the upload catalog, and FFmpeg generates a thumbnail. The backend serves ready videos to any browser connected to the same local instance. Data defaults to `~/.free-me-video`. To reopen an earlier prototype catalog, set `FREEME_DATA_DIR` to its previous directory before starting the backend. The discovery fixtures, persona switching, and monetization screens use sample data.
