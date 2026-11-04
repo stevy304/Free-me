@@ -31,6 +31,7 @@ export function UploadPage({ onBack, onUploadComplete }: {
     try {
       const response = await fetch('/api/videos', { method: 'POST', headers: {
         'Content-Type': 'video/mp4',
+        'X-Video-Visibility': String(form.get('visibility')),
         'X-Video-Title': encodeURIComponent(title),
         'X-Video-Description': encodeURIComponent(String(form.get('description') || '').trim()),
         'X-Video-Category': encodeURIComponent(String(form.get('category'))),
@@ -87,6 +88,9 @@ export function UploadPage({ onBack, onUploadComplete }: {
             <h2>Video details</h2>
             <label>Title <span aria-hidden="true">*</span><input name="title" placeholder="Give your video a clear title" maxLength={120} required /></label>
             <label>Description <span className="upload-optional">Optional</span><textarea name="description" placeholder="Tell viewers what the video is about" maxLength={1000} rows={4} /></label>
+            <label>Visibility
+              <select name="visibility"><option value="private">Private · only you</option><option value="public">Public · anyone</option></select>
+            </label>
             <label>Category
               <select name="category">
                 {['Kigali Life', 'Tech & Innovation', 'Wildlife & Safari', 'Music & Performance', 'Culinary & Coffee'].map((category) => <option key={category}>{category}</option>)}
