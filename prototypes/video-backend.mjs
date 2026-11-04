@@ -3,12 +3,13 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, writeFile, rename, unlink, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, unlink, stat, statfs, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream/promises';
+import { defaultUploadLimit, formatUploadLimit } from '../src/services/uploadLimits.mjs';
 import { openDatabase } from './database.mjs';
 import { boundedBody } from './request-body.mjs';
 import { createAccounts, readJson } from './accounts.mjs';
@@ -16,7 +17,32 @@ import { createAccounts, readJson } from './accounts.mjs';
 const run = promisify(execFile);
 const root = resolve(process.env.FREEME_DATA_DIR || join(homedir(), '.free-me-video'));
 const port = Number(process.env.PORT || 4400);
-const maxBytes = 25 * 1024 * 1024;
+const maxBytes = Number(process.env.FREEME_MAX_UPLOAD_BYTES ?? defaultUploadLimit);
+if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > defaultUploadLimit) {
+  throw new Error('FREEME_MAX_UPLOAD_BYTES must be a positive integer up to 100000000000.');
+}
+const limitMessage = 'Upload limit is ' + formatUploadLimit(maxBytes);
+const storageReserve = 512 * 1024 * 1024;
+const day = 24 * 60 * 60 * 1000;
+
+async function checkStorage(bytes = 0) {
+  const { bavail, bsize } = await statfs(root);
+  if (bavail * bsize < bytes + storageReserve) {
+    throw Object.assign(new Error('The server does not have enough free media storage for this upload.'), { status: 507 });
+  }
+}
+
+async function* uploadBody(request) {
+  let unchecked = 0;
+  for await (const chunk of boundedBody(request, maxBytes, limitMessage)) {
+    unchecked += chunk.length;
+    if (unchecked >= 64 * 1024 * 1024) {
+      await checkStorage(chunk.length);
+      unchecked = 0;
+    }
+    yield chunk;
+  }
+}
 await Promise.all([run('ffmpeg', ['-version']), run('ffprobe', ['-version'])]);
 await mkdir(root, { recursive: true });
 const db = await openDatabase(join(root, 'videos.sqlite'));
@@ -67,7 +93,7 @@ async function encodeRendition(source, directory, { height, bitrate }) {
   await run('ffmpeg', [
     '-nostdin', '-y', '-loglevel', 'error', '-protocol_whitelist', 'file',
     '-f', 'mov', '-i', source, '-map', '0:v:0', '-map', '0:a:0?',
-    '-t', '60', '-vf', `scale=-2:min(${height}\\,ih)`, '-threads', '2',
+    '-vf', `scale=-2:min(${height}\\,ih)`, '-threads', '2',
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
     '-b:v', bitrate + 'k', '-maxrate', bitrate + 'k', '-bufsize', (bitrate * 2) + 'k',
     '-c:a', 'aac', '-b:a', '96k', '-flags', '+cgop',
@@ -75,20 +101,22 @@ async function encodeRendition(source, directory, { height, bitrate }) {
     '-hls_time', '4', '-hls_playlist_type', 'vod', '-hls_flags', 'independent_segments+temp_file',
     '-hls_segment_filename', join(directory, name + '-%03d.ts'),
     join(directory, manifest),
-  ], { timeout: 120_000 });
+  ], { timeout: day });
 
   const playlist = await readFile(join(directory, manifest), 'utf8');
-  const segments = await Promise.all([...playlist.matchAll(/^#EXTINF:([\d.]+),\r?\n([^\r\n]+)/gm)]
-    .map(async ([, seconds, filename]) => ({
-      duration: Number(seconds),
-      bits: (await stat(join(directory, filename))).size * 8,
-    })));
-  const duration = segments.reduce((total, segment) => total + segment.duration, 0);
-  if (!(duration > 0) || segments.some((segment) => segment.duration <= 0 || segment.bits <= 0)) {
-    throw new Error('HLS playlist contains an invalid segment');
+  let duration = 0;
+  let totalBits = 0;
+  let bandwidth = 0;
+  for (const [, seconds, filename] of playlist.matchAll(/^#EXTINF:([\d.]+),\r?\n([^\r\n]+)/gm)) {
+    const segmentDuration = Number(seconds);
+    const bits = (await stat(join(directory, filename))).size * 8;
+    if (segmentDuration <= 0 || bits <= 0) throw new Error('HLS playlist contains an invalid segment');
+    duration += segmentDuration;
+    totalBits += bits;
+    bandwidth = Math.max(bandwidth, Math.ceil(bits / segmentDuration));
   }
-  const bandwidth = Math.ceil(Math.max(...segments.map((segment) => segment.bits / segment.duration)));
-  const average = Math.ceil(segments.reduce((total, segment) => total + segment.bits, 0) / duration);
+  if (!(duration > 0)) throw new Error('HLS playlist contains no segments');
+  const average = Math.ceil(totalBits / duration);
   return { manifest, bandwidth, average, duration };
 }
 
@@ -126,11 +154,11 @@ async function transcode(id, directory, source) {
     await writeFile(join(directory, 'index.m3u8.tmp'), master);
     await rename(join(directory, 'index.m3u8.tmp'), join(directory, 'index.m3u8'));
     await update.run('ready', renditions[0].duration, id);
+    await unlink(source).catch((error) => console.error('Source cleanup failed:', error.code));
   } catch (error) {
     console.error('Transcode failed', id, error.message);
     await update.run('failed', null, id);
-  } finally {
-    await unlink(source).catch((error) => { if (error.code !== 'ENOENT') console.error(error.message); });
+    await rm(directory, { recursive: true, force: true }).catch((failure) => console.error('Failed upload cleanup:', failure.code));
   }
 }
 
@@ -142,7 +170,7 @@ async function upload(request, response, account) {
     return json(response, 415, { error: 'Send a raw video/mp4 body' });
   }
   if (Number(request.headers['content-length']) > maxBytes) {
-    return json(response, 413, { error: 'Upload limit is 25 MiB' });
+    return json(response, 413, { error: limitMessage });
   }
   if (busy) return json(response, 503, { error: 'A video is already being processed' });
 
@@ -162,16 +190,17 @@ async function upload(request, response, account) {
   const directory = join(root, id);
   const source = join(directory, 'source.mp4');
   try {
+    await checkStorage(Number(request.headers['content-length']) || 0);
     await mkdir(directory);
-    await pipeline(boundedBody(request, maxBytes, 'Upload limit is 25 MiB'), createWriteStream(source, { flags: 'wx' }));
+    await pipeline(uploadBody(request), createWriteStream(source, { flags: 'wx' }));
     await insert.run(id, JSON.stringify(metadata), account.id, visibility);
   } catch (error) {
-    await unlink(source).catch(() => {});
+    await rm(directory, { recursive: true, force: true }).catch(() => {});
     busy = false;
     throw error;
   }
   json(response, 202, { id, status: 'processing', statusUrl: '/videos/' + id });
-  void transcode(id, directory, source).finally(() => { busy = false; });
+  void transcode(id, directory, source).catch((error) => console.error('Could not persist processing state:', error.code || error.message)).finally(() => { busy = false; });
 }
 
 async function handle(request, response) {
@@ -180,6 +209,7 @@ async function handle(request, response) {
     return json(response, 403, { error: 'Cross-origin request denied' });
   }
   if (path.startsWith('/account/')) return accounts.handle(request, response, path);
+  if (request.method === 'GET' && path === '/videos/upload-limits') return json(response, 200, { maxBytes });
   const account = await accounts.viewer(request);
   if (request.method === 'POST' && path === '/videos') return upload(request, response, account);
   if (request.method === 'GET' && path === '/videos/mine') {
@@ -196,7 +226,7 @@ async function handle(request, response) {
     }
   }
   const status = /^\/videos\/([a-f0-9-]{36})$/.exec(path);
-  const media = /^\/media\/([a-f0-9-]{36})\/(index\.m3u8|poster\.jpg|segment-\d{3}\.ts|(?:240|360|720)p(?:\.m3u8|-\d{3}\.ts))$/.exec(path);
+  const media = /^\/media\/([a-f0-9-]{36})\/(index\.m3u8|poster\.jpg|segment-\d{3,}\.ts|(?:240|360|720)p(?:\.m3u8|-\d{3,}\.ts))$/.exec(path);
   const match = status || media;
   const video = match && await find.get(match[1]);
   if (!video || (video.visibility === 'private' && (!account || account.id !== video.owner_id))) {
@@ -228,12 +258,12 @@ async function handle(request, response) {
 }
 
 
-const server = createServer({ requestTimeout: 120_000 }, (request, response) => {
+const server = createServer({ requestTimeout: day, headersTimeout: 60_000 }, (request, response) => {
   handle(request, response).catch((error) => {
     if (response.headersSent || response.destroyed) return response.destroy();
-    if (error.status === 413) response.setHeader('Connection', 'close');
+    if (error.status === 413 || error.status === 507 || error.code === 'ENOSPC') response.setHeader('Connection', 'close');
     console.error(error.message);
-    json(response, error.status || (error.code === 'ENOENT' ? 404 : 500), { error: error.status ? error.message : 'Request failed' });
+    json(response, error.status || (error.code === 'ENOSPC' ? 507 : error.code === 'ENOENT' ? 404 : 500), { error: error.status ? error.message : error.code === 'ENOSPC' ? 'The server ran out of media storage.' : 'Request failed' });
   });
 });
 server.on('error', async (error) => {

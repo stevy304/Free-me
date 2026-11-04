@@ -12,7 +12,7 @@ const run = promisify(execFile);
 test('private playback and editing require the owning account', { timeout: 30_000 }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'free-me-ownership-'));
   const child = spawn(process.execPath, ['prototypes/video-backend.mjs'], {
-    env: { ...process.env, PORT: '0', FREEME_DATA_DIR: directory },
+    env: { ...process.env, PORT: '0', FREEME_DATA_DIR: directory, FREEME_MAX_UPLOAD_BYTES: String(25 * 1024 * 1024) },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   const exited = once(child, 'exit');
@@ -56,7 +56,7 @@ test('private playback and editing require the owning account', { timeout: 30_00
   const owner = await register('owner@example.test');
   const outsider = await register('outsider@example.test');
   const file = join(directory, 'clip.mp4');
-  await run('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'color=s=640x360:d=1', '-c:v', 'libx264', file]);
+  await run('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'color=s=320x240:r=2:d=64', '-c:v', 'libx264', file]);
   const uploadOptions = {
     method: 'POST', body: await readFile(file),
     headers: { 'Content-Type': 'video/mp4', 'X-Video-Title': 'Owner clip' },
@@ -82,6 +82,7 @@ test('private playback and editing require the owning account', { timeout: 30_00
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.equal(video.status, 'ready');
+  assert.ok(video.durationSeconds >= 64, 'full video is transcoded');
   assert.equal(video.visibility, 'private');
   const prefix = video.playlistUrl.replace(/index\.m3u8$/, '');
   for (const path of [statusUrl, video.thumbnailUrl, video.playlistUrl, prefix + '240p.m3u8', prefix + '240p-000.ts']) {
