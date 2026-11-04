@@ -1,5 +1,6 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
+import { boundedBody } from './request-body.mjs';
 
 const derive = promisify(scrypt);
 const lifetime = 7 * 86400;
@@ -11,12 +12,11 @@ export async function readJson(request) {
   if (request.headers['content-type']?.split(';')[0] !== 'application/json') {
     throw Object.assign(new Error('Send application/json'), { status: 415 });
   }
-  const length = Number(request.headers['content-length']);
-  if (!Number.isInteger(length) || length < 1 || length > 8192) {
-    throw Object.assign(new Error('Invalid JSON body size'), { status: 400 });
+  if (Number(request.headers['content-length']) > 8192) {
+    throw Object.assign(new Error('JSON body exceeds 8 KiB'), { status: 413 });
   }
   const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
+  for await (const chunk of boundedBody(request, 8192, 'JSON body exceeds 8 KiB')) chunks.push(chunk);
   try {
     const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error();
