@@ -71,10 +71,11 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   return (
     <div>
       {/* Stage: the video on a dark band, lit softly by the brand colour. */}
-      <section className="relative bg-stage px-0 pb-9 pt-0 sm:px-6 sm:pt-5" style={{ backgroundImage: 'radial-gradient(ellipse at 50% 35%, rgb(12 130 126 / 0.32), transparent 62%)' }}>
-        <div className={`mx-auto transition-[max-width] duration-300 ${theater ? 'max-w-[min(1700px,calc((100dvh-9rem)*16/9))]' : 'max-w-[min(1120px,calc((100dvh-11rem)*16/9))]'}`}>{player}</div>
+      {/* Phones: the video sticks to the top, edge to edge, while the page scrolls under it. */}
+      <section className="sticky top-0 z-30 bg-stage sm:relative sm:z-auto sm:px-6 sm:pb-9 sm:pt-3" style={{ backgroundImage: 'radial-gradient(ellipse at 50% 35%, rgb(12 130 126 / 0.32), transparent 62%)' }}>
+        <div className={`mx-auto transition-[max-width] duration-300 ${theater ? 'sm:max-w-[min(1800px,calc((100dvh-6rem)*16/9))]' : 'sm:max-w-[min(1280px,calc((100dvh-8.5rem)*16/9))]'}`}>{player}</div>
         {/* Action dock: floats over the bottom edge of the stage. */}
-        <div className="absolute bottom-0 left-1/2 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-1/2 items-center gap-1.5 overflow-x-auto rounded-[18px] border border-line bg-elevated p-1.5 shadow-[var(--shadow)] no-scrollbar">
+        <div className="absolute bottom-0 left-1/2 hidden max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-1/2 items-center sm:flex gap-1.5 overflow-x-auto rounded-[18px] border border-line bg-elevated p-1.5 shadow-[var(--shadow)] no-scrollbar">
           <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Spark (${likes})`} className={`${dockBtn} ${reaction === 'like' ? 'bg-accent-soft text-on-accent-soft' : 'hover:bg-surface'}`}>
             <Icon.Spark size={20} filled={reaction === 'like'} className={reaction === 'like' ? 'text-accent' : ''} />Spark<span suppressHydrationWarning>{likes > 0 ? ` · ${compactNumber(likes, locale)}` : ''}</span>
           </button>
@@ -87,7 +88,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
         {menu && (
           <>
             <div className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
-            <div role="menu" className="absolute bottom-0 left-1/2 z-40 w-[240px] translate-x-[60px] translate-y-[calc(100%+30px)] rounded-2xl border border-line bg-elevated p-1.5 shadow-[var(--shadow)]">
+            <div role="menu" className="fixed inset-x-3 bottom-3 z-40 rounded-2xl sm:absolute sm:inset-x-auto sm:bottom-0 sm:left-1/2 sm:w-[240px] sm:translate-x-[60px] sm:translate-y-[calc(100%+30px)] border border-line bg-elevated p-1.5 shadow-[var(--shadow)]">
               {!initialViewer.isOwner && <button type="button" role="menuitemcheckbox" aria-checked={reaction === 'dislike'} onClick={() => { setMenu(false); void react('dislike'); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] hover:bg-surface"><Icon.NotForMe size={20} filled={reaction === 'dislike'} /><span className="flex-1 text-left">Not for me</span><span className="text-[11px] text-muted">private</span></button>}
               {!initialViewer.isOwner && <button type="button" role="menuitem" onClick={() => need('report')} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] hover:bg-surface"><Icon.Flag size={20} />Report</button>}
               {!initialViewer.isOwner && <Link role="menuitem" href={`/legal/copyright/notice?v=${v.id}`} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] hover:bg-surface"><Icon.Copyright size={20} />Copyright notice</Link>}
@@ -98,8 +99,8 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
       </section>
       {error && <p role="alert" className="mx-auto mt-10 max-w-[1120px] px-4 text-[13px] text-danger">{error}</p>}
 
-      <div className="mx-auto mt-12 grid max-w-[1120px] gap-8 px-4 sm:px-6 lg:grid-cols-[300px_1fr]">
-        <aside className="h-fit rounded-[20px] border border-line bg-elevated p-4 lg:sticky lg:top-20">
+      <div className="mx-auto mt-4 grid max-w-[1280px] gap-8 px-4 sm:mt-12 sm:px-6 lg:grid-cols-[300px_1fr]">
+        <aside className="hidden h-fit rounded-[20px] border border-line bg-elevated p-4 sm:block lg:sticky lg:top-20">
           <Link href={`/@${v.channel.handle}`} className="flex items-center gap-3">
             <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={52} />
             <div className="min-w-0"><p className="flex items-center gap-1 truncate font-display text-[17px] font-bold">{v.channel.name}{v.channel.isVerified && <Icon.Verified size={15} aria-label="Verified" className="text-brand" />}</p><p className="text-[13px] text-muted" suppressHydrationWarning>@{v.channel.handle} · {followersLabel(v.channel.followerCount, locale)}</p></div>
@@ -112,7 +113,24 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
         </aside>
         <div className="min-w-0">
           <p className="text-[13px] font-semibold text-brand">{v.category ? <><Link href={`/explore?topic=${v.category.slug}`} className="hover:underline">{v.category.name}</Link> · </> : null}{meta}</p>
-          <h1 className="mt-1.5 text-[26px] font-extrabold leading-[1.15] sm:text-[32px]">{v.title}</h1>
+          <h1 className="mt-1 text-[19px] font-extrabold leading-[1.2] sm:mt-1.5 sm:text-[32px] sm:leading-[1.15]">{v.title}</h1>
+          {/* Phones: creator row and a scrolling row of actions, under the title. */}
+          <div className="mt-3 flex items-center gap-3 sm:hidden">
+            <Link href={`/@${v.channel.handle}`} className="flex min-w-0 flex-1 items-center gap-2.5">
+              <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={38} />
+              <div className="min-w-0"><p className="truncate text-[15px] font-semibold">{v.channel.name}</p><p className="text-[12px] text-muted" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</p></div>
+            </Link>
+            {initialViewer.isOwner
+              ? <Link href="/hub" className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-surface px-3 text-[13px] font-semibold"><Icon.Hub size={16} />Hub</Link>
+              : <FollowButton handle={v.channel.handle} initial={initialViewer.following} initialCount={v.channel.followerCount} />}
+          </div>
+          <div className="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 sm:hidden">
+            <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-3 text-[13px] font-semibold ${reaction === 'like' ? 'bg-accent-soft text-on-accent-soft' : 'bg-surface'}`}><Icon.Spark size={17} filled={reaction === 'like'} className={reaction === 'like' ? 'text-accent' : ''} /><span suppressHydrationWarning>{likes > 0 ? compactNumber(likes, locale) : 'Spark'}</span></button>
+            {!initialViewer.isOwner && <button type="button" onClick={() => react('dislike')} aria-pressed={reaction === 'dislike'} aria-label="Not for me" className={`flex h-9 shrink-0 items-center rounded-xl px-3 ${reaction === 'dislike' ? 'bg-brand-soft text-brand' : 'bg-surface'}`}><Icon.NotForMe size={17} filled={reaction === 'dislike'} /></button>}
+            <button type="button" onClick={() => need('save')} aria-pressed={saved} className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-3 text-[13px] font-semibold ${saved ? 'bg-brand-soft text-brand' : 'bg-surface'}`}><Icon.Bookmark size={17} filled={saved} />{saved ? 'Kept' : 'Keep'}</button>
+            <button type="button" onClick={share} className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-surface px-3 text-[13px] font-semibold"><Icon.PassAlong size={17} />{copied ? 'Copied' : 'Pass along'}</button>
+            <button type="button" onClick={() => setMenu(true)} aria-label="More actions" className="flex h-9 shrink-0 items-center rounded-xl bg-surface px-3"><Icon.More size={17} /></button>
+          </div>
           <div role="tablist" className="mt-5 flex gap-1 border-b border-line">
             {tabBtn('about', 'About')}{tabBtn('conversation', v.commentsOpen ? `Conversation · ${compactNumber(v.commentCount, locale)}` : 'Conversation')}{more.length > 0 && tabBtn('next', 'Keep watching')}
           </div>

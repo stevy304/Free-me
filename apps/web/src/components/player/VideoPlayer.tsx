@@ -118,6 +118,24 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const setVol = (v: number, m = v === 0) => { const el = video.current!; el.volume = v; el.muted = m; setVolume(v); setMuted(m); store.set('fm_volume', String(v)); store.set('fm_muted', m ? '1' : '0'); };
   const setRate = (s: number) => { video.current!.playbackRate = s; setSpeed(s); store.set('fm_speed', String(s)); };
   const chooseLevel = (i: number) => { if (hls.current) { hls.current.currentLevel = i; hls.current.loadLevel = i; } setLevel(i); setMenu(null); };
+  // Phones: a tap shows or hides the controls (it does not pause); a double tap on the left or right third skips 10 s.
+  const lastTap = useRef<{ t: number; x: number } | null>(null);
+  const [skip, setSkip] = useState<null | 'back' | 'fwd'>(null);
+  const onTap = (e: React.PointerEvent<HTMLVideoElement>) => {
+    if (e.pointerType !== 'touch') return;
+    e.preventDefault();
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width;
+    const now = Date.now();
+    if (lastTap.current && now - lastTap.current.t < 300 && (x < 0.35 || x > 0.65)) {
+      const el = video.current!;
+      el.currentTime = Math.max(0, Math.min((el.duration || duration) - 0.1, el.currentTime + (x < 0.5 ? -10 : 10)));
+      setSkip(x < 0.5 ? 'back' : 'fwd'); setTimeout(() => setSkip(null), 550);
+      lastTap.current = null; poke(); return;
+    }
+    lastTap.current = { t: now, x };
+    if (idle || !playing) poke(); else { setIdle(true); setMenu(null); }
+  };
   const fullscreen = () => { if (document.fullscreenElement) void document.exitFullscreen(); else void box.current?.requestFullscreen?.(); };
   const pip = async () => { const el = video.current!; try { if (document.pictureInPictureElement) await document.exitPictureInPicture(); else await el.requestPictureInPicture(); } catch { /* not allowed */ } };
 
@@ -178,17 +196,24 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
 
   return (
     <div ref={box} onMouseMove={poke} onMouseLeave={() => playing && setIdle(true)}
-      className={`group relative aspect-video w-full select-none overflow-hidden bg-black ${full ? '' : 'rounded-[24px]'} ${showUi ? '' : 'cursor-none'}`}>
-      <video ref={video} playsInline poster={poster ?? undefined} className="h-full w-full" onClick={toggle} onDoubleClick={fullscreen}
+      className={`group relative aspect-video w-full select-none overflow-hidden bg-black ${full ? '' : 'sm:rounded-[24px]'} ${showUi ? '' : 'cursor-none'}`}>
+      <video ref={video} playsInline poster={poster ?? undefined} className="h-full w-full" onPointerUp={onTap} onClick={(e) => { if ((e.nativeEvent as PointerEvent).pointerType === 'touch') return; toggle(); }} onDoubleClick={(e) => { if ((e.nativeEvent as PointerEvent).pointerType === 'touch') return; fullscreen(); }}
         onPlay={() => setPlaying(true)} onPause={() => { setPlaying(false); save(); }} onWaiting={() => setWaiting(true)} onPlaying={() => setWaiting(false)} onCanPlay={() => setWaiting(false)}
         onTimeUpdate={onTime} onDurationChange={(e) => setDuration(e.currentTarget.duration)} onEnded={() => { setPlaying(false); save(true); onEnded?.(); }}
         onVolumeChange={(e) => { setMuted(e.currentTarget.muted); setVolume(e.currentTarget.volume); }} />
       {waiting && !error && <Icon.Spinner className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/90" />}
       {flash && <div className="pointer-events-none absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 animate-ping place-items-center rounded-full bg-[rgb(43_181_171/0.6)] text-white [animation-iteration-count:1]">{flash === 'play' ? <Icon.Play size={30} /> : <Icon.Pause size={30} />}</div>}
+      {!playing && !waiting && !error && showUi && (
+        <button type="button" onClick={toggle} aria-label="Play" className="absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[rgb(16_32_31/0.6)] text-white backdrop-blur sm:hidden"><Icon.Play size={30} /></button>
+      )}
+      {playing && showUi && !menu && !error && !waiting && (
+        <button type="button" onClick={toggle} aria-label="Pause" className="absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[rgb(16_32_31/0.6)] text-white backdrop-blur sm:hidden"><Icon.Pause size={28} /></button>
+      )}
+      {skip && <div className={`pointer-events-none absolute top-0 grid h-full w-1/3 place-items-center bg-white/10 text-[13px] font-semibold text-white ${skip === 'back' ? 'left-0 rounded-r-full' : 'right-0 rounded-l-full'}`}>{skip === 'back' ? '« 10 s' : '10 s »'}</div>}
       {error && <div className="absolute inset-0 grid place-items-center bg-black/80 px-6 text-center text-[15px] text-white">{error}</div>}
 
       {/* Controls: a floating capsule above the bottom edge, not a bar across it. */}
-      <div className={`absolute inset-x-2 bottom-2 transition-all duration-200 sm:inset-x-auto sm:bottom-3 sm:left-1/2 sm:w-[min(92%,860px)] sm:-translate-x-1/2 ${showUi ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0'}`}>
+      <div className={`absolute inset-x-1.5 bottom-1.5 transition-all duration-200 sm:inset-x-auto sm:bottom-3 sm:left-1/2 sm:w-[min(92%,860px)] sm:-translate-x-1/2 ${showUi ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0'}`}>
         {menu && (
           <div className="absolute bottom-[68px] right-0 w-[min(100%,300px)] overflow-hidden rounded-2xl border border-white/10 bg-[rgb(16_32_31/0.92)] p-2 text-[14px] text-white shadow-2xl backdrop-blur-md" role="menu">
             {menu === 'main' && (
@@ -215,11 +240,11 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
             )}
           </div>
         )}
-        <div className="flex h-14 items-center gap-1.5 rounded-[20px] border border-white/10 bg-[rgb(16_32_31/0.72)] pl-2 pr-1.5 text-white shadow-[0_8px_30px_rgb(0_0_0/0.35)] backdrop-blur-md">
-          <button type="button" onClick={toggle} aria-label={playing ? 'Pause (k)' : 'Play (k)'} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#2bb5ab] text-[#04201e] transition-transform hover:scale-105">{playing ? <Icon.Pause size={18} /> : <Icon.Play size={18} />}</button>
-          <span className="w-11 shrink-0 text-right text-[12px] font-semibold tabular-nums">{fmt(time)}</span>
+        <div className="flex h-10 items-center gap-1 rounded-2xl border border-white/10 bg-[rgb(16_32_31/0.72)] pl-1.5 pr-1 sm:h-14 sm:gap-1.5 sm:rounded-[20px] sm:pl-2 sm:pr-1.5 text-white shadow-[0_8px_30px_rgb(0_0_0/0.35)] backdrop-blur-md">
+          <button type="button" onClick={toggle} aria-label={playing ? 'Pause (k)' : 'Play (k)'} className="hidden h-10 w-10 shrink-0 place-items-center rounded-full bg-[#2bb5ab] text-[#04201e] transition-transform hover:scale-105 sm:grid">{playing ? <Icon.Pause size={18} /> : <Icon.Play size={18} />}</button>
+          <span className="w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums sm:w-11 sm:text-[12px]">{fmt(time)}</span>
           {/* Seek track */}
-          <div className="group/bar relative mx-1.5 flex h-8 min-w-0 flex-1 cursor-pointer items-center" role="slider" aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(time)} aria-valuetext={`${fmt(time)} of ${fmt(duration)}`} tabIndex={0}
+          <div className="group/bar relative mx-1 flex h-8 sm:mx-1.5 min-w-0 flex-1 cursor-pointer items-center" role="slider" aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(time)} aria-valuetext={`${fmt(time)} of ${fmt(duration)}`} tabIndex={0}
             onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHover({ x: e.clientX - r.left, t: ((e.clientX - r.left) / r.width) * duration }); }}
             onMouseLeave={() => setHover(null)}
             onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seek(((e.clientX - r.left) / r.width) * duration); }}>
@@ -230,7 +255,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
             </div>
             {hover && <span className="absolute -top-9 -translate-x-1/2 rounded-lg bg-[rgb(16_32_31/0.92)] px-2 py-1 text-[12px] font-semibold tabular-nums text-white" style={{ left: Math.max(22, hover.x) }}>{fmt(hover.t)}</span>}
           </div>
-          <span className="w-11 shrink-0 text-[12px] font-semibold tabular-nums text-white/60">{fmt(duration)}</span>
+          <span className="w-10 shrink-0 text-[11px] font-semibold tabular-nums text-white/60 sm:w-11 sm:text-[12px]">{fmt(duration)}</span>
           <div className="group/vol relative hidden items-center sm:flex">
             <button type="button" className={btn} onClick={() => setVol(volume || 1, !muted)} aria-label={muted ? 'Unmute (m)' : 'Mute (m)'}><VolIcon size={20} /></button>
             <div className="pointer-events-none absolute bottom-12 left-1/2 flex h-32 w-10 -translate-x-1/2 items-center justify-center rounded-2xl bg-[rgb(16_32_31/0.92)] opacity-0 transition-opacity group-hover/vol:pointer-events-auto group-hover/vol:opacity-100 group-focus-within/vol:pointer-events-auto group-focus-within/vol:opacity-100">
