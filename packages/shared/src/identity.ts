@@ -9,6 +9,7 @@ export const RESERVED_HANDLES = new Set([
   'admin', 'administrator', 'api', 'auth', 'login', 'logout', 'signin', 'signup', 'settings', 'studio', 'help',
   'support', 'about', 'terms', 'privacy', 'freeme', 'free-me', 'free_me', 'official', 'moderator', 'system',
   'root', 'null', 'undefined', 'channel', 'channels', 'watch', 'shorts', 'feed', 'results', 'search', 'upload',
+  'moments', 'hub', 'creator', 'following', 'collections', 'collection', 'history', 'saved', 'legal', 'copyright', 'report',
   'advertise', 'ads', 'payments', 'payouts', 'security', 'staff', 'team',
 ]);
 

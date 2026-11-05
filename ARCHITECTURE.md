@@ -23,10 +23,12 @@ Browser ──HTTPS──> Caddy (edge, TLS, load balancing)
 | `common` | CSRF origin guard, authentication and role guard, rate limiter, audit log, error filter |
 | `auth` | Email one-time codes, Google OpenID Connect, sessions, account creation and linking |
 | `users` | The signed-in account: profile, devices |
-| `channels` | Channels, handles, subscriptions |
+| `channels` | Channels, handles, following |
+| `engagement` | Likes, comments, watch history and resume, collections |
+| `trust` | Reports, copyright notices, counter-notices, the moderation queue, strikes |
 | `catalog` | Categories, feeds, watch page data, search and suggestions |
 | `admin` | Accounts, roles, suspension, audit log (administrators only) |
-| `videos` | Uploads, Studio (my videos), playback playlists for private media, view reporting, local storage stand-in |
+| `videos` | Uploads, Creator Hub (my videos), playback playlists for private media, view reporting, local storage stand-in |
 | `media` | Storage drivers (S3 and local), rendition ladder, FFmpeg processing, jobs, view counting; shared with the worker |
 | `health` | Liveness and dependency status for the load balancer |
 
@@ -36,7 +38,9 @@ Request pipeline: Helmet headers → cookie parser → session middleware (attac
 
 - `components/shell`: top bar with search and suggestions, sidebar (full on wide screens, narrow rail on tablets, drawer on phones), bottom bar on phones, account menu with theme choice.
 - `components/video`: cards, rows, the infinite grid, category chips.
-- `app/*`: pages: home, Shorts, subscriptions, search results, watch, channel (`/@handle`), create channel, settings, sign-in, You, administration.
+- `app/*`: pages: home, Moments, Following, search results, watch (likes, save, share, report, comments, resume), channel (`/@handle`), create channel, Creator Hub (videos, removals and notices), History, Collections, Saved, Your reports, Moderation, legal pages (Terms, Privacy, Community Guidelines, Copyright and the notice form), settings, sign-in, You, administration.
+- `components/icons`: the Free Me icon set, drawn for this app (24 px grid, 1.75 px rounded stroke; filled variants mark the current page). No third-party icon library.
+- Old addresses redirect: `/shorts` → `/moments`, `/studio` → `/hub`, `/feed/subscriptions` → `/following`.
 - Design tokens (light and dark) are CSS variables in `globals.css`; components never hard-code colours.
 
 ## Worldwide by design
@@ -70,7 +74,8 @@ Viewer: CDN serves pub/<id>/hls/master.m3u8 and its fMP4 segments; private video
 - **One upload path for any size.** Parts of 16 MB go straight from the browser to storage, never through the API, so a 20 GB file costs the API a few small requests. Parts retry with backoff; choosing the same file after a closed tab continues where it stopped.
 - **Fast first, then complete.** One FFmpeg decode feeds all rungs of a pass (split filter). The low pass finishes quickly, so viewers can watch while HD is still encoding; players pick up new renditions on their next playlist load.
 - **Rendition ladder.** H.264 High + AAC, 4-second fMP4 segments, keyframes every 2 seconds, capped CRF 21 (quality first, with a bitrate ceiling per rung), named by the short side so vertical video gets proper ladders. Never upscaled; 60 fps sources keep 60 fps with 1.5× bitrate.
-- **Shorts.** Vertical or square videos up to 3 minutes are marked as Shorts automatically and appear in the Shorts feed.
+- **Moments.** Vertical or square videos up to 3 minutes are marked as Moments automatically and appear in the Moments feed.
+- **Removals.** A removed video gets `takenDownAt` and status `SUSPENDED`; feeds, search, playback and every interaction refuse it, the watch page answers 410 with the reason, and its media moves to the private prefix (also when it was still processing).
 - **Visibility follows media.** Public and unlisted media live under `pub/` (CDN, cacheable for a year); private media under `prv/`. Changing visibility queues a `relocate` job that copies, switches, then deletes the old copy, so playback never breaks. Jobs on one video never overlap (Redis lock).
 - **Deleting** removes the database row at once and queues a `purge` of every file. Uploads left unfinished for 3 days are cancelled hourly, and videos whose processing was interrupted (a restarted server) are queued again after 30 minutes.
 - **Views.** The player reports a view after real watching (30 s, or half of a short video). The API de-duplicates per viewer for 6 hours in Redis and adds up views and watch time; the worker writes the totals to PostgreSQL every 15 seconds.

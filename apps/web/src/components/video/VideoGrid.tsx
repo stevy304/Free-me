@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2 } from 'lucide-react';
+import * as Icon from '@/components/icons';
 import { useEffect, useRef, useState } from 'react';
 import { VideoCard } from './VideoCard';
 import { useShell } from '../shell/ShellContext';
@@ -40,7 +40,7 @@ export function VideoGrid({ first, endpoint }: { first: VideoPage; endpoint: str
         {videos.map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}
       </div>
       <div ref={end} className="flex justify-center py-8">
-        {loading && <Loader2 className="animate-spin text-muted" />}
+        {loading && <Icon.Spinner className="animate-spin text-muted" />}
         {error && <p className="text-[14px] text-muted">Could not load more videos. Scroll to try again.</p>}
       </div>
     </>

@@ -67,36 +67,36 @@ export class ChannelsController {
   async get(@Param('handle') raw: string, @CurrentAuth() auth: AuthContext | null) {
     const channel = await this.prisma.channel.findUnique({ where: { handle: normalizeHandle(raw) } });
     if (!channel) throw new NotFoundException('This channel does not exist.');
-    const [videos, videoCount, subscribed] = await Promise.all([
+    const [videos, videoCount, following] = await Promise.all([
       this.prisma.video.findMany({ where: { channelId: channel.id, ...PUBLIC_VIDEO }, orderBy: { publishedAt: 'desc' }, take: 30, include: { channel: true } }),
       this.prisma.video.count({ where: { channelId: channel.id, ...PUBLIC_VIDEO } }),
       auth ? this.prisma.subscription.findUnique({ where: { userId_channelId: { userId: auth.user.id, channelId: channel.id } }, select: { id: true } }) : null,
     ]);
-    return { channel: publicChannel(channel), videoCount, videos: videos.map((v) => videoCard(v, this.urls)), viewer: { subscribed: !!subscribed, isOwner: auth?.user.id === channel.userId } };
+    return { channel: publicChannel(channel), videoCount, videos: videos.map((v) => videoCard(v, this.urls)), viewer: { following: !!following, isOwner: auth?.user.id === channel.userId } };
   }
 
-  @Post(':handle/subscription')
+  @Post(':handle/follow')
   @HttpCode(200)
   @RequireAuth()
-  @ApiOperation({ summary: 'Subscribe to a channel' })
-  async subscribe(@Param('handle') raw: string, @CurrentAuth() auth: AuthContext) {
-    await this.limits.consume(`subscribe:${auth.user.id}`, 120, 3600);
+  @ApiOperation({ summary: 'Follow a channel' })
+  async follow(@Param('handle') raw: string, @CurrentAuth() auth: AuthContext) {
+    await this.limits.consume(`follow:${auth.user.id}`, 120, 3600);
     const channel = await this.prisma.channel.findUnique({ where: { handle: normalizeHandle(raw) } });
     if (!channel) throw new NotFoundException('This channel does not exist.');
-    if (channel.userId === auth.user.id) throw new BadRequestException('You cannot subscribe to your own channel.');
+    if (channel.userId === auth.user.id) throw new BadRequestException('You cannot follow your own channel.');
     const count = await this.prisma.$transaction(async (tx) => {
       const r = await tx.subscription.createMany({ data: [{ userId: auth.user.id, channelId: channel.id }], skipDuplicates: true });
       const c = r.count ? await tx.channel.update({ where: { id: channel.id }, data: { subscriberCount: { increment: 1 } } }) : channel;
       return c.subscriberCount;
     });
-    return { subscribed: true, subscriberCount: count };
+    return { following: true, followerCount: count };
   }
 
-  @Delete(':handle/subscription')
+  @Delete(':handle/follow')
   @HttpCode(200)
   @RequireAuth()
-  @ApiOperation({ summary: 'Unsubscribe from a channel' })
-  async unsubscribe(@Param('handle') raw: string, @CurrentAuth() auth: AuthContext) {
+  @ApiOperation({ summary: 'Stop following a channel' })
+  async unfollow(@Param('handle') raw: string, @CurrentAuth() auth: AuthContext) {
     const channel = await this.prisma.channel.findUnique({ where: { handle: normalizeHandle(raw) } });
     if (!channel) throw new NotFoundException('This channel does not exist.');
     const count = await this.prisma.$transaction(async (tx) => {
@@ -104,6 +104,6 @@ export class ChannelsController {
       const c = r.count ? await tx.channel.update({ where: { id: channel.id }, data: { subscriberCount: { decrement: 1 } } }) : channel;
       return c.subscriberCount;
     });
-    return { subscribed: false, subscriberCount: count };
+    return { following: false, followerCount: count };
   }
 }

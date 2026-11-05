@@ -10,6 +10,14 @@ export class ApiUnavailable extends Error {}
  * Data is never cached across visitors.
  */
 export async function apiGet<T>(path: string): Promise<T | null> {
+  const r = await apiFetch<T>(path);
+  if (r.status === 404 || r.status === 401) return null;
+  if (!r.ok) throw new Error(`API ${path} answered ${r.status}`);
+  return r.data as T;
+}
+
+/** Like apiGet, but returns the status and the API's message too (e.g. 410 for a removed video). */
+export async function apiFetch<T>(path: string): Promise<{ ok: boolean; status: number; data: T | null; message: string | null }> {
   const [c, h] = await Promise.all([cookies(), headers()]);
   let res: Response;
   try {
@@ -17,9 +25,8 @@ export async function apiGet<T>(path: string): Promise<T | null> {
   } catch {
     throw new ApiUnavailable('The Free Me API is not reachable.');
   }
-  if (res.status === 404 || res.status === 401) return null;
-  if (!res.ok) throw new Error(`API ${path} answered ${res.status}`);
-  return (await res.json()) as T;
+  const body = await res.json().catch(() => null);
+  return { ok: res.ok, status: res.status, data: res.ok ? body as T : null, message: !res.ok && typeof body?.message === 'string' ? body.message : null };
 }
 
 /** The visitor's language from Accept-Language, as a valid tag, so server and browser format numbers and dates alike. */

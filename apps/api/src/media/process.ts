@@ -5,7 +5,7 @@ import { extname, join, relative, sep } from 'node:path';
 import type { AppConfig } from '../config/config';
 import { FAST_RUNGS, codecsFor, masterPlaylist, planLadder, type MasterEntry, type PlannedRung } from './ladder';
 import { MediaError, probe, run, type ProbeResult } from './probe';
-import { mediaPrefix } from './keys';
+import { mediaPrefix, wantedLocation } from './keys';
 import type { Storage } from './storage';
 
 const TYPES: Record<string, string> = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg' };
@@ -117,7 +117,7 @@ export class VideoProcessor {
   /** Uploads a pass's files, records the renditions and rewrites the master playlist so players see the new rungs. */
   private async publish(videoId: string, work: string, rungs: PlannedRung[], info: ProbeResult, done: MasterEntry[], thumbs: string[] | null, stage: string, progress: number) {
     const video = await this.prisma.video.findUniqueOrThrow({ where: { id: videoId } });
-    const location = video.visibility === 'PRIVATE' ? 'PRIVATE' : 'PUBLIC';
+    const location = wantedLocation(video);
     const prefix = mediaPrefix(videoId, location);
     const out = join(work, 'out');
     const files = [...(await Promise.all(rungs.map((r) => walk(join(out, 'hls', r.name))))).flat(), ...(thumbs ?? [])];
@@ -140,8 +140,10 @@ export class VideoProcessor {
     }
     await this.storage.putBuffer(`${prefix}hls/master.m3u8`, Buffer.from(masterPlaylist(done)), { contentType: TYPES['.m3u8'], cacheControl: SHORT });
     const thumbKeys = thumbs?.map((t) => `thumbs/${relative(join(out, 'thumbs'), t)}`);
+    // A video removed by moderators while it was processing stays removed.
+    const removed = !!(await this.prisma.video.findUnique({ where: { id: videoId }, select: { takenDownAt: true } }))?.takenDownAt;
     await this.prisma.video.update({ where: { id: videoId }, data: {
-      status: 'READY', mediaLocation: location, hlsMasterKey: 'hls/master.m3u8', processingProgress: progress, processingStage: stage, processingError: null,
+      status: removed ? 'SUSPENDED' : 'READY', mediaLocation: location, hlsMasterKey: 'hls/master.m3u8', processingProgress: progress, processingStage: stage, processingError: null,
       ...(thumbKeys?.length ? { thumbnailCandidates: thumbKeys, ...(video.customThumbnail ? {} : { thumbnailKey: thumbKeys[Math.min(1, thumbKeys.length - 1)] }) } : {}),
     } });
   }

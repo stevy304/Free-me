@@ -7,8 +7,8 @@ import { ShellProvider, useShell } from './ShellContext';
 import { TopBar } from './TopBar';
 import { Sidebar } from './Sidebar';
 import { MobileNav } from './MobileNav';
-import { UploadsProvider } from '../studio/UploadsContext';
-import { UploadDialog } from '../studio/UploadDialog';
+import { UploadsProvider } from '../hub/UploadsContext';
+import { UploadDialog } from '../hub/UploadDialog';
 
 function Main({ children }: { children: ReactNode }) {
   const { collapsed } = useShell();

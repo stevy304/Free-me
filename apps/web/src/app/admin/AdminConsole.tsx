@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2, Search } from 'lucide-react';
+import * as Icon from '@/components/icons';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/client-api';
 import { timeAgo } from '@/lib/format';
@@ -45,9 +45,9 @@ export function AdminConsole({ selfId }: { selfId: string }) {
       {tab === 'users' ? (
         <>
           <form className="mt-5 flex max-w-md items-center gap-2 rounded-full border border-line px-4" onSubmit={(e) => { e.preventDefault(); void loadUsers(q); }}>
-            <Search size={18} className="text-muted" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Email, name or @handle" aria-label="Find accounts" className="h-10 flex-1 bg-transparent text-[15px] outline-none" />
+            <Icon.Search size={18} className="text-muted" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Email, name or @handle" aria-label="Find accounts" className="h-10 flex-1 bg-transparent text-[15px] outline-none" />
           </form>
-          {!users ? <Loader2 className="mx-auto mt-10 animate-spin text-muted" /> : (
+          {!users ? <Icon.Spinner className="mx-auto mt-10 animate-spin text-muted" /> : (
             <div className="mt-5 overflow-x-auto rounded-2xl border border-line">
               <table className="w-full min-w-[760px] text-left text-[14px]">
                 <thead className="bg-surface text-[12px] uppercase tracking-wide text-muted"><tr><th className="px-4 py-3">Account</th><th className="px-4 py-3">Roles</th><th className="px-4 py-3">Last sign-in</th><th className="px-4 py-3">Status</th></tr></thead>
@@ -84,7 +84,7 @@ export function AdminConsole({ selfId }: { selfId: string }) {
             </div>
           )}
         </>
-      ) : !audit ? <Loader2 className="mx-auto mt-10 animate-spin text-muted" /> : (
+      ) : !audit ? <Icon.Spinner className="mx-auto mt-10 animate-spin text-muted" /> : (
         <ul className="mt-5 divide-y divide-line rounded-2xl border border-line text-[14px]">
           {audit.map((a) => (
             <li key={a.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-3">

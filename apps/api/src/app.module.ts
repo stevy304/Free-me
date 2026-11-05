@@ -14,6 +14,9 @@ import { CatalogModule } from './catalog/catalog.module';
 import { AdminModule } from './admin/admin.module';
 import { VideosModule } from './videos/videos.module';
 import { HealthController } from './health/health.controller';
+import { SiteController } from './health/site.controller';
+import { EngagementModule } from './engagement/engagement.module';
+import { TrustModule } from './trust/trust.module';
 
 @Module({})
 export class AppModule {
@@ -21,8 +24,8 @@ export class AppModule {
     return {
       module: AppModule,
       global: true,
-      imports: [DatabaseModule, CommonModule, MailModule, VideosModule, AuthModule, UsersModule, ChannelsModule, CatalogModule, AdminModule],
-      controllers: [HealthController],
+      imports: [DatabaseModule, CommonModule, MailModule, VideosModule, AuthModule, UsersModule, ChannelsModule, CatalogModule, AdminModule, EngagementModule, TrustModule],
+      controllers: [HealthController, SiteController],
       providers: [
         { provide: APP_CONFIG, useValue: config },
         { provide: APP_GUARD, useClass: OriginGuard },

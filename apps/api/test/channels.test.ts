@@ -22,7 +22,7 @@ describe('profiles', () => {
   });
 });
 
-describe('channels and subscriptions', () => {
+describe('channels and following', () => {
   test('create a channel, become a creator; handles are unique, valid and not reserved', async () => {
     const { agent } = await signIn(ctx.http, ctx.mail, 'uwase@example.com');
     expect((await request(ctx.http).get('/api/channels/handle-available?handle=@Uwase.Music')).body).toEqual({ available: true, handle: 'uwase.music' });
@@ -31,7 +31,7 @@ describe('channels and subscriptions', () => {
     await agent.post('/api/channels').set('Origin', WEB).send({ handle: 'uw', name: 'X' }).expect(400);
     await agent.post('/api/channels').set('Origin', WEB).send({ handle: 'uwase.music', name: 'Uwase Music', country: 'XX' }).expect(400);
     const created = await agent.post('/api/channels').set('Origin', WEB).send({ handle: '@Uwase.Music', name: 'Uwase Music', description: 'Songs', country: 'rw', defaultLanguage: 'rw' }).expect(201);
-    expect(created.body.channel).toMatchObject({ handle: 'uwase.music', name: 'Uwase Music', country: 'RW', defaultLanguage: 'rw', subscriberCount: 0, totalViews: '0' });
+    expect(created.body.channel).toMatchObject({ handle: 'uwase.music', name: 'Uwase Music', country: 'RW', defaultLanguage: 'rw', followerCount: 0, totalViews: '0' });
     expect((await agent.get('/api/me')).body.user.roles).toEqual(['VIEWER', 'CREATOR']);
     await agent.post('/api/channels').set('Origin', WEB).send({ handle: 'second', name: 'Second' }).expect(409);
     expect((await request(ctx.http).get('/api/channels/handle-available?handle=uwase.music')).body).toEqual({ available: false, reason: 'This handle is taken.' });
@@ -44,24 +44,24 @@ describe('channels and subscriptions', () => {
     await request(ctx.http).post('/api/channels').set('Origin', WEB).send({ handle: 'anon', name: 'Anon' }).expect(401);
   });
 
-  test('public channel page, subscribe and unsubscribe keep an exact count; no self-subscription', async () => {
+  test('public channel page, follow and unfollow keep an exact count; no self-following', async () => {
     const owner = await signIn(ctx.http, ctx.mail, 'owner@example.com');
     await owner.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'daily.news', name: 'Daily News' }).expect(201);
     const fan = await signIn(ctx.http, ctx.mail, 'fan@example.com');
 
     const anon = await request(ctx.http).get('/api/channels/@daily.news').expect(200);
-    expect(anon.body).toMatchObject({ channel: { handle: 'daily.news', subscriberCount: 0 }, videoCount: 0, videos: [], viewer: { subscribed: false, isOwner: false } });
+    expect(anon.body).toMatchObject({ channel: { handle: 'daily.news', followerCount: 0 }, videoCount: 0, videos: [], viewer: { following: false, isOwner: false } });
     await request(ctx.http).get('/api/channels/nobody-here').expect(404);
 
-    await owner.agent.post('/api/channels/daily.news/subscription').set('Origin', WEB).expect(400);
-    expect((await fan.agent.post('/api/channels/daily.news/subscription').set('Origin', WEB).expect(200)).body).toEqual({ subscribed: true, subscriberCount: 1 });
-    expect((await fan.agent.post('/api/channels/daily.news/subscription').set('Origin', WEB).expect(200)).body.subscriberCount).toBe(1);
-    expect((await fan.agent.get('/api/channels/daily.news')).body.viewer).toEqual({ subscribed: true, isOwner: false });
+    await owner.agent.post('/api/channels/daily.news/follow').set('Origin', WEB).expect(400);
+    expect((await fan.agent.post('/api/channels/daily.news/follow').set('Origin', WEB).expect(200)).body).toEqual({ following: true, followerCount: 1 });
+    expect((await fan.agent.post('/api/channels/daily.news/follow').set('Origin', WEB).expect(200)).body.followerCount).toBe(1);
+    expect((await fan.agent.get('/api/channels/daily.news')).body.viewer).toEqual({ following: true, isOwner: false });
     expect((await owner.agent.get('/api/channels/daily.news')).body.viewer.isOwner).toBe(true);
-    const feed = await fan.agent.get('/api/feed/subscriptions').expect(200);
+    const feed = await fan.agent.get('/api/feed/following').expect(200);
     expect(feed.body.channels.map((c: any) => c.handle)).toEqual(['daily.news']);
-    expect((await fan.agent.delete('/api/channels/daily.news/subscription').set('Origin', WEB).expect(200)).body).toEqual({ subscribed: false, subscriberCount: 0 });
-    expect((await fan.agent.delete('/api/channels/daily.news/subscription').set('Origin', WEB).expect(200)).body.subscriberCount).toBe(0);
+    expect((await fan.agent.delete('/api/channels/daily.news/follow').set('Origin', WEB).expect(200)).body).toEqual({ following: false, followerCount: 0 });
+    expect((await fan.agent.delete('/api/channels/daily.news/follow').set('Origin', WEB).expect(200)).body.followerCount).toBe(0);
   });
 });
 
@@ -90,7 +90,7 @@ describe('catalog', () => {
     expect([...p2.videos, ...p3.videos].map((v: any) => v.title)).toEqual(['Public 2', 'Public 3', 'Public 4']);
     expect(p3.nextCursor).toBeNull();
     expect((await request(ctx.http).get('/api/videos?category=music')).body.videos.map((v: any) => v.title)).toEqual(['Public 1', 'Public 3']);
-    expect((await request(ctx.http).get('/api/videos?shorts=true')).body.videos.map((v: any) => v.title)).toEqual(['Public 4']);
+    expect((await request(ctx.http).get('/api/videos?moments=true')).body.videos.map((v: any) => v.title)).toEqual(['Public 4']);
     expect((await request(ctx.http).get('/api/channels/maker')).body.videoCount).toBe(5);
     await request(ctx.http).get('/api/videos?cursor=garbage').expect(400);
   });
@@ -107,7 +107,7 @@ describe('watch page and search', () => {
     const proc = await mk('Still processing', { status: 'PROCESSING', visibility: 'PUBLIC' });
 
     const v = (await request(ctx.http).get(`/api/videos/${pub.id}`).expect(200)).body.video;
-    expect(v).toMatchObject({ title: 'Jollof rice in 20 minutes', playbackUrl: `${WEB}/api/storage/local/pub/${pub.id}/hls/master.m3u8`, channel: { handle: 'chef.amara', subscriberCount: 0 } });
+    expect(v).toMatchObject({ title: 'Jollof rice in 20 minutes', playbackUrl: `${WEB}/api/storage/local/pub/${pub.id}/hls/master.m3u8`, channel: { handle: 'chef.amara', followerCount: 0 } });
     await request(ctx.http).get(`/api/videos/${unl.id}`).expect(200);
     await request(ctx.http).get(`/api/videos/${priv.id}`).expect(404);
     await request(ctx.http).get(`/api/videos/${proc.id}`).expect(404);

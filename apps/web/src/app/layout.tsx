@@ -11,11 +11,10 @@ const inter = Inter({ subsets: ['latin', 'latin-ext'], variable: '--font-inter',
 export const metadata: Metadata = {
   title: { default: 'Free Me', template: '%s - Free Me' },
   description: 'Watch and share videos from creators everywhere. Your content. Your freedom. Your opportunity.',
-  icons: { icon: '/free-me.svg' },
   applicationName: 'Free Me',
 };
 export const viewport: Viewport = {
-  themeColor: [{ media: '(prefers-color-scheme: light)', color: '#ffffff' }, { media: '(prefers-color-scheme: dark)', color: '#0f0f0f' }],
+  themeColor: [{ media: '(prefers-color-scheme: light)', color: '#ffffff' }, { media: '(prefers-color-scheme: dark)', color: '#0a1110' }],
   width: 'device-width', initialScale: 1,
 };
 

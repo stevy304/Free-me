@@ -55,7 +55,7 @@ async function upload(agent: ReturnType<typeof request.agent>, file: string, opt
 async function until(agent: ReturnType<typeof request.agent>, id: string, ok: (v: any) => boolean, ms = 90_000) {
   const end = Date.now() + ms;
   for (;;) {
-    const v = (await agent.get(`/api/studio/videos/${id}`).expect(200)).body.video;
+    const v = (await agent.get(`/api/hub/videos/${id}`).expect(200)).body.video;
     if (ok(v)) return v;
     if (Date.now() > end) throw new Error(`timed out: ${JSON.stringify(v)}`);
     await new Promise((r) => setTimeout(r, 300));
@@ -110,9 +110,9 @@ test('upload in parts, resume, process to adaptive HLS, play privately, publish 
   expect((await request(ctx.http).get('/api/videos')).body.videos).toEqual([]);
 
   // Publish: details saved, media moves to the public (CDN) prefix, the video appears in the feed.
-  const saved = await agent.patch(`/api/studio/videos/${id}`).set('Origin', WEB).send({ title: 'Gorillas of Musanze', description: 'A morning in the park.', category: 'travel-events', tags: ['Rwanda', '#travel', 'rwanda'], visibility: 'PUBLIC', thumbnail: 2, language: 'rw' }).expect(200);
+  const saved = await agent.patch(`/api/hub/videos/${id}`).set('Origin', WEB).send({ title: 'Gorillas of Musanze', description: 'A morning in the park.', category: 'travel-events', tags: ['Rwanda', '#travel', 'rwanda'], visibility: 'PUBLIC', thumbnail: 2, language: 'rw' }).expect(200);
   expect(saved.body.video).toMatchObject({ title: 'Gorillas of Musanze', visibility: 'PUBLIC', category: { slug: 'travel-events' }, tags: ['rwanda', 'travel'], language: 'rw' });
-  await agent.patch(`/api/studio/videos/${id}`).set('Origin', WEB).send({ category: 'not-a-category' }).expect(400);
+  await agent.patch(`/api/hub/videos/${id}`).set('Origin', WEB).send({ category: 'not-a-category' }).expect(400);
   await until(agent, id, (x) => x.playbackUrl?.startsWith(WEB));
   // The old private copy is deleted after the switch (so playback never breaks mid-move).
   for (let i = 0; i < 50 && existsSync(join(storageDir, 'prv', id)); i++) await new Promise((r) => setTimeout(r, 100));
@@ -132,16 +132,16 @@ test('upload in parts, resume, process to adaptive HLS, play privately, publish 
   expect((await request(ctx.http).get(`/api/videos/${id}`)).body.video.viewCount).toBe('1');
 
   // Custom thumbnail: images only, by their bytes.
-  await agent.put(`/api/studio/videos/${id}/thumbnail`).set('Origin', WEB).set('Content-Type', 'image/jpeg').send(Buffer.from('not an image')).expect(400);
+  await agent.put(`/api/hub/videos/${id}/thumbnail`).set('Origin', WEB).set('Content-Type', 'image/jpeg').send(Buffer.from('not an image')).expect(400);
   const jpg = readFileSync(join(storageDir, 'pub', id, 'thumbs', '1.jpg'));
-  const custom = await agent.put(`/api/studio/videos/${id}/thumbnail`).set('Origin', WEB).set('Content-Type', 'image/jpeg').send(jpg).expect(200);
+  const custom = await agent.put(`/api/hub/videos/${id}/thumbnail`).set('Origin', WEB).set('Content-Type', 'image/jpeg').send(jpg).expect(200);
   expect(custom.body.video.customThumbnail).toBe(true);
 
   // Someone else cannot touch it; deleting removes every file.
   const other = await creator('other@example.com', 'other.channel');
-  await other.patch(`/api/studio/videos/${id}`).set('Origin', WEB).send({ title: 'Mine now' }).expect(404);
-  await other.delete(`/api/studio/videos/${id}`).set('Origin', WEB).expect(404);
-  await agent.delete(`/api/studio/videos/${id}`).set('Origin', WEB).expect(200);
+  await other.patch(`/api/hub/videos/${id}`).set('Origin', WEB).send({ title: 'Mine now' }).expect(404);
+  await other.delete(`/api/hub/videos/${id}`).set('Origin', WEB).expect(404);
+  await agent.delete(`/api/hub/videos/${id}`).set('Origin', WEB).expect(200);
   for (let i = 0; i < 50 && existsSync(join(storageDir, 'pub', id)); i++) await new Promise((r) => setTimeout(r, 100));
   expect(existsSync(join(storageDir, 'pub', id))).toBe(false);
   expect(existsSync(join(storageDir, 'src', id))).toBe(false);
@@ -162,7 +162,7 @@ test('a vertical clip becomes a Short; a file that is not a video fails with a c
   await agent.post('/api/uploads').set('Origin', WEB).send({ fileName: 'huge.mp4', sizeBytes: 1e15 }).expect(400);
   const cancel = (await agent.post('/api/uploads').set('Origin', WEB).send({ fileName: 'later.mp4', sizeBytes: 1000 }).expect(201)).body.videoId;
   await agent.delete(`/api/uploads/${cancel}`).set('Origin', WEB).expect(200);
-  await agent.get(`/api/studio/videos/${cancel}`).expect(404);
+  await agent.get(`/api/hub/videos/${cancel}`).expect(404);
 
   const viewer = (await signIn(ctx.http, ctx.mail, 'just.watching@example.com')).agent;
   await viewer.post('/api/uploads').set('Origin', WEB).send({ fileName: 'a.mp4', sizeBytes: 100 }).expect(403);

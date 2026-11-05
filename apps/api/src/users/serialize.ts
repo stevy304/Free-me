@@ -2,7 +2,7 @@ import type { Channel, Profile, User } from '@prisma/client';
 
 export const publicChannel = (c: Channel) => ({
   id: c.id, handle: c.handle, name: c.name, description: c.description, avatarUrl: c.avatarUrl, bannerUrl: c.bannerUrl,
-  country: c.country, defaultLanguage: c.defaultLanguage, isVerified: c.isVerified, subscriberCount: c.subscriberCount,
+  country: c.country, defaultLanguage: c.defaultLanguage, isVerified: c.isVerified, followerCount: c.subscriberCount,
   totalViews: c.totalViews.toString(), createdAt: c.createdAt,
 });
 

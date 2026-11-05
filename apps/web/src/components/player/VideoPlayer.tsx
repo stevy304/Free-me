@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, ChevronLeft, ChevronRight, Loader2, Maximize, Minimize, Pause, PictureInPicture2, Play, RectangleHorizontal, Settings, Volume1, Volume2, VolumeX } from 'lucide-react';
+import * as Icon from '@/components/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type Hls from 'hls.js';
 
@@ -17,10 +17,12 @@ const label = (h: number, w: number) => `${Math.min(h, w)}p`;
 /**
  * Adaptive video player: hls.js (Safari plays HLS natively), quality and speed menus, theater mode, picture-in-picture,
  * fullscreen and the usual keyboard shortcuts (k/space, j/l, arrows, m, f, t, 0-9, <, >). A view is reported once,
- * after real watching (30 s, or half of a short video).
+ * after real watching (30 s, or half of a short video). `startAt` resumes where the viewer stopped; `onProgress` is
+ * called every 10 seconds of playback, on pause, at the end and when the page is left, to remember the position.
  */
-export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded }: {
+export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress }: {
   src: string; poster?: string | null; videoId?: string; durationHint?: number; autoPlay?: boolean; theater?: boolean; onTheater?: () => void; onEnded?: () => void;
+  startAt?: number; onProgress?: (seconds: number, ended: boolean) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -46,6 +48,32 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const reported = useRef(false);
   const lastT = useRef(0);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSaved = useRef(0);
+  const progressRef = useRef(onProgress);
+  progressRef.current = onProgress;
+  const save = useCallback((ended = false) => {
+    const el = video.current;
+    if (!el || !progressRef.current || el.currentTime < 1) return;
+    lastSaved.current = Date.now();
+    progressRef.current(Math.floor(el.currentTime), ended);
+  }, []);
+
+  // Resume once the video knows its length.
+  useEffect(() => {
+    const el = video.current!;
+    if (!(startAt > 0)) return;
+    const go = () => { if (el.duration && startAt < el.duration - 5) el.currentTime = startAt; };
+    if (el.readyState >= 1) go(); else el.addEventListener('loadedmetadata', go, { once: true });
+    return () => el.removeEventListener('loadedmetadata', go);
+  }, [src, startAt]);
+
+  // Remember the position when the viewer leaves the page or switches tabs.
+  useEffect(() => {
+    const leave = () => save();
+    const vis = () => { if (document.visibilityState === 'hidden') save(); };
+    window.addEventListener('pagehide', leave); document.addEventListener('visibilitychange', vis);
+    return () => { save(); window.removeEventListener('pagehide', leave); document.removeEventListener('visibilitychange', vis); };
+  }, [src, save]);
 
   // Source: native HLS on Safari/iOS, hls.js elsewhere.
   useEffect(() => {
@@ -134,6 +162,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     const delta = el.currentTime - lastT.current;
     if (!el.paused && delta > 0 && delta < 2) watched.current += delta;
     lastT.current = el.currentTime;
+    if (!el.paused && Date.now() - lastSaved.current > 10_000) save();
     const need = Math.min(30, (el.duration || duration) * 0.5);
     if (videoId && !reported.current && need > 0 && watched.current >= need) {
       reported.current = true;
@@ -142,7 +171,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   };
 
   const pct = (n: number) => `${duration ? Math.min(100, (n / duration) * 100) : 0}%`;
-  const VolIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+  const VolIcon = muted || volume === 0 ? Icon.VolumeOff : volume < 0.5 ? Icon.VolumeLow : Icon.VolumeHigh;
   const autoLabel = level === -1 ? `Auto${playingLevel ? ` (${playingLevel}p)` : ''}` : levels.find((l) => l.index === level)?.label ?? 'Auto';
   const btn = 'grid h-10 w-10 place-items-center rounded-full text-white hover:bg-white/10';
   const showUi = !playing || !idle || menu !== null;
@@ -151,11 +180,11 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     <div ref={box} onMouseMove={poke} onMouseLeave={() => playing && setIdle(true)}
       className={`group relative aspect-video w-full select-none overflow-hidden bg-black ${full ? '' : 'rounded-xl'} ${showUi ? '' : 'cursor-none'}`}>
       <video ref={video} playsInline poster={poster ?? undefined} className="h-full w-full" onClick={toggle} onDoubleClick={fullscreen}
-        onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onWaiting={() => setWaiting(true)} onPlaying={() => setWaiting(false)} onCanPlay={() => setWaiting(false)}
-        onTimeUpdate={onTime} onDurationChange={(e) => setDuration(e.currentTarget.duration)} onEnded={() => { setPlaying(false); onEnded?.(); }}
+        onPlay={() => setPlaying(true)} onPause={() => { setPlaying(false); save(); }} onWaiting={() => setWaiting(true)} onPlaying={() => setWaiting(false)} onCanPlay={() => setWaiting(false)}
+        onTimeUpdate={onTime} onDurationChange={(e) => setDuration(e.currentTarget.duration)} onEnded={() => { setPlaying(false); save(true); onEnded?.(); }}
         onVolumeChange={(e) => { setMuted(e.currentTarget.muted); setVolume(e.currentTarget.volume); }} />
-      {waiting && !error && <Loader2 className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/90" />}
-      {flash && <div className="pointer-events-none absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 animate-ping place-items-center rounded-full bg-black/50 text-white [animation-iteration-count:1]">{flash === 'play' ? <Play size={30} fill="currentColor" /> : <Pause size={30} fill="currentColor" />}</div>}
+      {waiting && !error && <Icon.Spinner className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/90" />}
+      {flash && <div className="pointer-events-none absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 animate-ping place-items-center rounded-full bg-black/50 text-white [animation-iteration-count:1]">{flash === 'play' ? <Icon.Play size={30} /> : <Icon.Pause size={30} />}</div>}
       {error && <div className="absolute inset-0 grid place-items-center bg-black/80 px-6 text-center text-[15px] text-white">{error}</div>}
 
       <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-1 pt-10 transition-opacity duration-200 ${showUi ? 'opacity-100' : 'opacity-0'}`}>
@@ -172,7 +201,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
           {hover && <span className="absolute -top-8 -translate-x-1/2 rounded bg-black/80 px-2 py-0.5 text-[12px] font-medium text-white" style={{ left: Math.max(20, hover.x) }}>{fmt(hover.t)}</span>}
         </div>
         <div className="flex items-center gap-1">
-          <button type="button" className={btn} onClick={toggle} aria-label={playing ? 'Pause (k)' : 'Play (k)'}>{playing ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" />}</button>
+          <button type="button" className={btn} onClick={toggle} aria-label={playing ? 'Pause (k)' : 'Play (k)'}>{playing ? <Icon.Pause size={22} /> : <Icon.Play size={22} />}</button>
           <div className="group/vol flex items-center">
             <button type="button" className={btn} onClick={() => setVol(volume || 1, !muted)} aria-label={muted ? 'Unmute (m)' : 'Mute (m)'}><VolIcon size={22} /></button>
             <input type="range" min={0} max={1} step={0.01} value={muted ? 0 : volume} onChange={(e) => setVol(Number(e.target.value))} aria-label="Volume"
@@ -181,34 +210,34 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
           <span className="ml-2 text-[13px] tabular-nums text-white">{fmt(time)} / {fmt(duration)}</span>
           <div className="flex-1" />
           <div className="relative">
-            <button type="button" className={btn} onClick={() => setMenu(menu ? null : 'main')} aria-label="Settings" aria-expanded={menu !== null}><Settings size={21} className={menu ? 'rotate-45 transition-transform' : 'transition-transform'} /></button>
+            <button type="button" className={btn} onClick={() => setMenu(menu ? null : 'main')} aria-label="Settings" aria-expanded={menu !== null}><Icon.Settings size={21} className={menu ? 'rotate-45 transition-transform' : 'transition-transform'} /></button>
             {menu && (
               <div className="absolute bottom-12 right-0 w-64 overflow-hidden rounded-xl bg-black/90 py-2 text-[14px] text-white shadow-lg backdrop-blur" role="menu">
                 {menu === 'main' && (
                   <>
-                    <button type="button" className="flex w-full items-center justify-between px-4 py-2.5 hover:bg-white/10" onClick={() => setMenu('speed')}><span>Playback speed</span><span className="flex items-center gap-1 text-white/70">{speed === 1 ? 'Normal' : speed}<ChevronRight size={16} /></span></button>
-                    {levels.length > 0 && <button type="button" className="flex w-full items-center justify-between px-4 py-2.5 hover:bg-white/10" onClick={() => setMenu('quality')}><span>Quality</span><span className="flex items-center gap-1 text-white/70">{autoLabel}<ChevronRight size={16} /></span></button>}
+                    <button type="button" className="flex w-full items-center justify-between px-4 py-2.5 hover:bg-white/10" onClick={() => setMenu('speed')}><span>Playback speed</span><span className="flex items-center gap-1 text-white/70">{speed === 1 ? 'Normal' : speed}<Icon.ChevronRight size={16} /></span></button>
+                    {levels.length > 0 && <button type="button" className="flex w-full items-center justify-between px-4 py-2.5 hover:bg-white/10" onClick={() => setMenu('quality')}><span>Quality</span><span className="flex items-center gap-1 text-white/70">{autoLabel}<Icon.ChevronRight size={16} /></span></button>}
                   </>
                 )}
                 {menu === 'speed' && (
                   <>
-                    <button type="button" className="flex w-full items-center gap-2 border-b border-white/10 px-3 pb-2.5 pt-1" onClick={() => setMenu('main')}><ChevronLeft size={18} />Playback speed</button>
-                    {SPEEDS.map((s) => <button key={s} type="button" role="menuitemradio" aria-checked={speed === s} className="flex w-full items-center gap-3 px-4 py-2 hover:bg-white/10" onClick={() => { setRate(s); setMenu(null); }}><span className="w-4">{speed === s && <Check size={16} />}</span>{s === 1 ? 'Normal' : s}</button>)}
+                    <button type="button" className="flex w-full items-center gap-2 border-b border-white/10 px-3 pb-2.5 pt-1" onClick={() => setMenu('main')}><Icon.ChevronLeft size={18} />Playback speed</button>
+                    {SPEEDS.map((s) => <button key={s} type="button" role="menuitemradio" aria-checked={speed === s} className="flex w-full items-center gap-3 px-4 py-2 hover:bg-white/10" onClick={() => { setRate(s); setMenu(null); }}><span className="w-4">{speed === s && <Icon.Check size={16} />}</span>{s === 1 ? 'Normal' : s}</button>)}
                   </>
                 )}
                 {menu === 'quality' && (
                   <>
-                    <button type="button" className="flex w-full items-center gap-2 border-b border-white/10 px-3 pb-2.5 pt-1" onClick={() => setMenu('main')}><ChevronLeft size={18} />Quality</button>
-                    {levels.map((l) => <button key={l.index} type="button" role="menuitemradio" aria-checked={level === l.index} className="flex w-full items-center gap-3 px-4 py-2 hover:bg-white/10" onClick={() => chooseLevel(l.index)}><span className="w-4">{level === l.index && <Check size={16} />}</span>{l.label}{Math.min(l.height, l.width) >= 720 && <sup className="text-[10px] font-bold text-brand">HD</sup>}</button>)}
-                    <button type="button" role="menuitemradio" aria-checked={level === -1} className="flex w-full items-center gap-3 px-4 py-2 hover:bg-white/10" onClick={() => chooseLevel(-1)}><span className="w-4">{level === -1 && <Check size={16} />}</span>Auto{playingLevel ? <span className="text-white/60">({playingLevel}p)</span> : null}</button>
+                    <button type="button" className="flex w-full items-center gap-2 border-b border-white/10 px-3 pb-2.5 pt-1" onClick={() => setMenu('main')}><Icon.ChevronLeft size={18} />Quality</button>
+                    {levels.map((l) => <button key={l.index} type="button" role="menuitemradio" aria-checked={level === l.index} className="flex w-full items-center gap-3 px-4 py-2 hover:bg-white/10" onClick={() => chooseLevel(l.index)}><span className="w-4">{level === l.index && <Icon.Check size={16} />}</span>{l.label}{Math.min(l.height, l.width) >= 720 && <sup className="text-[10px] font-bold text-brand">HD</sup>}</button>)}
+                    <button type="button" role="menuitemradio" aria-checked={level === -1} className="flex w-full items-center gap-3 px-4 py-2 hover:bg-white/10" onClick={() => chooseLevel(-1)}><span className="w-4">{level === -1 && <Icon.Check size={16} />}</span>Auto{playingLevel ? <span className="text-white/60">({playingLevel}p)</span> : null}</button>
                   </>
                 )}
               </div>
             )}
           </div>
-          <button type="button" className={btn} onClick={pip} aria-label="Picture in picture"><PictureInPicture2 size={20} /></button>
-          {onTheater && !full && <button type="button" className={`${btn} hidden lg:grid`} onClick={onTheater} aria-label={theater ? 'Default view (t)' : 'Theater mode (t)'}><RectangleHorizontal size={22} strokeWidth={theater ? 2.4 : 1.8} /></button>}
-          <button type="button" className={btn} onClick={fullscreen} aria-label={full ? 'Exit full screen (f)' : 'Full screen (f)'}>{full ? <Minimize size={21} /> : <Maximize size={21} />}</button>
+          <button type="button" className={btn} onClick={pip} aria-label="Picture in picture"><Icon.MiniPlayer size={20} /></button>
+          {onTheater && !full && <button type="button" className={`${btn} hidden lg:grid`} onClick={onTheater} aria-label={theater ? 'Default view (t)' : 'Theater mode (t)'}><Icon.Theater size={22} strokeWidth={theater ? 2.4 : 1.8} /></button>}
+          <button type="button" className={btn} onClick={fullscreen} aria-label={full ? 'Exit full screen (f)' : 'Full screen (f)'}>{full ? <Icon.ExitFullscreen size={21} /> : <Icon.Fullscreen size={21} />}</button>
         </div>
       </div>
     </div>

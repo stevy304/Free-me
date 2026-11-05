@@ -30,6 +30,11 @@ enum MediaLocation {
   PRIVATE  // prv/ prefix: served only through short-lived signed links (private videos)
 }
 
+enum CollectionKind {
+  SAVED   // the built-in "Saved" collection (one per account, private)
+  CUSTOM
+}
+
 enum VideoStatus {
   UPLOADING
   PROCESSING
@@ -86,6 +91,7 @@ enum ModerationStatus {
 enum ModerationActionType {
   WARNING_ISSUED
   VIDEO_TAKEDOWN
+  VIDEO_RESTORED
   MONETIZATION_REVOKED
   ACCOUNT_SUSPENSION
   DISMISSED
@@ -243,7 +249,11 @@ model Video {
   monetizedViewCount    BigInt            @default(0)
   watchTimeSeconds      BigInt            @default(0)
   likeCount             Int               @default(0)
+  dislikeCount          Int               @default(0)   // never shown publicly; only to the creator
   commentCount          Int               @default(0)
+  commentsEnabled       Boolean           @default(true)
+  takenDownAt           DateTime?         // removed after a report or copyright notice; READY again if restored
+  takedownReason        String?
   sourceFileS3Key       String?
   hlsMasterKey          String?           // HLS master playlist, relative to the video's media prefix
   publishedAt           DateTime?
@@ -364,7 +374,10 @@ model Comment {
   parentId              String?           // For nested replies
   content               String
   likeCount             Int               @default(0)
+  replyCount            Int               @default(0)
   isPinned              Boolean           @default(false)
+  editedAt              DateTime?
+  deletedAt             DateTime?         // removed by its author, the creator or a moderator; kept while it has replies
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
@@ -375,21 +388,24 @@ model Comment {
 
   @@index([videoId])
   @@index([userId])
+  @@index([videoId, parentId, createdAt])
+  @@index([parentId, createdAt])
 }
 
 model Playlist {
   id                    String            @id @default(uuid())
   userId                String
   user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind                  CollectionKind    @default(CUSTOM)
   title                 String
   description           String?
-  visibility            Visibility        @default(PUBLIC)
+  visibility            Visibility        @default(PRIVATE)
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
   items                 PlaylistItem[]
 
-  @@index([userId])
+  @@index([userId, kind])
 }
 
 model PlaylistItem {
@@ -403,7 +419,8 @@ model PlaylistItem {
   video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   @@unique([playlistId, videoId])
-  @@index([playlistId])
+  @@index([playlistId, position])
+  @@index([videoId])
 }
 
 model WatchHistory {
@@ -600,16 +617,31 @@ model Report {
   reporter              User              @relation("UserReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
   videoId               String
   video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  reason                String            // "COPYRIGHT", "HARASSMENT", "INAPPROPRIATE_CONTENT", "MISINFORMATION", "SPAM"
+  reason                String            // see REPORT_REASONS in packages/shared
   details               String?
+  timestampSeconds      Int?              // where in the video the problem is
   status                ModerationStatus  @default(PENDING)
+  // Copyright notices only: who owns the work, what it is, and the signed statements.
+  claimantName          String?
+  claimantEmail         String?
+  claimantAddress       String?
+  originalWork          String?
+  signature             String?
+  // Counter-notice from the creator after a copyright removal.
+  counterStatement      String?
+  counterName           String?
+  counterAddress        String?
+  counterAt             DateTime?
+  resolution            String?           // what the moderator decided, shown to the reporter and the creator
+  resolvedAt            DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
   moderationActions     ModerationAction[]
 
   @@index([videoId])
-  @@index([status])
+  @@index([status, createdAt])
+  @@index([reporterId])
 }
 
 model ModerationAction {
@@ -618,11 +650,13 @@ model ModerationAction {
   report                Report?           @relation(fields: [reportId], references: [id], onDelete: SetNull)
   moderatorId           String
   moderator             User              @relation(fields: [moderatorId], references: [id], onDelete: Cascade)
+  videoId               String?           // the video acted on (also for actions without a report)
   action                ModerationActionType
   notes                 String?
   createdAt             DateTime          @default(now())
 
   @@index([moderatorId])
+  @@index([videoId])
 }
 
 model AuditLog {
