@@ -14,7 +14,18 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   const r = await load((await searchParams).v);
   const d = r?.data;
   if (!d) return { title: r?.status === 410 ? 'Video removed' : 'Video not available', robots: { index: false } };
-  return { title: d.video.title, description: d.video.description?.slice(0, 160), openGraph: { title: d.video.title, type: 'video.other', images: d.video.thumbnailUrl && d.video.visibility !== 'PRIVATE' ? [d.video.thumbnailUrl] : undefined } };
+  const v = d.video;
+  const description = (v.description?.replace(/\s+/g, ' ').trim() || `Watch ${v.title} from ${v.channel.name} on Free Me.`).slice(0, 200);
+  const image = v.thumbnailUrl && v.visibility !== 'PRIVATE' ? [{ url: v.thumbnailUrl, width: 1280, height: 720, alt: v.title }] : undefined;
+  const url = `/watch?v=${v.id}`;
+  return {
+    title: v.title, description,
+    alternates: { canonical: url },
+    // Unlisted and private videos are for people who have the link, not for search engines.
+    robots: v.visibility === 'PUBLIC' ? undefined : { index: false, follow: false },
+    openGraph: { type: 'video.other', url, title: v.title, description, siteName: 'Free Me', images: image },
+    twitter: { card: image ? 'summary_large_image' : 'summary', title: v.title, description, images: image?.map((i) => i.url) },
+  };
 }
 
 export default async function Watch({ searchParams }: { searchParams: Promise<{ v?: string; t?: string }> }) {

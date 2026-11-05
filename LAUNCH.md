@@ -57,6 +57,7 @@ payment or a decision only the operator can make.
 
 - [ ] Load test with the expected first audience (DEPLOYMENT.md → Scaling) and decide how many media workers you need.
 - [ ] Tag the release (`v1.0.0`) and deploy with `release.sh`.
+- [ ] Submit `https://<domain>/sitemap.xml` in Google Search Console and Bing Webmaster Tools, and paste a video link into WhatsApp to check the preview card.
 
 ## Maintenance commands
 
@@ -65,3 +66,4 @@ payment or a decision only the operator can make.
 | Find files a video left in the wrong storage place (report only) | `node dist/tools/repair-media.js` in `apps/api` |
 | Repair them | `node dist/tools/repair-media.js --apply` (safe while the site runs; busy videos are skipped, run again later) |
 | System status | `GET /api/admin/system` signed in as an administrator |
+| Upgrade older videos (HDR colour, even volume, previews, captions) | `POST /api/admin/system/reprocess` with `{ "limit": 50 }`, repeated until `remaining` is 0 (check `videosNeedingUpgrade` on the status page) |

@@ -1,6 +1,6 @@
 import express from 'express';
 import request from 'supertest';
-import { makeApp, resetDb, signIn } from './helpers';
+import { makeApp, resetDb, signIn, WEB } from './helpers';
 import { requestLog } from '../src/common/request-log';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -42,4 +42,23 @@ test('system status: administrators only; reports services, processing, videos, 
   expect(s.storage).toEqual({ sourceBytes: '0', mediaBytes: '0' });
   expect(s.warnings).toContain('Google sign-in is not configured.');
   expect(s.ok).toBe(false);
+});
+
+test('sitemap lists public videos and Spaces only; older videos can be re-processed in batches by administrators', async () => {
+  const c = await signIn(ctx.http, ctx.mail, 'maker@example.com');
+  const ch = (await c.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'maker', name: 'Maker' }).expect(201)).body.channel;
+  const base = { channelId: ch.id, durationSeconds: 60, status: 'READY' as const, mediaLocation: 'PUBLIC' as const, publishedAt: new Date(), hlsMasterKey: 'hls/master.m3u8', sourceFileS3Key: 'src/x/source.mp4' };
+  const pub = await ctx.prisma.video.create({ data: { ...base, title: 'Public', visibility: 'PUBLIC' } });
+  await ctx.prisma.video.create({ data: { ...base, title: 'Unlisted', visibility: 'UNLISTED' } });
+  await ctx.prisma.video.create({ data: { ...base, title: 'Upgraded', visibility: 'PUBLIC', storyboard: { key: 'thumbs/storyboard.jpg' } } });
+  const map = (await request(ctx.http).get('/api/site/sitemap').expect(200)).body;
+  expect(map.videos.map((v: any) => v.id)).toContain(pub.id);
+  expect(map.videos).toHaveLength(2);
+  expect(map.channels).toEqual([expect.objectContaining({ handle: 'maker' })]);
+
+  await c.agent.post('/api/admin/system/reprocess').set('Origin', WEB).send({}).expect(403);
+  const admin = await signIn(ctx.http, ctx.mail, 'boss@example.com');
+  expect((await admin.agent.get('/api/admin/system')).body.processing.videosNeedingUpgrade).toBe(2);
+  expect((await admin.agent.post('/api/admin/system/reprocess').set('Origin', WEB).send({ dryRun: true }).expect(200)).body).toEqual({ queued: 0, wouldQueue: 2, remaining: 2 });
+  await admin.agent.post('/api/admin/system/reprocess').set('Origin', WEB).send({ limit: 0 }).expect(400);
 });

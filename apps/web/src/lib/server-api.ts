@@ -42,3 +42,13 @@ export async function getLocale(): Promise<string> {
 export async function getViewer(): Promise<Viewer | null> {
   return apiGet<Viewer>('/me');
 }
+
+/** The site's public origin (https://freeme.example): APP_URL when set, else the address this request came to. */
+export async function siteOrigin(): Promise<string> {
+  const env = process.env.APP_URL?.trim().replace(/\/+$/, '');
+  if (env) return env;
+  const h = await headers();
+  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'localhost:3000';
+  const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') || host.startsWith('127.') ? 'http' : 'https');
+  return `${proto}://${host}`;
+}
