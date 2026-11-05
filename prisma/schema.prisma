@@ -15,6 +15,16 @@ enum Role {
   MODERATOR
 }
 
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum OtpPurpose {
+  SIGN_IN
+}
+
 enum VideoStatus {
   UPLOADING
   PROCESSING
@@ -55,12 +65,10 @@ enum PayoutStatus {
 }
 
 enum PayoutMethod {
-  MTN_MOMO_RWANDA
-  AIRTEL_MONEY_RWANDA
-  BANK_TRANSFER_BK
-  MPESA_KENYA
-  AIRTEL_MONEY_UGANDA
-  STRIPE_AFRICA
+  MOBILE_MONEY
+  BANK_TRANSFER
+  CARD
+  DIGITAL_WALLET
 }
 
 enum ModerationStatus {
@@ -78,16 +86,19 @@ enum ModerationActionType {
   DISMISSED
 }
 
+// Sign-in is passwordless: Google (OAuthAccount) or a one-time code sent by email (EmailOtp).
 model User {
   id                    String            @id @default(uuid())
   email                 String            @unique
-  passwordHash          String
-  role                  Role              @default(VIEWER)
-  isEmailVerified       Boolean           @default(false)
-  twoFactorEnabled      Boolean           @default(false)
-  twoFactorSecret       String?
+  roles                 Role[]            @default([VIEWER])
+  status                UserStatus        @default(ACTIVE)
+  emailVerifiedAt       DateTime?
+  lastLoginAt           DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
+
+  oauthAccounts         OAuthAccount[]
+  sessions              Session[]
 
   profile               Profile?
   channel               Channel?
@@ -101,8 +112,55 @@ model User {
   moderatorActions      ModerationAction[]
   auditLogs             AuditLog[]
 
-  @@index([email])
-  @@index([role])
+  @@index([status])
+}
+
+model OAuthAccount {
+  id                    String            @id @default(uuid())
+  userId                String
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider              String            // "google"
+  providerAccountId     String            // the provider's stable subject id ("sub")
+  email                 String
+  createdAt             DateTime          @default(now())
+  lastUsedAt            DateTime          @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+// One-time sign-in codes. Only a keyed hash of the code is stored.
+model EmailOtp {
+  id                    String            @id @default(uuid())
+  email                 String
+  codeHash              String
+  purpose               OtpPurpose        @default(SIGN_IN)
+  attempts              Int               @default(0)
+  expiresAt             DateTime
+  consumedAt            DateTime?
+  requestIp             String?
+  createdAt             DateTime          @default(now())
+
+  @@index([email, createdAt])
+  @@index([expiresAt])
+}
+
+// Server-side sessions. The browser holds a random token; only its SHA-256 is stored.
+model Session {
+  id                    String            @id @default(uuid())
+  tokenHash             String            @unique
+  userId                String
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  method                String            // "google" | "email_otp"
+  ipAddress             String?
+  userAgent             String?
+  createdAt             DateTime          @default(now())
+  lastSeenAt            DateTime          @default(now())
+  expiresAt             DateTime
+  revokedAt             DateTime?
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
 }
 
 model Profile {
@@ -112,9 +170,10 @@ model Profile {
   displayName           String
   avatarUrl             String?
   bio                   String?
-  country               String            @default("RW") // ISO 3166-1 alpha-2, default Rwanda
-  city                  String?           @default("Kigali")
-  preferredLanguage     String            @default("en") // en, fr, rw (Kinyarwanda), sw (Swahili)
+  country               String?           // ISO 3166-1 alpha-2, chosen by the user
+  city                  String?
+  preferredLanguage     String            @default("en") // BCP 47
+  timezone              String?           // IANA, e.g. "Africa/Kigali", "America/New_York"
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
@@ -130,6 +189,8 @@ model Channel {
   description           String?
   avatarUrl             String?
   bannerUrl             String?
+  country               String?           // ISO 3166-1 alpha-2
+  defaultLanguage       String?           // BCP 47
   isVerified            Boolean           @default(false)
   subscriberCount       Int               @default(0)
   totalViews            BigInt            @default(0)
@@ -153,8 +214,9 @@ model Video {
   channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
   title                 String
   description           String?
-  categoryId            String
-  category              Category          @relation(fields: [categoryId], references: [id])
+  categoryId            String?
+  category              Category?         @relation(fields: [categoryId], references: [id])
+  language              String?           // BCP 47
   status                VideoStatus       @default(UPLOADING)
   visibility            Visibility        @default(PUBLIC)
   durationSeconds       Int               @default(0)
@@ -349,11 +411,13 @@ model Advertiser {
   userId                String            @unique
   user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   businessName          String
-  tinOrRegistrationNumber String?         // Rwanda RDB/RRA Tax Identification Number
-  businessType          String            // e.g. "Hospitality", "Fintech", "Retail", "Agribusiness"
-  contactPhone          String
+  registrationNumber    String?           // business or tax registration number in its country
+  country               String            // ISO 3166-1 alpha-2
+  businessType          String
+  contactPhone          String?
   isVerified            Boolean           @default(false)
-  creditBalanceCents    BigInt            @default(0) // In local currency cents (e.g. RWF or USD cents)
+  currency              String            // ISO 4217
+  creditBalanceCents    BigInt            @default(0) // minor units of `currency`
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
@@ -369,10 +433,11 @@ model Campaign {
   name                  String
   adFormat              AdFormat          @default(PRE_ROLL)
   status                CampaignStatus    @default(DRAFT)
-  budgetAmountCents     BigInt
+  currency              String            // ISO 4217
+  budgetAmountCents     BigInt            // minor units of `currency`
   spentAmountCents      BigInt            @default(0)
-  targetCountry         String            @default("RW") // "RW", "KE", "UG", "ALL"
-  cpmRateCents          Int               // Cost per 1,000 impressions in cents
+  targetCountries       String[]          // ISO 3166-1 alpha-2; empty = worldwide
+  cpmRateCents          Int               // cost per 1,000 impressions, minor units
   adCreativeUrl         String            // Video or banner asset URL
   destinationUrl        String            // Advertiser landing page
   headline              String
@@ -388,7 +453,7 @@ model Campaign {
 
   @@index([advertiserId])
   @@index([status])
-  @@index([targetCountry])
+  @@index([targetCountries], type: Gin)
 }
 
 model CampaignCategory {
@@ -406,13 +471,14 @@ model AdImpression {
   campaign              Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   videoId               String
   video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  viewerCountry         String            @default("RW")
+  viewerCountry         String?           // ISO 3166-1 alpha-2
   watchedDurationMs     Int
   completed             Boolean           @default(false)
+  currency              String            // ISO 4217
   costChargedCents      Int
-  creatorShareCents     Int               // 60% of costChargedCents
-  platformShareCents    Int               // 30%
-  reinvestShareCents    Int               // 10%
+  creatorShareCents     Int               // creator pool share under the split in force
+  platformShareCents    Int
+  reinvestShareCents    Int
   createdAt             DateTime          @default(now())
 
   events                AdEvent[]
@@ -456,7 +522,7 @@ model CreatorBalance {
   id                    String            @id @default(uuid())
   channelId             String            @unique
   channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  currency              String            @default("RWF") // Rwandan Francs default
+  currency              String            // ISO 4217
   pendingBalanceCents   BigInt            @default(0)
   confirmedBalanceCents BigInt            @default(0)
   lifetimeEarningsCents BigInt            @default(0)
@@ -470,10 +536,12 @@ model RevenueLedger {
   channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
   sourceType            String            // "AD_SHARE_PRE_ROLL", "AD_SHARE_BANNER", "PLATFORM_BONUS", "PAYOUT_DEDUCTION"
   referenceId           String?           // Reference to AdImpression or Payout
+  currency              String            // ISO 4217
   grossAmountCents      BigInt
-  creatorShareCents     BigInt            // Exactly 60%
-  platformShareCents    BigInt            // Exactly 30%
-  reinvestShareCents    BigInt            // Exactly 10%
+  creatorShareCents     BigInt            // under the split in force (splitBps)
+  platformShareCents    BigInt
+  reinvestShareCents    BigInt
+  splitBps              String            // e.g. "6000/3000/1000", recorded with every entry
   balanceAfterCents     BigInt
   description           String
   isReconciled          Boolean           @default(false)
@@ -488,9 +556,10 @@ model Payout {
   channelId             String
   channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
   amountCents           BigInt
-  currency              String            @default("RWF")
-  method                PayoutMethod      @default(MTN_MOMO_RWANDA)
-  accountIdentifier     String            // e.g. Phone number +250788... or BK Account
+  currency              String            // ISO 4217
+  method                PayoutMethod
+  provider              String            // payout adapter, e.g. "mtn_momo", "mpesa", "bank", "paypal"
+  accountIdentifier     String            // phone number, IBAN or account id at the provider
   accountHolderName     String
   status                PayoutStatus      @default(REQUESTED)
   referenceTransactionId String?
@@ -545,6 +614,7 @@ model AuditLog {
   entityType            String            // "User", "Campaign", "Payout", "Video", "SystemSetting"
   entityId              String?
   ipAddress             String?
+  userAgent             String?
   detailsJson           String?           // Detailed payload diff
   createdAt             DateTime          @default(now())
 

@@ -1,6 +1,0 @@
-{
-  "name": "Free Me — African Video & Creator Platform",
-  "description": "Independent African video-sharing platform empowering creators with transparent monetization, local advertising, HLS streaming, and Creator Studio.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
