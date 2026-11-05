@@ -43,8 +43,10 @@ jobs:
       - name: FFmpeg and an S3-compatible test server
         run: |
           sudo apt-get update -q && sudo apt-get install -yq ffmpeg
-          pip install --quiet "moto[server]"
-          (moto_server -p 5055 > /tmp/moto.log 2>&1 &)
+          python3 -m pip install --quiet "moto[server]"
+          (python3 -m moto.server -p 5055 > /tmp/moto.log 2>&1 &)
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:5055/ > /dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:5055/ > /dev/null || { cat /tmp/moto.log; exit 1; }
       - name: Install (generates the Prisma client and builds the shared package)
         run: npm ci
       - name: Schema is valid and migrations match it
