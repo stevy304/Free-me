@@ -1,7 +1,7 @@
 import { BadRequestException, Controller, Get, HttpCode, Inject, NotFoundException, Param, Put, Req, Res } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
-import { extname, resolve } from 'node:path';
+import { extname, relative, resolve } from 'node:path';
 import { APP_CONFIG, type AppConfig } from '../config/config';
 import { STORAGE } from '../media/queue';
 import { LocalStorage, type Storage } from '../media/storage';
@@ -40,10 +40,13 @@ export class LocalStorageController {
     const s = this.local();
     let path: string;
     try { path = resolve(s.path(key)); } catch { throw new NotFoundException(); }
+    // Send relative to the storage folder: the dot-file check then covers only the key, not the folder itself
+    // (the default LOCAL_STORAGE_DIR is ./.data/storage, which a check on the full path would refuse).
+    const root = resolve(s.rootDir);
     res.setHeader('Cache-Control', cache);
     const type = TYPES[extname(key)];
     if (type) res.type(type);
-    res.sendFile(path, { dotfiles: 'deny' }, (e) => { if (e && !res.headersSent) res.status(404).end(); });
+    res.sendFile(relative(root, path), { root, dotfiles: 'deny' }, (e) => { if (e && !res.headersSent) res.status(404).end(); });
   }
 
   @Get('file/:token')

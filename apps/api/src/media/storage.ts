@@ -130,6 +130,9 @@ export class S3Storage implements Storage {
 export class LocalStorage implements Storage {
   constructor(private readonly root: string, private readonly appUrl: string, private readonly secret: string) {}
 
+  /** The folder that holds every stored file. */
+  get rootDir() { return this.root; }
+
   /** Resolves a key inside the root; refuses anything that would escape it. */
   path(key: string): string {
     const p = normalize(join(this.root, key));
