@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConsoleLogger, INestApplication, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -7,10 +7,11 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import type { AppConfig } from './config/config';
+import { requestLog } from './common/request-log';
 
 /** Builds the HTTP application (used by main.ts and by the API tests). Every route lives under /api. */
 export async function createApp(config: AppConfig): Promise<INestApplication> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config));
+  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config), config.logFormat === 'json' ? { logger: new ConsoleLogger({ json: true }) } : {});
   return configureApp(app, config);
 }
 
@@ -18,6 +19,7 @@ export async function createApp(config: AppConfig): Promise<INestApplication> {
 export function configureApp(app: NestExpressApplication, config: AppConfig): NestExpressApplication {
   app.set('trust proxy', config.trustProxy);
   app.disable('x-powered-by');
+  app.use(requestLog({ json: config.logFormat === 'json' }));
   app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'same-site' } }));
   app.use(cookieParser());
   app.setGlobalPrefix('api');

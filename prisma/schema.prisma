@@ -1,10 +1,13 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  // pg_trgm: typo-tolerant search on titles and Space names (ships with PostgreSQL).
+  extensions = [pg_trgm]
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 enum Role {
@@ -218,6 +221,7 @@ model Channel {
 
   @@index([handle])
   @@index([isVerified])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Channel_name_trgm_idx")
 }
 
 model Video {
@@ -278,6 +282,7 @@ model Video {
   @@index([createdAt])
   @@index([channelId, createdAt])
   @@index([status, visibility, isShort, publishedAt])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "Video_title_trgm_idx")
 }
 
 model VideoRendition {

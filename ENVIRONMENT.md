@@ -26,6 +26,7 @@ Values for local development are in [.env.example](.env.example). In production 
 | `LEGAL_JURISDICTION` | | | Country whose law governs the Terms, e.g. `Rwanda` |
 | `TRUST_PROXY` | | `1` in production | Number of proxies in front of the API |
 | `API_DOCS` | | on outside production | `true` serves OpenAPI at `/api/docs` |
+| `LOG_FORMAT` | | `json` in production, `text` otherwise | `json`: one JSON object per line (API and worker), with a request id per HTTP request; `text`: readable lines |
 
 ## Video storage and processing (API and worker)
 

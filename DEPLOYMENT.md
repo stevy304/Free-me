@@ -1,5 +1,7 @@
 # Deployment (Ubuntu 24.04, no containers)
 
+Going live for the first time? Follow [LAUNCH.md](LAUNCH.md), which links back here.
+
 Free Me runs as plain systemd services on Ubuntu servers. Nothing here has been provisioned yet. Buying servers or storage, pointing a domain and opening the platform to the public each need the owner's go-ahead.
 
 ## Servers
@@ -82,4 +84,4 @@ Services run as the unprivileged `freeme` user with systemd hardening (read-only
 
 ## Not yet covered (phase 6)
 
-Monitoring and alerts (Prometheus, Grafana), centralised logs and error tracking, staged load tests at 100, 500 and 1,000 concurrent viewers, and a recorded restore drill.
+Monitoring and alerts (Prometheus, Grafana) and a central log store (logs are already JSON lines with request ids, and `/api/admin/system` reports health, queue and failures), staged load tests at 100, 500 and 1,000 concurrent viewers, and a recorded restore drill.

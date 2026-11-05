@@ -170,6 +170,28 @@ test('published while processing: earlier files and a custom thumbnail move with
   expect(custom.customThumbnail).toBe(true);
 }, 180_000);
 
+test('repair: files left in the other storage place are reported, then brought back without overwriting', async () => {
+  const agent = await creator();
+  const { videoId: id } = await upload(agent, landscape);
+  await until(agent, id, (x) => x.status === 'READY' && x.processingStage === 'Ready');
+  const { renameSync, mkdirSync } = await import('node:fs');
+  // As the old bug left it: the video is private, its thumbnails sit under pub/.
+  mkdirSync(join(storageDir, 'pub', id), { recursive: true });
+  renameSync(join(storageDir, 'prv', id, 'thumbs'), join(storageDir, 'pub', id, 'thumbs'));
+  const { MediaJobs } = await import('../src/media/jobs');
+  const { STORAGE } = await import('../src/media/queue');
+  const jobs = new MediaJobs(ctx.prisma, ctx.app.get(STORAGE), ctx.config, null);
+  const report = await jobs.repair(id, false);
+  expect(report).toMatchObject({ location: 'PRIVATE', leftovers: 3, toCopy: 3, copied: 0 });
+  expect(report!.missing).toEqual(expect.arrayContaining(['thumbs/1.jpg', 'thumbs/2.jpg', 'thumbs/3.jpg']));
+  expect(existsSync(join(storageDir, 'prv', id, 'thumbs'))).toBe(false); // report only
+  const fixed = await jobs.repair(id, true);
+  expect(fixed).toMatchObject({ copied: 3 });
+  expect(existsSync(join(storageDir, 'prv', id, 'thumbs', '2.jpg'))).toBe(true);
+  expect(existsSync(join(storageDir, 'pub', id))).toBe(false);
+  expect(await jobs.repair(id, false)).toMatchObject({ missing: [], leftovers: 0 });
+}, 180_000);
+
 test('a vertical clip becomes a Short; a file that is not a video fails with a clear reason; bad uploads are refused', async () => {
   const agent = await creator();
   const short = await upload(agent, vertical);

@@ -19,7 +19,9 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
 
 export default async function Watch({ searchParams }: { searchParams: Promise<{ v?: string; t?: string }> }) {
   const sp = await searchParams;
-  const r = await load(sp.v);
+  const valid = !!sp.v && /^[0-9a-f-]{36}$/i.test(sp.v);
+  // The video and what comes after it load together.
+  const [r, more] = await Promise.all([load(sp.v), valid ? apiGet<{ videos: VideoPage['videos'] }>(`/videos/${sp.v}/next?limit=20`).catch(() => null) : null]);
   if (r?.status === 410) {
     return (
       <EmptyState icon={<Icon.Warning size={36} strokeWidth={1.4} />} title="Video unavailable" action={<Link href="/" className="inline-flex h-10 items-center rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand">Go home</Link>}>
@@ -30,7 +32,6 @@ export default async function Watch({ searchParams }: { searchParams: Promise<{ 
   if (r && r.status >= 500) throw new Error(`API answered ${r.status}`);
   if (!r?.data) notFound();
   const d = r.data;
-  const more = await apiGet<VideoPage>('/videos?limit=20&moments=false');
   // ?t=90 (or 1m30s) starts at that moment, e.g. from a shared link or a report.
   const t = parseStart(sp.t);
   return <WatchView v={d.video} viewer={t ? { ...d.viewer, resumeAt: t } : d.viewer} more={(more?.videos ?? []).filter((x) => x.id !== d.video.id)} />;

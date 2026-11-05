@@ -10,6 +10,7 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 - **Rate limits:** 429 with `retryAfterSeconds`.
 - **Pagination:** `?cursor=` with `nextCursor` in the response (`null` at the end).
 - **Big numbers** (views, totals) are strings.
+- **Request id:** every answer has an `X-Request-Id` header (the edge's, or a new one). Unexpected errors (500) also return it as `requestId`, so a report can be matched with the server log.
 
 ## Sign-in
 
@@ -49,7 +50,8 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 | GET | `/categories` | Video categories |
 | GET | `/videos?category=&moments=&cursor=&limit=` | Latest public videos; `moments=true` only Moments (vertical, up to 3 minutes), `false` none |
 | GET | `/videos/:id` | One video for its watch page: `playbackUrl` (CDN for public and unlisted, API route for private), processing stage, size, `commentsOpen`; and `viewer`: `reaction`, `saved`, `following`, `isOwner`, `resumeAt` (seconds). `410` with the reason when moderators removed it |
-| GET | `/search?q=&cursor=` | Matching channels (first page) and videos |
+| GET | `/videos/:id/next?limit=` | What to watch after this video (default 20, up to 40): same Space, shared tags and topic first, then the viewer's picked topics, then popularity and freshness; videos the viewer finished come last; at most two from one Space in any four in a row. Unknown video: the latest videos |
+| GET | `/search?q=&cursor=` | Matching channels (first page) and videos, ranked: title words first, then description, tags and Space name; close spellings match too ("gorrilas" finds "Gorillas"). Pages of 24 |
 | GET | `/search/suggest?q=` | Up to ten suggestions while typing |
 | GET | `/feed/following` 🔒 | Channels I follow and their latest videos |
 | GET | `/feed/home` | For you: `spotlight`, `interests` (with `picked`), `shelves` (one per picked topic, then the busiest topics this month), `fromCreators`, `moments`, `latest`. Built only from picked topics, followed creators and recency |
@@ -138,6 +140,7 @@ Public and unlisted videos play from the CDN: `playbackUrl` in `/videos/:id` and
 | PATCH | `/admin/users/:id/roles` | `{ roles }`; you cannot remove your own administrator role |
 | PATCH | `/admin/users/:id/status` | `{ status: ACTIVE or SUSPENDED }`; suspension signs the account out everywhere |
 | GET | `/admin/audit?cursor=` | Latest audit entries |
+| GET | `/admin/system` | `ok`, `warnings` (database or Redis down, email not really sent, Google sign-in missing, videos waiting, stuck over 2 hours or failed in 24 hours), `services`, `processing` (queue counts), `videos` by status, `storage` bytes, `accounts`, `moderation.openReports` |
 
 ## Health
 

@@ -73,6 +73,31 @@ export class MediaJobs {
     });
   }
 
+  /**
+   * Finds a ready video's files left in the other storage place (public vs private) and, with `apply`, copies the
+   * ones missing where the video lives, then removes the leftovers. Before November 2026, publishing while the HD
+   * pass ran could leave thumbnails and SD files behind this way. Never overwrites a file that is already in place.
+   */
+  async repair(videoId: string, apply: boolean) {
+    const check = async () => {
+      const v = await this.prisma.video.findUnique({ where: { id: videoId }, include: { renditions: { select: { playlistKey: true } } } });
+      if (!v?.hlsMasterKey) return null;
+      const here = mediaPrefix(videoId, v.mediaLocation);
+      const there = mediaPrefix(videoId, v.mediaLocation === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC');
+      const [hereKeys, thereKeys] = await Promise.all([this.storage.list(here).then((k) => new Set(k)), this.storage.list(there)]);
+      const needed = [v.hlsMasterKey, ...v.renditions.map((r) => `hls/${r.playlistKey.replace(/^hls\//, '')}`), ...(v.thumbnailKey ? [v.thumbnailKey] : []), ...v.thumbnailCandidates];
+      const missing = [...new Set(needed)].filter((k) => !hereKeys.has(here + k));
+      const toCopy = thereKeys.filter((k) => !hereKeys.has(here + k.slice(there.length)));
+      let copied = 0;
+      if (apply && thereKeys.length) {
+        for (const k of toCopy) { await this.storage.copyObject(k, here + k.slice(there.length)); copied++; }
+        await this.storage.deletePrefix(there);
+      }
+      return { videoId, location: v.mediaLocation, missing, leftovers: thereKeys.length, toCopy: toCopy.length, copied };
+    };
+    return apply ? this.withLock(videoId, check) : check();
+  }
+
   /** Deletes every file of a removed video (source, public and private media). */
   async purge(videoId: string) {
     for (const p of [`src/${videoId}/`, `pub/${videoId}/`, `prv/${videoId}/`]) await this.storage.deletePrefix(p);

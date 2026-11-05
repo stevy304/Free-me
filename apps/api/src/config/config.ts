@@ -7,6 +7,8 @@ import { normalizeEmail } from '@free-me/shared';
 export interface AppConfig {
   nodeEnv: 'development' | 'test' | 'production';
   port: number;
+  /** json: one JSON object per line (production default, for log collectors); text: readable lines. */
+  logFormat: 'json' | 'text';
   /** Public origin of the web app (https://freeme.example). Cookies, redirects and the CSRF check use it. */
   appUrl: string;
   /** Extra origins allowed to send state-changing requests (comma-separated), e.g. a staging web app. */
@@ -121,7 +123,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   if (problems.length) throw new ConfigError(`Free Me API configuration:\n- ${problems.join('\n- ')}`);
   return {
-    nodeEnv, port: Number(env.PORT || 4000), appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
+    nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
     sessionTtlDays: Math.min(90, Math.max(1, Number(env.SESSION_TTL_DAYS || 30))),
     google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,
     mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)),

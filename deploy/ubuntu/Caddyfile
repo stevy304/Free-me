@@ -24,6 +24,8 @@
 			health_interval 5s
 			health_timeout 2s
 			header_up X-Forwarded-For {remote_host}
+			# One id per request, in the API's logs and in its error answers.
+			header_up X-Request-Id {http.request.uuid}
 		}
 	}
 
