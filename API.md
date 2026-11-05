@@ -80,6 +80,8 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 | PUT | `/hub/videos/:id/thumbnail` | Body: a JPEG, PNG or WebP image (up to 2 MB), checked by its bytes |
 | PUT | `/hub/videos/:id/captions/:lang` | Body: a WebVTT or SubRip (.srt) file, up to 1 MB. Cleaned to WebVTT (times normalised; markup other than `<b>`, `<i>`, `<u>` removed). Replaces captions in that language, automatic ones included. `:lang` from the language list |
 | DELETE | `/hub/videos/:id/captions/:lang` | Removes captions in one language |
+| GET | `/hub/stats?days=` | My Space over 7, 28, 90 or 365 days: `series` (per day: views, watchSeconds, newFollowers), `totals` with the `previous` period, `topVideos` (views, watch time, average view) |
+| GET | `/hub/videos/:id/stats?days=` | One video: daily series, `lifetime` and `period` totals, and `retention` (share of signed-in viewers still watching at each 5%; shown from 5 viewers) |
 | DELETE | `/hub/videos/:id` | Deletes the video and every file |
 | GET | `/hub/notices` | My removed videos, why, the copyright notice (claimant name and work, never their email), and strikes in the last 90 days |
 | POST | `/hub/notices/:reportId/counter` | Counter-notice for a copyright removal: `{ statement, name, address, goodFaith: true, consent: true, signature }` (signature = name); forwarded to the claimant |

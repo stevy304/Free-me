@@ -278,6 +278,7 @@ model Video {
   videoFiles            VideoFile[]
   tags                  VideoTag[]
   captions              Caption[]
+  dailyStats            VideoDailyStat[]
   notifications         Notification[]
   /// When followers were told about this video (once, the first time it is public and ready).
   announcedAt           DateTime?
@@ -779,4 +780,16 @@ model Notification {
 
   @@index([userId, updatedAt])
   @@index([userId, readAt])
+}
+
+/// Views and watch time of one video on one day (UTC), written by the view counter's batches. Creator Hub's charts read it.
+model VideoDailyStat {
+  videoId               String
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  day                   DateTime          @db.Date
+  views                 Int               @default(0)
+  watchSeconds          BigInt            @default(0)
+
+  @@id([videoId, day])
+  @@index([day])
 }

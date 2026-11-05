@@ -5,10 +5,11 @@ import { MediaUrls } from './media-urls';
 import { PlaybackController } from './playback.controller';
 import { HubController } from './hub.controller';
 import { UploadsController } from './uploads.controller';
+import { StatsController } from './stats.controller';
 
 @Global()
 @Module({
-  controllers: [UploadsController, HubController, PlaybackController, LocalStorageController],
+  controllers: [UploadsController, HubController, PlaybackController, LocalStorageController, StatsController],
   providers: [storageProvider, MediaQueue, MediaUrls],
   exports: [storageProvider, MediaQueue, MediaUrls],
 })
