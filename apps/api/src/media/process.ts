@@ -119,6 +119,10 @@ export class VideoProcessor {
     const video = await this.prisma.video.findUniqueOrThrow({ where: { id: videoId } });
     const location = wantedLocation(video);
     const prefix = mediaPrefix(videoId, location);
+    // Published (or made private) while processing: the earlier pass's files (SD, thumbnails) live in the other
+    // place. Bring them along first, so nothing is left behind; this pass's playlists overwrite the old ones.
+    const moveFrom = video.hlsMasterKey && video.mediaLocation !== location ? mediaPrefix(videoId, video.mediaLocation) : null;
+    if (moveFrom) await this.storage.copyPrefix(moveFrom, prefix);
     const out = join(work, 'out');
     const files = [...(await Promise.all(rungs.map((r) => walk(join(out, 'hls', r.name))))).flat(), ...(thumbs ?? [])];
     let i = 0;
@@ -140,12 +144,18 @@ export class VideoProcessor {
     }
     await this.storage.putBuffer(`${prefix}hls/master.m3u8`, Buffer.from(masterPlaylist(done)), { contentType: TYPES['.m3u8'], cacheControl: SHORT });
     const thumbKeys = thumbs?.map((t) => `thumbs/${relative(join(out, 'thumbs'), t)}`);
-    // A video removed by moderators while it was processing stays removed.
-    const removed = !!(await this.prisma.video.findUnique({ where: { id: videoId }, select: { takenDownAt: true } }))?.takenDownAt;
+    // Read again now: uploading takes a while, and in the meantime moderators may have removed the video
+    // or the creator may have chosen a thumbnail, which the default frame must not replace.
+    const now = await this.prisma.video.findUnique({ where: { id: videoId }, select: { takenDownAt: true, thumbnailKey: true } });
     await this.prisma.video.update({ where: { id: videoId }, data: {
-      status: removed ? 'SUSPENDED' : 'READY', mediaLocation: location, hlsMasterKey: 'hls/master.m3u8', processingProgress: progress, processingStage: stage, processingError: null,
-      ...(thumbKeys?.length ? { thumbnailCandidates: thumbKeys, ...(video.customThumbnail ? {} : { thumbnailKey: thumbKeys[Math.min(1, thumbKeys.length - 1)] }) } : {}),
+      status: now?.takenDownAt ? 'SUSPENDED' : 'READY', mediaLocation: location, hlsMasterKey: 'hls/master.m3u8', processingProgress: progress, processingStage: stage, processingError: null,
+      ...(thumbKeys?.length ? { thumbnailCandidates: thumbKeys, ...(now?.thumbnailKey ? {} : { thumbnailKey: thumbKeys[Math.min(1, thumbKeys.length - 1)] }) } : {}),
     } });
+    if (moveFrom) {
+      // A custom thumbnail saved to the old place while this pass ran is picked up here (see the thumbnail upload).
+      await this.storage.copyPrefix(`${moveFrom}thumbs/`, `${prefix}thumbs/`);
+      await this.storage.deletePrefix(moveFrom);
+    }
   }
 }
 

@@ -13,6 +13,33 @@ const VISIBILITY = [
   { v: 'PUBLIC', label: 'Public', help: 'Everyone can find and watch it', Icon: Icon.Globe },
 ] as const;
 
+const MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Makes any picture the browser can open into an upload the server accepts: small JPEG, PNG and WebP files go
+ * as they are; anything larger than 1280x720 or 2 MB, or in another format (HEIC, GIF, BMP...), is redrawn as a JPEG.
+ */
+async function prepareThumbnail(f: File): Promise<Blob> {
+  const fine = ['image/jpeg', 'image/png', 'image/webp'].includes(f.type) && f.size <= MAX_BYTES;
+  let img: ImageBitmap;
+  try { img = await createImageBitmap(f); } catch {
+    if (fine) return f;
+    throw new Error('This picture could not be opened. Use a JPEG, PNG or WebP image.');
+  }
+  if (fine && img.width <= 1920 && img.height <= 1080) { img.close(); return f; }
+  const scale = Math.min(1, 1280 / img.width, 720 / img.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(img.width * scale)); canvas.height = Math.max(1, Math.round(img.height * scale));
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height); // transparent PNGs get a dark backdrop, not black-on-nothing
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height); img.close();
+  for (const q of [0.9, 0.8, 0.7, 0.55]) {
+    const b = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, 'image/jpeg', q));
+    if (b && b.size <= MAX_BYTES) return b;
+  }
+  throw new Error('The image is too large. Try a smaller picture.');
+}
+
 /** Title, description, thumbnail, audience, category, tags, language and visibility of one video. */
 export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video: HubVideo; onSaved: (v: HubVideo) => void; saveLabel?: string }) {
   const [title, setTitle] = useState(video.title);
@@ -44,12 +71,12 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
     } catch (e) { setMessage({ ok: false, text: e instanceof Error ? e.message : 'Could not save.' }); } finally { setBusy(false); }
   };
   const uploadThumb = async (f: File) => {
-    if (f.size > 2 * 1024 * 1024) { setMessage({ ok: false, text: 'The image must be 2 MB or smaller.' }); return; }
     setBusy(true); setMessage(null);
     try {
-      const res = await fetch(`/api/hub/videos/${video.id}/thumbnail`, { method: 'PUT', body: f, headers: { 'content-type': f.type || 'application/octet-stream' }, credentials: 'same-origin' });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.message ?? 'Could not upload the image.');
+      const body = await prepareThumbnail(f);
+      const res = await fetch(`/api/hub/videos/${video.id}/thumbnail`, { method: 'PUT', body, headers: { 'content-type': body.type || 'application/octet-stream' }, credentials: 'same-origin' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.message ?? (res.status === 413 ? 'The image is too large.' : 'Could not upload the image. Check your connection and try again.'));
       setThumb(null); onSaved(d.video); setMessage({ ok: true, text: 'Thumbnail updated' });
     } catch (e) { setMessage({ ok: false, text: (e as Error).message }); } finally { setBusy(false); }
   };
@@ -70,13 +97,13 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
       </div>
       <div>
         <p className={label}>Thumbnail</p>
-        <p className="text-[13px] text-muted">Pick a frame or upload a picture (JPEG, PNG or WebP, 1280×720, up to 2 MB).</p>
+        <p className="text-[13px] text-muted">Pick a frame or upload a picture. Any size works: big photos are resized to 1280×720 for you.</p>
         <div className="mt-3 flex flex-wrap gap-3">
           <button type="button" disabled={!video.thumbnailCandidates.length || busy} onClick={() => file.current?.click()}
             className="flex aspect-video w-36 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line text-[12px] text-muted hover:bg-surface disabled:opacity-50">
             <Icon.ImageAdd size={20} />Upload thumbnail
           </button>
-          <input ref={file} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadThumb(f); e.target.value = ''; }} />
+          <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadThumb(f); e.target.value = ''; }} />
           {video.customThumbnail && video.thumbnailUrl && (
             <span className={`relative aspect-video w-36 overflow-hidden rounded-lg ring-2 ${chosen === -1 ? 'ring-ink' : 'ring-transparent'}`}><img src={video.thumbnailUrl} alt="Custom thumbnail" className="h-full w-full object-cover" /></span>
           )}
@@ -84,7 +111,7 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
             <button key={u} type="button" onClick={() => setThumb(i)} aria-pressed={chosen === i} className={`relative aspect-video w-36 overflow-hidden rounded-lg ring-2 ${chosen === i ? 'ring-ink' : 'ring-transparent hover:ring-line'}`}>
               <img src={u} alt={`Frame ${i + 1}`} className="h-full w-full object-cover" />{chosen === i && <Icon.Check size={18} className="absolute right-1 top-1 rounded-full bg-black/70 p-0.5 text-white" />}
             </button>
-          )) : <p className="flex items-center gap-2 text-[13px] text-muted"><Icon.Spinner size={14} className="animate-spin" />Frames appear once processing starts.</p>}
+          )) : <p className="flex items-center gap-2 text-[13px] text-muted"><Icon.Spinner size={14} className="animate-spin" />Frames, and your own picture, can be chosen once the first version is ready.</p>}
         </div>
       </div>
       <fieldset>

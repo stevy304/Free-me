@@ -23,6 +23,9 @@ test('upload, details, publish, processing to every quality, then on the home pa
   test.setTimeout(180_000);
   const dir = mkdtempSync(join(tmpdir(), 'fm-e2e-'));
   const clip = join(dir, `Morning in Kigali ${run}.mp4`);
+  // A big, noisy photo (well over 2 MB): the browser shrinks it before uploading.
+  const photo = join(dir, 'cover.png');
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=gray:s=3000x2000', '-vf', 'noise=alls=60:allf=t', '-frames:v', '1', photo]);
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30:duration=6', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-shortest', clip]);
 
   const email = `uploader.${run}@example.com`;
@@ -46,6 +49,9 @@ test('upload, details, publish, processing to every quality, then on the home pa
   await page.getByLabel('Category').selectOption('travel-events');
   await page.locator('label').filter({ hasText: 'Everyone can find and watch it' }).click();
   await expect(page.getByText(/Processing complete · 720p/)).toBeVisible({ timeout: 120_000 });
+  expect(readFileSync(photo).length).toBeGreaterThan(2 * 1024 * 1024);
+  await page.locator('input[type=file][accept="image/*"]').setInputFiles(photo);
+  await expect(page.getByText('Thumbnail updated')).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByText('Published')).toBeVisible();
   await page.getByRole('button', { name: 'Close' }).click();
@@ -53,13 +59,14 @@ test('upload, details, publish, processing to every quality, then on the home pa
   await page.goto('/hub');
   await expect(page.getByText(`Morning in Kigali ${run}`)).toBeVisible();
   await expect(page.getByRole('cell', { name: '720p' })).toBeVisible();
-  // Media moves to the public prefix in the background; then the video is on the home page with its thumbnail.
+  // Media (and the custom thumbnail) moves to the public prefix in the background; then the video is on the home page.
   await expect(async () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: `Morning in Kigali ${run}` }).first()).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 30_000 });
   const thumb = page.getByRole('link', { name: `Morning in Kigali ${run}` }).first().locator('img');
-  await expect(thumb).toHaveAttribute('src', /\/pub\/[0-9a-f-]{36}\/thumbs\/\d\.jpg$/);
+  await expect(thumb).toHaveAttribute('src', /\/pub\/[0-9a-f-]{36}\/thumbs\/custom-\d+\.jpg$/);
+  expect((await page.request.get((await thumb.getAttribute('src'))!)).status()).toBe(200);
   await page.getByRole('heading', { name: `Morning in Kigali ${run}` }).first().click();
   await expect(page).toHaveURL(/\/watch\?v=/);
   await expect(page.locator('video')).toBeAttached();

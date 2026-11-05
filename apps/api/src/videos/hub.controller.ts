@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Put, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Put, Query, Req } from '@nestjs/common';
 import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import type { Video, Visibility } from '@prisma/client';
@@ -122,8 +122,16 @@ export class HubController {
     const kind = IMAGE.find(([, magic]) => magic.every((b, i) => buf[i] === b));
     if (!kind || (kind[0] === 'image/webp' && buf.subarray(8, 12).toString() !== 'WEBP')) throw new BadRequestException('Use a JPEG, PNG or WebP image.');
     const rel = `thumbs/custom-${Date.now()}${kind[2]}`;
-    await this.storage.putBuffer(mediaPrefix(id, v.mediaLocation) + rel, buf, { contentType: kind[0], cacheControl: 'public, max-age=31536000, immutable' });
-    await this.prisma.video.update({ where: { id }, data: { thumbnailKey: rel, customThumbnail: true } });
+    // The media may be moving between public and private storage right now (a visibility change). Save the image
+    // where the files are, then record it only if they are still there; otherwise try again in the new place.
+    // A move copies thumbs/ once more after switching places, so an image recorded before the switch is never lost.
+    for (let attempt = 0; ; attempt++) {
+      const cur = await this.mine(auth, id);
+      await this.storage.putBuffer(mediaPrefix(id, cur.mediaLocation) + rel, buf, { contentType: kind[0], cacheControl: 'public, max-age=31536000, immutable' });
+      const r = await this.prisma.video.updateMany({ where: { id, mediaLocation: cur.mediaLocation }, data: { thumbnailKey: rel, customThumbnail: true } });
+      if (r.count) break;
+      if (attempt >= 2) throw new ConflictException('The video is being moved. Try again in a moment.');
+    }
     return { video: await this.view(await this.mine(auth, id)) };
   }
 

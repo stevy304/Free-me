@@ -147,6 +147,29 @@ test('upload in parts, resume, process to adaptive HLS, play privately, publish 
   expect(existsSync(join(storageDir, 'src', id))).toBe(false);
 }, 180_000);
 
+test('published while processing: earlier files and a custom thumbnail move with the video; the thumbnail is kept', async () => {
+  const agent = await creator();
+  const { videoId: id } = await upload(agent, landscape);
+  await until(agent, id, (x) => x.status === 'READY' && x.processingStage === 'Ready');
+  const jpg = readFileSync(join(storageDir, 'prv', id, 'thumbs', '1.jpg'));
+  const custom = (await agent.put(`/api/hub/videos/${id}/thumbnail`).set('Origin', WEB).set('Content-Type', 'image/jpeg').send(jpg).expect(200)).body.video;
+  const key = (await ctx.prisma.video.findUniqueOrThrow({ where: { id } })).thumbnailKey!;
+  expect(existsSync(join(storageDir, 'prv', id, key))).toBe(true);
+  // As if the creator pressed Publish while the HD pass was still running: the visibility changes, files are still private.
+  await ctx.prisma.video.update({ where: { id }, data: { visibility: 'PUBLIC', publishedAt: new Date() } });
+  const { MediaJobs } = await import('../src/media/jobs');
+  const { STORAGE } = await import('../src/media/queue');
+  await new MediaJobs(ctx.prisma, ctx.app.get(STORAGE), ctx.config, null).transcode(id, true);
+  const after = await ctx.prisma.video.findUniqueOrThrow({ where: { id } });
+  expect(after).toMatchObject({ mediaLocation: 'PUBLIC', customThumbnail: true, thumbnailKey: key });
+  expect(existsSync(join(storageDir, 'pub', id, key))).toBe(true);
+  expect(existsSync(join(storageDir, 'pub', id, 'hls', '144p', 'init.mp4'))).toBe(true);
+  expect(existsSync(join(storageDir, 'prv', id))).toBe(false);
+  const card = (await request(ctx.http).get(`/api/videos/${id}`).expect(200)).body.video;
+  expect(card.thumbnailUrl).toBe(`${WEB}/api/storage/local/pub/${id}/${key}`);
+  expect(custom.customThumbnail).toBe(true);
+}, 180_000);
+
 test('a vertical clip becomes a Short; a file that is not a video fails with a clear reason; bad uploads are refused', async () => {
   const agent = await creator();
   const short = await upload(agent, vertical);

@@ -66,6 +66,8 @@ export class MediaJobs {
       const to = mediaPrefix(videoId, want);
       const n = await this.storage.copyPrefix(from, to);
       await this.prisma.video.update({ where: { id: videoId }, data: { mediaLocation: want } });
+      // A custom thumbnail written to the old place during the copy is moved too (see the thumbnail upload).
+      await this.storage.copyPrefix(`${from}thumbs/`, `${to}thumbs/`);
       await this.storage.deletePrefix(from);
       this.log.log(`${videoId}: moved ${n} files to ${want.toLowerCase()} storage`);
     });
