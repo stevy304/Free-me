@@ -13,7 +13,7 @@ import { VideoPlayer } from '@/components/player/VideoPlayer';
 import { useShell } from '@/components/shell/ShellContext';
 import { Thumbnail, VideoRow } from '@/components/video/VideoCard';
 import { api } from '@/lib/client-api';
-import { compactNumber, followersLabel, fullDate, timeAgo, viewsLabel } from '@/lib/format';
+import { compactNumber, duration, followersLabel, fullDate, timeAgo, viewsLabel } from '@/lib/format';
 import type { VideoCardData } from '@/lib/types';
 
 export interface WatchVideo extends VideoCardData {
@@ -60,8 +60,41 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   const need = (what: 'save' | 'report') => { setMenu(false); if (!initialViewer.signedIn) router.push(login); else setDialog(what); };
   const [tab, setTab] = useState<'about' | 'conversation' | 'next'>('conversation');
 
+  // Next: what plays after this one. "Flow on" moves to it by itself after a short, cancellable countdown.
+  const next = more[0] ?? null;
+  const [flow, setFlow] = useState(true);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  useEffect(() => { try { setFlow(localStorage.getItem('fm_flow') !== '0'); } catch { /* blocked */ } }, []);
+  const toggleFlow = () => setFlow((f) => { try { localStorage.setItem('fm_flow', f ? '0' : '1'); } catch { /* blocked */ } if (f) setCountdown(null); return !f; });
+  const ended = useCallback(() => { if (flow && next) setCountdown(8); }, [flow, next]);
+  useEffect(() => {
+    if (countdown === null || !next) return;
+    if (countdown <= 0) { router.push(`/watch?v=${next.id}`); return; }
+    const t = setTimeout(() => setCountdown((c) => (c === null ? null : c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [countdown, next, router]);
+
+  // Mini-player (tablets and up): while the video plays and the stage scrolls out of view, it keeps playing in a corner.
+  // Phones keep the video pinned to the top instead.
+  const stage = useRef<HTMLDivElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [offscreen, setOffscreen] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    const el = stage.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(([e]) => {
+      const out = e.intersectionRatio < 0.35;
+      setOffscreen(out && window.matchMedia('(min-width: 640px)').matches);
+      if (!out) setDismissed(false);
+    }, { threshold: [0, 0.35, 1] });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  const docked = offscreen && playing && !dismissed && !!v.playbackUrl;
+
   const player = v.playbackUrl
-    ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} onProgress={progress} />
+    ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
     : <div className="grid aspect-video w-full place-items-center rounded-[24px] bg-[#0b1413] text-center text-[15px] text-[#9fb0ad]"><div><Icon.Spinner className="mx-auto mb-3 animate-spin" />{v.takenDownAt ? 'This video was removed. See Creator Hub for details.' : v.processingStage ?? 'This video is still being processed.'}</div></div>;
 
   const dockBtn = 'flex h-10 shrink-0 items-center gap-2 rounded-xl px-3.5 text-[14px] font-semibold';
@@ -73,7 +106,69 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
       {/* Stage: the video on a dark band, lit softly by the brand colour. */}
       {/* Phones: the video sticks to the top, edge to edge, while the page scrolls under it. */}
       <section className="sticky top-0 z-30 bg-stage sm:relative sm:z-auto sm:px-6 sm:pb-9 sm:pt-3" style={{ backgroundImage: 'radial-gradient(ellipse at 50% 35%, rgb(12 130 126 / 0.32), transparent 62%)' }}>
-        <div className={`mx-auto transition-[max-width] duration-300 ${theater ? 'sm:max-w-[min(1800px,calc((100dvh-6rem)*16/9))]' : 'sm:max-w-[min(1280px,calc((100dvh-8.5rem)*16/9))]'}`}>{player}</div>
+        <div className="mx-auto flex justify-center gap-5">
+          <div ref={stage} className={`relative min-w-0 flex-1 transition-[max-width] duration-300 ${docked ? 'aspect-video' : ''} ${theater ? 'sm:max-w-[min(1800px,calc((100dvh-6rem)*16/9))]' : 'sm:max-w-[min(1280px,calc((100dvh-8.5rem)*16/9))]'}`}>
+            {docked && <div className="absolute inset-0 grid place-items-center rounded-[24px] border border-white/10 text-[14px] text-[#9fb0ad]">Playing in the corner</div>}
+            <div className={docked ? 'fixed bottom-4 right-4 z-50 w-[min(400px,calc(100vw-2rem))] overflow-hidden rounded-[20px] bg-stage shadow-[0_18px_48px_rgb(0_0_0/0.45)] [&_video]:rounded-none' : 'relative'}>
+              {player}
+              {docked && (
+                <div className="flex items-center gap-2 px-3 py-2 text-white">
+                  <p className="min-w-0 flex-1 truncate text-[13px] font-semibold">{v.title}</p>
+                  <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Back to the video" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-white/10"><Icon.ChevronUp size={18} /></button>
+                  <button type="button" onClick={() => setDismissed(true)} aria-label="Close the mini-player" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-white/10"><Icon.Close size={18} /></button>
+                </div>
+              )}
+              {countdown !== null && next && (
+                <div className="absolute inset-0 z-20 grid place-items-center bg-[rgb(5_10_10/0.82)] p-4 text-white backdrop-blur-sm sm:rounded-[24px]">
+                  <div className="w-full max-w-[420px]">
+                    <p className="text-[13px] font-semibold text-[#f5b95c]" aria-live="polite">Next in {countdown} s</p>
+                    <Link href={`/watch?v=${next.id}`} className="mt-2 flex items-center gap-3">
+                      <span className="relative block w-[42%] shrink-0 overflow-hidden rounded-xl">
+                        {next.thumbnailUrl ? <img src={next.thumbnailUrl} alt="" className="aspect-video w-full object-cover" /> : <span className="block aspect-video w-full bg-white/10" />}
+                        <svg viewBox="0 0 36 36" className="absolute right-1.5 top-1.5 h-7 w-7 -rotate-90" aria-hidden><circle cx="18" cy="18" r="15" fill="rgb(0 0 0/0.5)" stroke="rgb(255 255 255/0.25)" strokeWidth="3" /><circle cx="18" cy="18" r="15" fill="none" stroke="#f5b95c" strokeWidth="3" strokeDasharray="94.2" strokeDashoffset={94.2 * (countdown / 8)} className="transition-[stroke-dashoffset] duration-1000 ease-linear" /></svg>
+                      </span>
+                      <span className="min-w-0"><span className="line-clamp-2 text-[15px] font-bold leading-tight sm:text-[17px]">{next.title}</span><span className="mt-1 block truncate text-[12px] text-[#9fb0ad]">{next.channel.name}</span></span>
+                    </Link>
+                    <div className="mt-4 flex gap-2">
+                      <button type="button" onClick={() => setCountdown(null)} className="h-10 flex-1 rounded-xl bg-white/10 text-[14px] font-semibold hover:bg-white/15">Stay here</button>
+                      <Link href={`/watch?v=${next.id}`} className="flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[#2bb5ab] text-[14px] font-semibold text-[#04201e]"><Icon.Play size={18} />Play now</Link>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          {/* Wide screens: what comes next, beside the video on the stage. */}
+          {!theater && more.length > 0 && (
+            <aside aria-label="Next" className="relative hidden w-[340px] shrink-0 xl:block">
+              <div className="absolute inset-0 flex flex-col rounded-[24px] bg-white/[0.04] ring-1 ring-white/10">
+                <div className="flex items-center justify-between px-4 pb-2 pt-3.5 text-white">
+                  <h2 className="text-[16px] font-bold">Next</h2>
+                  <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 text-[12px] font-semibold text-[#9fb0ad]">
+                    Flow on
+                    <span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-[#2bb5ab]' : 'bg-white/20'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span>
+                  </button>
+                </div>
+                <div className="no-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-2">
+                  {more.slice(0, 10).map((x, i) => (
+                    <Link key={x.id} href={`/watch?v=${x.id}`} className="group flex gap-3 rounded-2xl p-2 hover:bg-white/[0.06]">
+                      <span className="relative block w-[132px] shrink-0 overflow-hidden rounded-xl">
+                        {x.thumbnailUrl ? <img src={x.thumbnailUrl} alt="" loading="lazy" className="aspect-video w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]" /> : <span className="block aspect-video w-full bg-white/10" />}
+                        {x.durationSeconds ? <span className="absolute bottom-1 right-1 rounded-md bg-black/75 px-1 text-[11px] font-semibold text-white">{duration(x.durationSeconds)}</span> : null}
+                        {i === 0 && flow && <span className="absolute left-1 top-1 rounded-md bg-[#f5b95c] px-1.5 text-[10px] font-bold uppercase tracking-wide text-[#2a1a00]">Up first</span>}
+                      </span>
+                      <span className="min-w-0 py-0.5">
+                        <span className="line-clamp-2 text-[13.5px] font-semibold leading-snug text-white">{x.title}</span>
+                        <span className="mt-1 block truncate text-[12px] text-[#9fb0ad]">{x.channel.name}</span>
+                        <span className="block text-[12px] text-[#9fb0ad]" suppressHydrationWarning>{viewsLabel(x.viewCount, locale)}</span>
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </aside>
+          )}
+        </div>
         {/* Action dock: floats over the bottom edge of the stage. */}
         <div className="absolute bottom-0 left-1/2 hidden max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-1/2 items-center sm:flex gap-1.5 overflow-x-auto rounded-[18px] border border-line bg-elevated p-1.5 shadow-[var(--shadow)] no-scrollbar">
           <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Spark (${likes})`} className={`${dockBtn} ${reaction === 'like' ? 'bg-accent-soft text-on-accent-soft' : 'hover:bg-surface'}`}>
@@ -144,7 +239,9 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
           {tab === 'next' && <div className="grid gap-4 py-5">{more.map((x) => <VideoRow key={x.id} v={x} locale={locale} large />)}</div>}
           {tab !== 'next' && more.length > 0 && (
             <section className="mt-10">
-              <h2 className="flex items-baseline justify-between text-[18px] font-bold">Keep watching<button type="button" onClick={() => setTab('next')} className="font-sans text-[13px] font-semibold text-brand">See all</button></h2>
+              <h2 className="flex items-center gap-3 text-[18px] font-bold"><span className="flex-1">Keep watching</span>
+                <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 font-sans text-[12px] font-semibold text-muted xl:hidden">Flow on<span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-brand' : 'bg-line'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span></button>
+                <button type="button" onClick={() => setTab('next')} className="font-sans text-[13px] font-semibold text-brand">See all</button></h2>
               <div className="no-scrollbar -mx-4 mt-3 flex gap-4 overflow-x-auto px-4 pb-2">
                 {more.slice(0, 8).map((x) => (
                   <Link key={x.id} href={`/watch?v=${x.id}`} className="group w-[220px] shrink-0">

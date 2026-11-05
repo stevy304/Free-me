@@ -20,9 +20,9 @@ const label = (h: number, w: number) => `${Math.min(h, w)}p`;
  * after real watching (30 s, or half of a short video). `startAt` resumes where the viewer stopped; `onProgress` is
  * called every 10 seconds of playback, on pause, at the end and when the page is left, to remember the position.
  */
-export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress }: {
+export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange }: {
   src: string; poster?: string | null; videoId?: string; durationHint?: number; autoPlay?: boolean; theater?: boolean; onTheater?: () => void; onEnded?: () => void;
-  startAt?: number; onProgress?: (seconds: number, ended: boolean) => void;
+  startAt?: number; onProgress?: (seconds: number, ended: boolean) => void; onPlayingChange?: (playing: boolean) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -49,6 +49,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const lastT = useRef(0);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef(0);
+  useEffect(() => { onPlayingChange?.(playing); }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
   const progressRef = useRef(onProgress);
   progressRef.current = onProgress;
   const save = useCallback((ended = false) => {
@@ -151,7 +152,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
       const t = e.target as HTMLElement;
       if (t.closest('input, textarea, select, [contenteditable="true"]') || e.ctrlKey || e.metaKey || e.altKey) return;
       const el = video.current; if (!el) return;
-      const k = e.key.toLowerCase();
+      const k = (e.key ?? '').toLowerCase();
       const handled = () => { e.preventDefault(); poke(); };
       if (k === ' ' || k === 'k') { handled(); toggle(); }
       else if (k === 'j') { handled(); seek(el.currentTime - 10); }
