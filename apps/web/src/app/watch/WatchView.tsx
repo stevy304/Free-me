@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Icon from '@/components/icons';
 import { Avatar } from '@/components/Avatar';
 import { FollowButton } from '@/components/FollowButton';
-import { Comments } from '@/components/engagement/Comments';
+import { Comments, type CommentData } from '@/components/engagement/Comments';
 import { ReportDialog } from '@/components/engagement/ReportDialog';
 import { SaveDialog } from '@/components/engagement/SaveDialog';
 import { VideoPlayer } from '@/components/player/VideoPlayer';
@@ -93,6 +93,29 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   }, []);
   const docked = offscreen && playing && !dismissed && !!v.playbackUrl;
 
+  // Phones: About and Conversation open in a panel under the pinned video.
+  const top = useRef<HTMLDivElement>(null);
+  const [sheet, setSheet] = useState<null | 'about' | 'conversation'>(null);
+  const openSheet = (which: 'about' | 'conversation') => {
+    const y = (top.current?.getBoundingClientRect().top ?? 0) + window.scrollY;
+    window.scrollTo({ top: y });
+    setSheet(which);
+  };
+  useEffect(() => {
+    if (!sheet) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [sheet]);
+  // A peek at the conversation for the phone card.
+  const [firstComment, setFirstComment] = useState<CommentData | null>(null);
+  useEffect(() => {
+    if (!v.commentsOpen || v.commentCount === 0) return;
+    let live = true;
+    api<{ comments: CommentData[] }>(`/videos/${v.id}/comments?sort=newest`).then((p) => { if (live) setFirstComment(p.comments.find((c) => c.author && !c.deleted) ?? null); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [v.id, v.commentsOpen, v.commentCount]);
+
   const player = v.playbackUrl
     ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
     : <div className="grid aspect-video w-full place-items-center rounded-[24px] bg-[#0b1413] text-center text-[15px] text-[#9fb0ad]"><div><Icon.Spinner className="mx-auto mb-3 animate-spin" />{v.takenDownAt ? 'This video was removed. See Creator Hub for details.' : v.processingStage ?? 'This video is still being processed.'}</div></div>;
@@ -105,6 +128,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
     <div>
       {/* Stage: the video on a dark band, lit softly by the brand colour. */}
       {/* Phones: the video sticks to the top, edge to edge, while the page scrolls under it. */}
+      <div ref={top} />
       <section className="sticky top-0 z-30 bg-stage sm:relative sm:z-auto sm:px-6 sm:pb-9 sm:pt-3" style={{ backgroundImage: 'radial-gradient(ellipse at 50% 35%, rgb(12 130 126 / 0.32), transparent 62%)' }}>
         <div className="mx-auto flex justify-center gap-5">
           <div ref={stage} className={`relative min-w-0 flex-1 transition-[max-width] duration-300 ${docked ? 'aspect-video' : ''} ${theater ? 'sm:max-w-[min(1800px,calc((100dvh-6rem)*16/9))]' : 'sm:max-w-[min(1280px,calc((100dvh-8.5rem)*16/9))]'}`}>
@@ -194,7 +218,99 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
       </section>
       {error && <p role="alert" className="mx-auto mt-10 max-w-[1120px] px-4 text-[13px] text-danger">{error}</p>}
 
-      <div className="mx-auto mt-4 grid max-w-[1280px] gap-8 px-4 sm:mt-12 sm:px-6 lg:grid-cols-[300px_1fr]">
+      {/* Phones: the video-app layout — title, Space row, pill actions, a Conversation card and the Keep watching feed. */}
+      <div className="sm:hidden">
+        <div className="px-4 pt-3">
+          <button type="button" onClick={() => openSheet('about')} className="block w-full text-left">
+            <h1 className="line-clamp-2 text-[18px] font-bold leading-[1.25]">{v.title}</h1>
+            <p className="mt-1 text-[12px] text-muted" suppressHydrationWarning>
+              {viewsLabel(v.viewCount, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : 'Not published'}{v.category ? <> · <span className="text-brand">#{v.category.name.replace(/\s+/g, '')}</span></> : null} <span className="font-semibold text-ink">…more</span>
+            </p>
+          </button>
+          <div className="mt-3 flex items-center gap-3">
+            <Link href={`/@${v.channel.handle}`} className="flex min-w-0 flex-1 items-center gap-2.5">
+              <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={36} />
+              <span className="flex min-w-0 items-baseline gap-1.5"><span className="flex items-center gap-1 truncate text-[14px] font-semibold">{v.channel.name}{v.channel.isVerified && <Icon.Verified size={13} aria-label="Verified" className="shrink-0 text-muted" />}</span><span className="shrink-0 text-[12px] text-muted" suppressHydrationWarning>{compactNumber(v.channel.followerCount, locale)}</span></span>
+            </Link>
+            {initialViewer.isOwner
+              ? <Link href="/hub" className="flex h-9 shrink-0 items-center rounded-full bg-surface px-4 text-[13px] font-semibold">Creator Hub</Link>
+              : <FollowButton pill handle={v.channel.handle} initial={initialViewer.following} initialCount={v.channel.followerCount} />}
+          </div>
+        </div>
+        <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto px-4">
+          <div className="flex h-9 shrink-0 items-center rounded-full bg-surface">
+            <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Spark (${likes})`} className="flex h-full items-center gap-1.5 rounded-l-full pl-3.5 pr-3 text-[13px] font-semibold">
+              <Icon.Spark size={18} filled={reaction === 'like'} className={reaction === 'like' ? 'text-accent' : ''} /><span suppressHydrationWarning>{likes > 0 ? compactNumber(likes, locale) : 'Spark'}</span>
+            </button>
+            {!initialViewer.isOwner && <>
+              <span className="h-5 w-px bg-line" />
+              <button type="button" onClick={() => react('dislike')} aria-pressed={reaction === 'dislike'} aria-label="Not for me" className="flex h-full items-center rounded-r-full pl-3 pr-3.5"><Icon.NotForMe size={18} filled={reaction === 'dislike'} className={reaction === 'dislike' ? 'text-brand' : ''} /></button>
+            </>}
+          </div>
+          <button type="button" onClick={share} className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-surface px-3.5 text-[13px] font-semibold"><Icon.PassAlong size={18} />{copied ? 'Copied' : 'Pass along'}</button>
+          <button type="button" onClick={() => need('save')} aria-pressed={saved} className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-semibold ${saved ? 'bg-brand-soft text-brand' : 'bg-surface'}`}><Icon.Bookmark size={18} filled={saved} />{saved ? 'Kept' : 'Keep'}</button>
+          {!initialViewer.isOwner && <button type="button" onClick={() => need('report')} className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-surface px-3.5 text-[13px] font-semibold"><Icon.Flag size={18} />Report</button>}
+          <button type="button" onClick={() => setMenu(true)} aria-label="More actions" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-surface"><Icon.More size={18} /></button>
+        </div>
+        <button type="button" onClick={() => openSheet('conversation')} className="mx-4 mt-4 block w-[calc(100%-2rem)] rounded-2xl bg-surface px-3.5 py-3 text-left">
+          <p className="text-[14px] font-bold">Conversation <span className="font-normal text-muted" suppressHydrationWarning>{v.commentsOpen ? compactNumber(v.commentCount, locale) : ''}</span></p>
+          {!v.commentsOpen ? <p className="mt-1.5 text-[13px] text-muted">The conversation is closed for this video.</p>
+            : firstComment?.author ? (
+              <span className="mt-2 flex items-center gap-2.5"><Avatar name={firstComment.author.name} src={firstComment.author.avatarUrl} size={24} /><span className="line-clamp-2 text-[13px]">{firstComment.content}</span></span>
+            ) : <span className="mt-2 flex items-center gap-2.5"><Icon.PersonCircle size={24} className="text-muted" /><span className="flex-1 rounded-full bg-elevated px-3 py-1.5 text-[13px] text-muted">Start the conversation…</span></span>}
+        </button>
+        {more.length > 0 && (
+          <section className="mt-5 pb-8">
+            <div className="flex items-center justify-between px-4 pb-3">
+              <h2 className="text-[16px] font-bold">Keep watching</h2>
+              <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 text-[12px] font-semibold text-muted">Flow on<span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-brand' : 'bg-line'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span></button>
+            </div>
+            <div className="grid gap-6">
+              {more.map((x, i) => (
+                <article key={x.id}>
+                  <Link href={`/watch?v=${x.id}`} className="relative block bg-surface">
+                    {x.thumbnailUrl ? <img src={x.thumbnailUrl} alt="" loading="lazy" className="aspect-video w-full object-cover" /> : <span className="block aspect-video w-full" />}
+                    {x.durationSeconds ? <span className="absolute bottom-2 right-2 rounded-md bg-black/75 px-1.5 py-px text-[12px] font-semibold text-white">{duration(x.durationSeconds)}</span> : null}
+                    {i === 0 && flow && <span className="absolute left-2 top-2 rounded-md bg-[#f5b95c] px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-[#2a1a00]">Up first</span>}
+                  </Link>
+                  <div className="flex gap-3 px-4 pt-3">
+                    <Link href={`/@${x.channel.handle}`} className="shrink-0"><Avatar name={x.channel.name} src={x.channel.avatarUrl} size={36} /></Link>
+                    <Link href={`/watch?v=${x.id}`} className="min-w-0 flex-1">
+                      <h3 className="line-clamp-2 text-[14px] font-semibold leading-snug">{x.title}</h3>
+                      <p className="mt-0.5 truncate text-[12px] text-muted" suppressHydrationWarning>{x.channel.name} · {viewsLabel(x.viewCount, locale)} · {timeAgo(x.publishedAt, locale)}</p>
+                    </Link>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+      {/* Phones: About and Conversation open as panels under the video, as in video apps. */}
+      {sheet && (
+        <div role="dialog" aria-modal="true" aria-label={sheet === 'about' ? 'About' : 'Conversation'} className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(100dvh-56.25vw)] flex-col rounded-t-[22px] bg-elevated shadow-[0_-12px_32px_rgb(0_0_0/0.18)] sm:hidden">
+          <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+            <p className="text-[16px] font-bold">{sheet === 'about' ? 'About' : 'Conversation'}</p>
+            <button type="button" onClick={() => setSheet(null)} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-full hover:bg-surface"><Icon.Close size={20} /></button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
+            {sheet === 'about' ? (
+              <div className="py-4">
+                <h2 className="text-[18px] font-bold leading-tight">{v.title}</h2>
+                <div className="mt-4 grid grid-cols-3 text-center">
+                  <div><p className="text-[17px] font-bold" suppressHydrationWarning>{compactNumber(likes, locale)}</p><p className="text-[12px] text-muted">Sparks</p></div>
+                  <div><p className="text-[17px] font-bold" suppressHydrationWarning>{compactNumber(v.viewCount, locale)}</p><p className="text-[12px] text-muted">Views</p></div>
+                  <div><p className="text-[17px] font-bold" suppressHydrationWarning>{v.publishedAt ? fullDate(v.publishedAt, locale) : '—'}</p><p className="text-[12px] text-muted">Published</p></div>
+                </div>
+                {v.category && <Link href={`/explore?topic=${v.category.slug}`} className="mt-4 inline-flex rounded-full bg-surface px-3 py-1 text-[13px] font-semibold text-brand">#{v.category.name.replace(/\s+/g, '')}</Link>}
+                <p className="mt-4 whitespace-pre-line break-words rounded-2xl bg-surface p-3.5 text-[14px] leading-relaxed">{v.description || <span className="text-muted">No description.</span>}</p>
+                <Link href={`/@${v.channel.handle}`} className="mt-4 flex items-center gap-3"><Avatar name={v.channel.name} src={v.channel.avatarUrl} size={40} /><span><span className="block text-[15px] font-semibold">{v.channel.name}</span><span className="text-[12px] text-muted" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</span></span></Link>
+              </div>
+            ) : <Comments videoId={v.id} initialCount={v.commentCount} />}
+          </div>
+        </div>
+      )}
+      <div className="mx-auto hidden max-w-[1280px] gap-8 px-4 sm:mt-12 sm:grid sm:px-6 lg:grid-cols-[300px_1fr]">
         <aside className="hidden h-fit rounded-[20px] border border-line bg-elevated p-4 sm:block lg:sticky lg:top-20">
           <Link href={`/@${v.channel.handle}`} className="flex items-center gap-3">
             <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={52} />
@@ -209,39 +325,6 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
         <div className="min-w-0">
           <p className="text-[13px] font-semibold text-brand">{v.category ? <><Link href={`/explore?topic=${v.category.slug}`} className="hover:underline">{v.category.name}</Link> · </> : null}{meta}</p>
           <h1 className="mt-1 text-[19px] font-extrabold leading-[1.2] sm:mt-1.5 sm:text-[32px] sm:leading-[1.15]">{v.title}</h1>
-          {/* Phones: creator row and a scrolling row of actions, under the title. */}
-          <div className="mt-3 flex items-center gap-3 sm:hidden">
-            <Link href={`/@${v.channel.handle}`} className="flex min-w-0 flex-1 items-center gap-2.5">
-              <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={38} />
-              <div className="min-w-0"><p className="truncate text-[15px] font-semibold">{v.channel.name}</p><p className="text-[12px] text-muted" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</p></div>
-            </Link>
-            {initialViewer.isOwner
-              ? <Link href="/hub" className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-surface px-3 text-[13px] font-semibold"><Icon.Hub size={16} />Hub</Link>
-              : <FollowButton handle={v.channel.handle} initial={initialViewer.following} initialCount={v.channel.followerCount} />}
-          </div>
-          <div className="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 sm:hidden">
-            <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-3 text-[13px] font-semibold ${reaction === 'like' ? 'bg-accent-soft text-on-accent-soft' : 'bg-surface'}`}><Icon.Spark size={17} filled={reaction === 'like'} className={reaction === 'like' ? 'text-accent' : ''} /><span suppressHydrationWarning>{likes > 0 ? compactNumber(likes, locale) : 'Spark'}</span></button>
-            {!initialViewer.isOwner && <button type="button" onClick={() => react('dislike')} aria-pressed={reaction === 'dislike'} aria-label="Not for me" className={`flex h-9 shrink-0 items-center rounded-xl px-3 ${reaction === 'dislike' ? 'bg-brand-soft text-brand' : 'bg-surface'}`}><Icon.NotForMe size={17} filled={reaction === 'dislike'} /></button>}
-            <button type="button" onClick={() => need('save')} aria-pressed={saved} className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-3 text-[13px] font-semibold ${saved ? 'bg-brand-soft text-brand' : 'bg-surface'}`}><Icon.Bookmark size={17} filled={saved} />{saved ? 'Kept' : 'Keep'}</button>
-            <button type="button" onClick={share} className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-surface px-3 text-[13px] font-semibold"><Icon.PassAlong size={17} />{copied ? 'Copied' : 'Pass along'}</button>
-            <button type="button" onClick={() => setMenu(true)} aria-label="More actions" className="flex h-9 shrink-0 items-center rounded-xl bg-surface px-3"><Icon.More size={17} /></button>
-          </div>
-          {/* Phones: what plays next, right under the actions (the rail beside the video is for wide screens). */}
-          {next && (
-            <div className="mt-4 rounded-[18px] bg-surface p-2.5 sm:hidden">
-              <div className="flex items-center justify-between px-1 pb-2">
-                <p className="text-[13px] font-bold">Up next</p>
-                <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 text-[12px] font-semibold text-muted">Flow on<span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-brand' : 'bg-line'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span></button>
-              </div>
-              <Link href={`/watch?v=${next.id}`} className="flex gap-3">
-                <span className="relative block w-[128px] shrink-0 overflow-hidden rounded-xl bg-line">
-                  {next.thumbnailUrl ? <img src={next.thumbnailUrl} alt="" loading="lazy" className="aspect-video w-full object-cover" /> : <span className="block aspect-video w-full" />}
-                  {next.durationSeconds ? <span className="absolute bottom-1 right-1 rounded-md bg-black/75 px-1 text-[11px] font-semibold text-white">{duration(next.durationSeconds)}</span> : null}
-                </span>
-                <span className="min-w-0 py-0.5"><span className="line-clamp-2 text-[14px] font-semibold leading-snug">{next.title}</span><span className="mt-1 block truncate text-[12px] text-muted">{next.channel.name}</span></span>
-              </Link>
-            </div>
-          )}
           <div role="tablist" className="mt-5 flex gap-1 border-b border-line">
             {tabBtn('about', 'About')}{tabBtn('conversation', v.commentsOpen ? `Conversation · ${compactNumber(v.commentCount, locale)}` : 'Conversation')}{more.length > 0 && tabBtn('next', 'Keep watching')}
           </div>
