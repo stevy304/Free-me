@@ -27,7 +27,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang={viewer?.profile?.preferredLanguage ?? 'en'} className={`${inter.variable} ${theme === 'dark' ? 'dark' : ''}`} suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} /></head>
-      <body className="font-sans">
+      {/* Browser extensions (Grammarly, password managers…) add attributes to <body> before React loads. */}
+      <body className="font-sans" suppressHydrationWarning>
         <AppShell viewer={viewer} locale={locale}>{children}</AppShell>
       </body>
     </html>
