@@ -19,6 +19,11 @@ Values for local development are in [.env.example](.env.example). In production 
 | `MAIL_FROM` | production | | Sender, e.g. `Free Me <no-reply@freeme.example>` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` | with smtp | port 587 | Mail provider credentials (`SMTP_SECURE=true` or port 465 for implicit TLS) |
 | `ADMIN_EMAILS` | | | Addresses that get the administrator role when they sign in |
+| `LEGAL_OPERATOR_NAME` | | `Free Me` | The person or company that runs the service, named in the Terms, Privacy Policy and notices |
+| `LEGAL_CONTACT_EMAIL` | | | Contact address shown on the legal pages (privacy requests, account closure) |
+| `COPYRIGHT_EMAIL` | | `LEGAL_CONTACT_EMAIL` | Where copyright notices and counter-notices can also be sent; named in counter-notice emails |
+| `LEGAL_POSTAL_ADDRESS` | | | Postal address for legal notices |
+| `LEGAL_JURISDICTION` | | | Country whose law governs the Terms, e.g. `Rwanda` |
 | `TRUST_PROXY` | | `1` in production | Number of proxies in front of the API |
 | `API_DOCS` | | on outside production | `true` serves OpenAPI at `/api/docs` |
 

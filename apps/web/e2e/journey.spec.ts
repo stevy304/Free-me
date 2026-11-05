@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 
 /**
  * The main journeys, in a real browser, against the real API and database:
- * sign in with an emailed code, create a channel, subscribe from a second account, edit a profile, search, sign out.
+ * sign in with an emailed code, create a channel, follow from a second account, edit a profile, search, sign out.
  * Needs: the web app at E2E_BASE_URL and an API started with MAIL_TRANSPORT=console logging to E2E_API_LOG.
  */
 const LOG = process.env.E2E_API_LOG ?? '';
@@ -28,7 +28,7 @@ async function signIn(page: Page, email: string, returnTo = '/') {
   await page.waitForURL((u) => u.pathname === returnTo.split('?')[0]);
 }
 
-test('a creator signs in, creates a channel; a viewer subscribes, edits their profile, searches and signs out', async ({ browser }) => {
+test('a creator signs in, creates a channel; a viewer follows, edits their profile, searches and signs out', async ({ browser }) => {
   test.skip(!LOG, 'Set E2E_API_LOG to the API log (MAIL_TRANSPORT=console).');
   const handle = `e2e.${run}`;
 
@@ -49,11 +49,11 @@ test('a creator signs in, creates a channel; a viewer subscribes, edits their pr
   viewer.on('pageerror', (e) => errors.push(e.message));
   await signIn(viewer, `viewer.${run}@example.com`);
   await viewer.goto(`/@${handle}`);
-  await viewer.getByRole('button', { name: 'Subscribe' }).click();
-  await expect(viewer.getByRole('button', { name: 'Subscribed' })).toBeVisible();
+  await viewer.getByRole('button', { name: 'Follow', exact: true }).click();
+  await expect(viewer.getByRole('button', { name: 'Following' })).toBeVisible();
   await viewer.reload();
-  await expect(viewer.getByText('1 subscriber')).toBeVisible();
-  await viewer.goto('/feed/subscriptions');
+  await expect(viewer.getByText('1 follower')).toBeVisible();
+  await viewer.goto('/following');
   await expect(viewer.getByRole('main').getByText('End to End Kitchen')).toBeVisible();
 
   await viewer.goto('/settings');

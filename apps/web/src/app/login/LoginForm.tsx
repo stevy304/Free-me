@@ -1,6 +1,7 @@
 'use client';
 
-import { ArrowLeft, Loader2, Mail } from 'lucide-react';
+import Link from 'next/link';
+import * as Icon from '@/components/icons';
 import { useEffect, useRef, useState } from 'react';
 import { LogoMark } from '@/components/Logo';
 import { api, ApiError } from '@/lib/client-api';
@@ -54,7 +55,7 @@ export function LoginForm({ returnTo, google, initialError }: { returnTo: string
         {step === 'email' ? (
           <>
             <h1 className="mt-5 text-[26px] font-semibold tracking-tight">Sign in to Free Me</h1>
-            <p className="mt-1.5 text-[15px] text-muted">Watch, subscribe and create. New here? Signing in creates your account.</p>
+            <p className="mt-1.5 text-[15px] text-muted">Watch, follow and create. New here? Signing in creates your account.</p>
             {error && <p role="alert" className="mt-5 rounded-xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
             {google && (
               <>
@@ -69,14 +70,14 @@ export function LoginForm({ returnTo, google, initialError }: { returnTo: string
               <input id="email" type="email" required autoComplete="email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
                 className="mt-2 h-12 w-full rounded-xl border border-line bg-bg px-4 text-[16px] outline-none focus:border-brand" />
               <button type="submit" disabled={busy || !email} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-strong text-[15px] font-medium text-on-strong hover:opacity-90 disabled:opacity-50">
-                {busy ? <Loader2 size={18} className="animate-spin" /> : <Mail size={18} />}Email me a sign-in code
+                {busy ? <Icon.Spinner size={18} className="animate-spin" /> : <Icon.Mail size={18} />}Email me a sign-in code
               </button>
             </form>
             <p className="mt-6 text-[12px] leading-5 text-faint">No password needed. We send a one-time code that works for ten minutes.</p>
           </>
         ) : (
           <>
-            <button type="button" onClick={() => { setStep('email'); setError(null); }} className="mt-4 flex items-center gap-1 text-[14px] text-muted hover:text-ink"><ArrowLeft size={16} />Use another email</button>
+            <button type="button" onClick={() => { setStep('email'); setError(null); }} className="mt-4 flex items-center gap-1 text-[14px] text-muted hover:text-ink"><Icon.ArrowLeft size={16} />Use another email</button>
             <h1 className="mt-3 text-[26px] font-semibold tracking-tight">Check your email</h1>
             <p className="mt-1.5 text-[15px] text-muted">We sent a 6-digit code to <span className="font-medium text-ink">{email}</span>.</p>
             {error && <p role="alert" className="mt-5 rounded-xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
@@ -86,7 +87,7 @@ export function LoginForm({ returnTo, google, initialError }: { returnTo: string
                 onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 6); setCode(v); if (v.length === 6) void verify(v); }}
                 className="mt-2 h-14 w-full rounded-xl border border-line bg-bg px-4 text-center font-mono text-[28px] tracking-[0.5em] outline-none focus:border-brand" placeholder="••••••" />
               <button type="submit" disabled={busy || code.length !== 6} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-strong text-[15px] font-medium text-on-strong hover:opacity-90 disabled:opacity-50">
-                {busy && <Loader2 size={18} className="animate-spin" />}Sign in
+                {busy && <Icon.Spinner size={18} className="animate-spin" />}Sign in
               </button>
             </form>
             <button type="button" disabled={wait > 0 || busy} onClick={() => void send()} className="mt-5 text-[14px] font-medium text-brand disabled:text-faint">
@@ -94,6 +95,7 @@ export function LoginForm({ returnTo, google, initialError }: { returnTo: string
             </button>
           </>
         )}
+        <p className="mt-8 text-[12px] leading-5 text-muted">By continuing you agree to the <Link href="/legal/terms" className="text-brand">Terms of Service</Link> and confirm you have read the <Link href="/legal/privacy" className="text-brand">Privacy Policy</Link>.</p>
       </div>
     </div>
   );

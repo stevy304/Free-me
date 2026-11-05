@@ -10,11 +10,13 @@ Phases 1 (foundation) and 2 (video upload and playback) are built and tested. La
 
 | Works today | Arrives later |
 | --- | --- |
-| Sign-in with Google or a one-time email code (no passwords), sessions, signing out other devices | Comments, likes, watch history, playlists, captions (phase 3) |
-| Profiles with country, language and time zone for anyone in the world; channels with @handles; subscriptions | Creator Studio analytics, advertiser studio, revenue ledger (phase 4) |
-| **Video upload**: resumable multipart uploads straight to object storage, up to 20 GB per file by default | Payouts, moderation queues (phase 5) |
-| **Processing**: FFmpeg worker turns every upload into adaptive HLS from 144p up to 4K (never upscaled), SD playable first, HD follows; thumbnails; Shorts detected automatically | Monitoring, load tests, production rollout (phase 6) |
-| **Playback**: YouTube-style player (quality and speed menus, theater, picture-in-picture, keyboard shortcuts), Shorts feed, home feed, search, Studio to manage videos | |
+| Sign-in with Google or a one-time email code (no passwords), sessions, signing out other devices | Captions, notifications (phase 3) |
+| Profiles with country, language and time zone for anyone in the world; channels with @handles; following | Creator Hub analytics, advertiser studio, revenue ledger (phase 4) |
+| **Video upload**: resumable multipart uploads straight to object storage, up to 20 GB per file by default | Payouts (phase 5) |
+| **Processing**: FFmpeg worker turns every upload into adaptive HLS from 144p up to 4K (never upscaled), SD playable first, HD follows; thumbnails; Moments (short vertical videos) detected automatically | Monitoring, load tests, production rollout (phase 6) |
+| **Playback**: adaptive player (quality and speed menus, theater, picture-in-picture, keyboard shortcuts, resume where you stopped), Moments feed, home feed, search, Creator Hub to manage videos | |
+| **Community**: likes (dislikes visible only to the creator), comments with replies and pinning, watch history, Saved and shareable collections | |
+| **Trust and safety**: reports, copyright notices and counter-notices, a moderation queue with removal and restore, strikes, decision emails; Terms, Privacy Policy, Community Guidelines and Copyright pages | |
 | Public and unlisted videos from the CDN; private videos only through short-lived signed links; views counted in Redis and written in batches | |
 | Administration: roles, suspension, audit log | |
 

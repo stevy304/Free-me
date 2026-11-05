@@ -10,8 +10,8 @@ export function viewsLabel(n: number | string, locale?: string): string {
   return `${compactNumber(v, locale)} ${v === 1 ? 'view' : 'views'}`;
 }
 
-export function subscribersLabel(n: number, locale?: string): string {
-  return `${compactNumber(n, locale)} ${n === 1 ? 'subscriber' : 'subscribers'}`;
+export function followersLabel(n: number, locale?: string): string {
+  return `${compactNumber(n, locale)} ${n === 1 ? 'follower' : 'followers'}`;
 }
 
 const UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [['year', 31_536_000], ['month', 2_592_000], ['week', 604_800], ['day', 86_400], ['hour', 3600], ['minute', 60], ['second', 1]];

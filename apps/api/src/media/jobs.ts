@@ -3,7 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import { randomUUID } from 'node:crypto';
 import type { AppConfig } from '../config/config';
-import { mediaPrefix } from './keys';
+import { mediaPrefix, wantedLocation } from './keys';
 import { MediaError, VideoProcessor } from './process';
 import type { Storage } from './storage';
 import { ViewCounter } from './views';
@@ -55,12 +55,12 @@ export class MediaJobs {
     });
   }
 
-  /** Moves media between the public (CDN) and private (signed links) prefixes after a visibility change. */
+  /** Moves media between the public (CDN) and private (signed links) prefixes after a visibility change or a removal. */
   async relocate(videoId: string) {
     await this.withLock(videoId, async () => {
       const v = await this.prisma.video.findUnique({ where: { id: videoId } });
       if (!v?.hlsMasterKey) return;
-      const want = v.visibility === 'PRIVATE' ? 'PRIVATE' : 'PUBLIC';
+      const want = wantedLocation(v);
       if (v.mediaLocation === want) return;
       const from = mediaPrefix(videoId, v.mediaLocation);
       const to = mediaPrefix(videoId, want);

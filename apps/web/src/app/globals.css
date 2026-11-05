@@ -4,39 +4,42 @@
 
 /* Free Me design tokens. Light and dark share names; components never hard-code colours. */
 :root {
+  /* Free Me neutrals carry a little of the brand teal, so surfaces read as Free Me rather than plain grey. */
   --bg: #ffffff;
   --bg-elevated: #ffffff;
-  --surface: #f2f2f2;
-  --surface-hover: #e5e5e5;
-  --surface-strong: #0f0f0f;
+  --surface: #f0f4f3;
+  --surface-hover: #e2e9e8;
+  --surface-strong: #0e1716;
   --on-surface-strong: #ffffff;
-  --text: #0f0f0f;
-  --muted: #606060;
-  --faint: #909090;
-  --line: #e5e5e5;
+  --text: #0e1716;
+  --muted: #56625f;
+  --faint: #8a9693;
+  --line: #e2e9e8;
   --brand: #0c827e;
   --brand-strong: #075655;
-  --brand-soft: #e3f4f2;
+  --brand-soft: #e1f3f1;
+  --on-brand: #ffffff;
   --danger: #c5221f;
-  --shadow: 0 4px 32px rgb(0 0 0 / 0.1);
+  --shadow: 0 4px 32px rgb(8 40 38 / 0.12);
   color-scheme: light;
 }
 .dark {
-  --bg: #0f0f0f;
-  --bg-elevated: #212121;
-  --surface: #272727;
-  --surface-hover: #3f3f3f;
-  --surface-strong: #f1f1f1;
-  --on-surface-strong: #0f0f0f;
-  --text: #f1f1f1;
-  --muted: #aaaaaa;
-  --faint: #717171;
-  --line: #3f3f3f;
-  --brand: #21a79e;
-  --brand-strong: #4fd1c5;
+  --bg: #0a1110;
+  --bg-elevated: #16201f;
+  --surface: #1b2726;
+  --surface-hover: #283635;
+  --surface-strong: #eef4f3;
+  --on-surface-strong: #0a1110;
+  --text: #eef4f3;
+  --muted: #9fb0ad;
+  --faint: #6b7d7a;
+  --line: #283635;
+  --brand: #2bb5ab;
+  --brand-strong: #5fd6cb;
   --brand-soft: #0f2e2c;
+  --on-brand: #04201e;
   --danger: #ff6b6b;
-  --shadow: 0 4px 32px rgb(0 0 0 / 0.5);
+  --shadow: 0 4px 32px rgb(0 0 0 / 0.55);
   color-scheme: dark;
 }
 
@@ -48,6 +51,7 @@
   --color-strong: var(--surface-strong);
   --color-on-strong: var(--on-surface-strong);
   --color-ink: var(--text);
+  --color-on-brand: var(--on-brand);
   --color-muted: var(--muted);
   --color-faint: var(--faint);
   --color-line: var(--line);

@@ -3,7 +3,7 @@ export type Role = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'MODERATOR' | 'ADMIN';
 
 export interface ChannelInfo {
   id: string; handle: string; name: string; description: string | null; avatarUrl: string | null; bannerUrl: string | null;
-  country: string | null; defaultLanguage: string | null; isVerified: boolean; subscriberCount: number; totalViews: string; createdAt: string;
+  country: string | null; defaultLanguage: string | null; isVerified: boolean; followerCount: number; totalViews: string; createdAt: string;
 }
 export interface Profile { displayName: string; avatarUrl: string | null; bio: string | null; country: string | null; city: string | null; preferredLanguage: string; timezone: string | null }
 export interface Viewer {

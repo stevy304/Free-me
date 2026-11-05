@@ -1,6 +1,6 @@
 'use client';
 
-import { Laptop, Loader2, Smartphone } from 'lucide-react';
+import * as Icon from '@/components/icons';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState, type ReactNode } from 'react';
@@ -26,7 +26,7 @@ function SaveBar({ busy, message, disabled }: { busy: boolean; message: { ok: bo
   return (
     <div className="mt-6 flex items-center justify-end gap-4">
       {message && <p role="status" className={`text-[14px] ${message.ok ? 'text-brand' : 'text-danger'}`}>{message.text}</p>}
-      <button type="submit" disabled={busy || disabled} className="flex h-10 items-center gap-2 rounded-full bg-strong px-5 text-[14px] font-medium text-on-strong hover:opacity-90 disabled:opacity-40">{busy && <Loader2 size={16} className="animate-spin" />}Save</button>
+      <button type="submit" disabled={busy || disabled} className="flex h-10 items-center gap-2 rounded-full bg-strong px-5 text-[14px] font-medium text-on-strong hover:opacity-90 disabled:opacity-40">{busy && <Icon.Spinner size={16} className="animate-spin" />}Save</button>
     </div>
   );
 }
@@ -93,7 +93,7 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
           </dl>
         </Section>
 
-        <Section id="profile" title="Profile" intro="Your name and picture appear with your comments and subscriptions.">
+        <Section id="profile" title="Profile" intro="Your name and picture appear with your comments.">
           <form onSubmit={(e) => { e.preventDefault(); void saveProfile(); }} className="grid gap-5 sm:grid-cols-2">
             <div className="sm:col-span-2"><label htmlFor="dn" className={label}>Display name</label><input id="dn" required maxLength={DISPLAY_NAME_MAX} value={profile.displayName} onChange={(e) => setProfile({ ...profile, displayName: e.target.value })} className={`${inputClass} mt-2`} /></div>
             <div className="sm:col-span-2"><label htmlFor="bio" className={label}>About you</label><textarea id="bio" rows={3} maxLength={BIO_MAX} value={profile.bio} onChange={(e) => setProfile({ ...profile, bio: e.target.value })} className="mt-2 w-full rounded-xl border border-line bg-bg px-3 py-2.5 text-[15px] outline-none focus:border-brand" /></div>
@@ -129,7 +129,7 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
               const d = device(s.userAgent);
               return (
                 <li key={s.id} className="flex items-center gap-4 px-4 py-3.5">
-                  {d.mobile ? <Smartphone size={22} className="shrink-0 text-muted" /> : <Laptop size={22} className="shrink-0 text-muted" />}
+                  {d.mobile ? <Icon.Phone size={22} className="shrink-0 text-muted" /> : <Icon.Laptop size={22} className="shrink-0 text-muted" />}
                   <div className="min-w-0 flex-1">
                     <p className="text-[15px] font-medium">{d.label}{s.current && <span className="ml-2 rounded-full bg-brand-soft px-2 py-0.5 text-[12px] font-medium text-brand">This device</span>}</p>
                     <p className="text-[13px] text-muted" suppressHydrationWarning>Signed in with {s.method === 'google' ? 'Google' : 'an email code'} · active {timeAgo(s.lastSeenAt, locale)}{s.ipAddress ? ` · ${s.ipAddress}` : ''}</p>

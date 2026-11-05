@@ -1,17 +1,17 @@
-import { BadgeCheck, Clapperboard } from 'lucide-react';
+import * as Icon from '@/components/icons';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { countryName } from '@free-me/shared';
 import { Avatar } from '@/components/Avatar';
 import { EmptyState } from '@/components/EmptyState';
-import { SubscribeButton } from '@/components/SubscribeButton';
+import { FollowButton } from '@/components/FollowButton';
 import { VideoCard } from '@/components/video/VideoCard';
 import { apiGet, getLocale } from '@/lib/server-api';
-import { compactNumber, fullDate, subscribersLabel } from '@/lib/format';
+import { compactNumber, fullDate, followersLabel } from '@/lib/format';
 import type { ChannelInfo, VideoCardData } from '@/lib/types';
 
-interface ChannelPage { channel: ChannelInfo; videoCount: number; videos: VideoCardData[]; viewer: { subscribed: boolean; isOwner: boolean } }
+interface ChannelPage { channel: ChannelInfo; videoCount: number; videos: VideoCardData[]; viewer: { following: boolean; isOwner: boolean } }
 
 const load = (handle: string) => apiGet<ChannelPage>(`/channels/${encodeURIComponent(decodeURIComponent(handle).replace(/^@/, ''))}`);
 
@@ -36,13 +36,13 @@ export default async function Channel({ params, searchParams }: { params: Promis
         <div className="hidden sm:block"><Avatar name={c.name} src={c.avatarUrl} size={160} /></div>
         <div className="sm:hidden"><Avatar name={c.name} src={c.avatarUrl} size={72} /></div>
         <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-[28px] font-bold leading-tight sm:text-[36px]">{c.name}{c.isVerified && <BadgeCheck size={22} aria-label="Verified" className="text-muted" />}</h1>
-          <p className="mt-1.5 text-[14px] text-muted"><span className="font-medium text-ink">@{c.handle}</span> · {subscribersLabel(c.subscriberCount, locale)} · {compactNumber(videoCount, locale)} {videoCount === 1 ? 'video' : 'videos'}</p>
+          <h1 className="flex items-center gap-2 text-[28px] font-bold leading-tight sm:text-[36px]">{c.name}{c.isVerified && <Icon.Verified size={22} aria-label="Verified" className="text-muted" />}</h1>
+          <p className="mt-1.5 text-[14px] text-muted"><span className="font-medium text-ink">@{c.handle}</span> · {followersLabel(c.followerCount, locale)} · {compactNumber(videoCount, locale)} {videoCount === 1 ? 'video' : 'videos'}</p>
           {c.description && <Link href={`/@${c.handle}?tab=about`} className="mt-1.5 line-clamp-1 max-w-xl text-[14px] text-muted hover:text-ink">{c.description}</Link>}
           <div className="mt-4">
             {viewer.isOwner
               ? <Link href="/settings#channel" className="inline-flex h-9 items-center rounded-full bg-surface px-4 text-[14px] font-medium hover:bg-surface-hover">Customize channel</Link>
-              : <SubscribeButton handle={c.handle} initial={viewer.subscribed} initialCount={c.subscriberCount} />}
+              : <FollowButton handle={c.handle} initial={viewer.following} initialCount={c.followerCount} />}
           </div>
         </div>
       </div>
@@ -54,7 +54,7 @@ export default async function Channel({ params, searchParams }: { params: Promis
         videos.length ? (
           <div className="grid grid-cols-1 gap-x-4 gap-y-10 py-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{videos.map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}</div>
         ) : (
-          <EmptyState icon={<Clapperboard size={36} strokeWidth={1.4} />} title={viewer.isOwner ? 'Your channel is ready' : 'No videos yet'}>
+          <EmptyState icon={<Icon.Moments size={36} strokeWidth={1.4} />} title={viewer.isOwner ? 'Your channel is ready' : 'No videos yet'}>
             {viewer.isOwner ? 'Your videos will appear here once you publish them.' : 'This channel has not published any videos yet.'}
           </EmptyState>
         )
@@ -64,7 +64,7 @@ export default async function Channel({ params, searchParams }: { params: Promis
           <p className="mt-3 whitespace-pre-line leading-relaxed text-ink">{c.description || 'No description yet.'}</p>
           <dl className="mt-6 space-y-2 text-[14px] text-muted">
             <div>Joined {fullDate(c.createdAt, locale)}</div>
-            <div>{subscribersLabel(c.subscriberCount, locale)}</div>
+            <div>{followersLabel(c.followerCount, locale)}</div>
             <div>{compactNumber(c.totalViews, locale)} views</div>
             {c.country && <div>{countryName(c.country, locale)}</div>}
           </dl>

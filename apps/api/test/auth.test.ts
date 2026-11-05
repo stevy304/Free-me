@@ -89,7 +89,7 @@ describe('sessions and security', () => {
   test('anonymous requests to private routes get 401', async () => {
     await request(ctx.http).get('/api/me').expect(401);
     await request(ctx.http).get('/api/me/sessions').expect(401);
-    await request(ctx.http).get('/api/feed/subscriptions').expect(401);
+    await request(ctx.http).get('/api/feed/following').expect(401);
   });
 
   test('health reports the database', async () => {

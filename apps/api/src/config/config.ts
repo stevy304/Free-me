@@ -24,6 +24,18 @@ export interface AppConfig {
   trustProxy: number;
   docsEnabled: boolean;
   media: MediaConfig;
+  /** Who runs the service, shown on the legal pages and in notices (see ENVIRONMENT.md). */
+  legal: LegalConfig;
+}
+
+export interface LegalConfig {
+  operatorName: string;
+  contactEmail: string | null;
+  /** Where copyright notices and counter-notices go (also the designated agent's address). */
+  copyrightEmail: string | null;
+  postalAddress: string | null;
+  /** Country whose law governs the Terms, e.g. "Rwanda". */
+  jurisdiction: string | null;
 }
 
 /** Where videos live and how they are processed (see ENVIRONMENT.md). */
@@ -101,6 +113,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   };
   if (prod && !env.REDIS_URL) problems.push('REDIS_URL is required in production (rate limits, video jobs and view counts).');
 
+  const email = (k: string) => { const v = env[k]?.trim(); if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) problems.push(`${k} must be an email address.`); return v || null; };
+  const legal: LegalConfig = {
+    operatorName: env.LEGAL_OPERATOR_NAME?.trim() || 'Free Me', contactEmail: email('LEGAL_CONTACT_EMAIL'), copyrightEmail: email('COPYRIGHT_EMAIL'),
+    postalAddress: env.LEGAL_POSTAL_ADDRESS?.trim() || null, jurisdiction: env.LEGAL_JURISDICTION?.trim() || null,
+  };
+
   if (problems.length) throw new ConfigError(`Free Me API configuration:\n- ${problems.join('\n- ')}`);
   return {
     nodeEnv, port: Number(env.PORT || 4000), appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
@@ -108,7 +126,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,
     mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)),
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
-    media,
+    media, legal,
   };
 }
 

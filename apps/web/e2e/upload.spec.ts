@@ -18,7 +18,7 @@ async function codeFor(email: string) {
   throw new Error('no code');
 }
 
-test('upload, details, publish, processing to every quality, then on the home page and in Studio', async ({ page }) => {
+test('upload, details, publish, processing to every quality, then on the home page and in Creator Hub', async ({ page }) => {
   test.skip(!LOG, 'Set E2E_API_LOG.');
   test.setTimeout(180_000);
   const dir = mkdtempSync(join(tmpdir(), 'fm-e2e-'));
@@ -50,7 +50,7 @@ test('upload, details, publish, processing to every quality, then on the home pa
   await expect(page.getByText('Published')).toBeVisible();
   await page.getByRole('button', { name: 'Close' }).click();
 
-  await page.goto('/studio');
+  await page.goto('/hub');
   await expect(page.getByText(`Morning in Kigali ${run}`)).toBeVisible();
   await expect(page.getByRole('cell', { name: '720p' })).toBeVisible();
   // Media moves to the public prefix in the background; then the video is on the home page with its thumbnail.
