@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { notifyComment } from '../notifications/notify';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import type { Channel, Comment, Profile, User } from '@prisma/client';
@@ -102,11 +103,13 @@ export class CommentsController {
     if (!v.commentsEnabled || v.madeForKids) throw new ForbiddenException('Comments are turned off for this video.');
     const content = clean(body.content);
     let parentId: string | null = null;
+    let replyingTo: string | null = null;
     if (body.parentId) {
       const p = await this.prisma.comment.findUnique({ where: { id: body.parentId } });
       if (!p || p.videoId !== id) throw new BadRequestException('You can only reply to a comment on this video.');
       if (p.deletedAt && !p.parentId) throw new BadRequestException('This comment was removed.');
       parentId = p.parentId ?? p.id; // replies to a reply join the same thread
+      replyingTo = p.userId; // the person answered, even inside a thread
     }
     const created = await this.prisma.$transaction(async (tx) => {
       const c = await tx.comment.create({ data: { videoId: id, userId: auth.user.id, parentId, content }, include: AUTHOR });
@@ -114,6 +117,7 @@ export class CommentsController {
       if (parentId) await tx.comment.update({ where: { id: parentId }, data: { replyCount: { increment: 1 } } });
       return c;
     });
+    await notifyComment(this.prisma, created, replyingTo);
     return { comment: this.view(created, v, auth) };
   }
 

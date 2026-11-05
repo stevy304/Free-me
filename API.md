@@ -148,6 +148,16 @@ Public and unlisted videos play from the CDN: `playbackUrl` in `/videos/:id` and
 | POST | `/admin/system/reprocess` | `{ limit?: 1–500 (50), dryRun? }`: queue older videos (processed before seek previews existed) for the current pipeline, oldest first; they stay watchable. Answers `{ queued, wouldQueue, remaining }` |
 | GET | `/admin/system` | `ok`, `warnings` (database or Redis down, email not really sent, Google sign-in missing, videos waiting, stuck over 2 hours or failed in 24 hours), `services`, `processing` (queue counts), `videos` by status, `storage` bytes, `accounts`, `moderation.openReports` |
 
+## Notifications 🔒
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/me/notifications?cursor=` | Newest first, 50 a page: `{ id, type (NEW_VIDEO, COMMENT, REPLY, SPARK), count, read, at, text, href, actor, video }` and `unread`. Sparks on one video are one unread entry with a count. Removed videos drop out |
+| GET | `/me/notifications/unread` | `{ unread }`, for the bell |
+| POST | `/me/notifications/read` | `{ ids? }`: mark these, or all, as read |
+
+Raised when: a Space you tune into publishes a video (once, the first time it is public and ready); someone joins the conversation on your video; someone replies to your comment; someone sparks your video. Never for your own actions.
+
 ## Health
 
 `GET /health`: `200 { status: "ok", database, redis }` or `503` when a dependency is down (production also requires Redis).

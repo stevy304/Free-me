@@ -124,6 +124,8 @@ model User {
   watchHistories        WatchHistory[]
   interests             UserInterest[]
   reportsFiled          Report[]          @relation("UserReportsFiled")
+  notifications         Notification[]    @relation("NotificationsReceived")
+  notificationsCaused   Notification[]    @relation("NotificationsCaused")
   moderatorActions      ModerationAction[]
   auditLogs             AuditLog[]
 
@@ -276,6 +278,9 @@ model Video {
   videoFiles            VideoFile[]
   tags                  VideoTag[]
   captions              Caption[]
+  notifications         Notification[]
+  /// When followers were told about this video (once, the first time it is public and ready).
+  announcedAt           DateTime?
   likes                 Like[]
   comments              Comment[]
   playlistItems         PlaylistItem[]
@@ -747,4 +752,31 @@ model BlockedHash {
   createdAt             DateTime          @default(now())
 
   @@unique([algorithm, value])
+}
+
+enum NotificationType {
+  NEW_VIDEO
+  COMMENT
+  REPLY
+  SPARK
+}
+
+/// What appears under the bell. Sparks on one video are grouped into one unread entry (count, latest actor).
+model Notification {
+  id                    String            @id @default(uuid())
+  userId                String
+  user                  User              @relation("NotificationsReceived", fields: [userId], references: [id], onDelete: Cascade)
+  type                  NotificationType
+  actorId               String?
+  actor                 User?             @relation("NotificationsCaused", fields: [actorId], references: [id], onDelete: SetNull)
+  videoId               String?
+  video                 Video?            @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  commentId             String?           // the comment or reply, to open it
+  count                 Int               @default(1)
+  readAt                DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([userId, updatedAt])
+  @@index([userId, readAt])
 }

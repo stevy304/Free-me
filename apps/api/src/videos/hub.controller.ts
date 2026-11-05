@@ -1,4 +1,5 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Put, Query, Req } from '@nestjs/common';
+import { announceVideo } from '../notifications/notify';
 import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import type { Video, Visibility } from '@prisma/client';
@@ -110,6 +111,7 @@ export class HubController {
     // Media follows visibility: public/unlisted to the CDN prefix, private (and removed) behind signed links.
     const want = wantedLocation({ visibility: (data.visibility as string | undefined) ?? v.visibility, takenDownAt: v.takenDownAt });
     if (v.hlsMasterKey && want !== v.mediaLocation) await this.queue.add({ name: 'relocate', videoId: id });
+    await announceVideo(this.prisma, id);
     await this.audit.record({ userId: auth.user.id, action: 'VIDEO_UPDATED', entityType: 'Video', entityId: id, req, details: { fields: Object.keys(data).concat(body.tags ? ['tags'] : []) } });
     return { video: await this.view(await this.mine(auth, id)) };
   }

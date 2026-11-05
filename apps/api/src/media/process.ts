@@ -10,6 +10,7 @@ import { mediaPrefix, wantedLocation } from './keys';
 import { LATE_FOLDERS } from './captions';
 import { extractSpeech } from './autocaptions';
 import { hold, screen } from './screening';
+import { announceVideo } from '../notifications/notify';
 import type { Storage } from './storage';
 
 const TYPES: Record<string, string> = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg' };
@@ -213,6 +214,7 @@ export class VideoProcessor {
       ...(first?.board ? { storyboard: first.board.meta as unknown as Prisma.InputJsonValue } : {}),
       ...(thumbKeys?.length ? { thumbnailCandidates: thumbKeys, ...(now?.thumbnailKey ? {} : { thumbnailKey: thumbKeys[Math.min(1, thumbKeys.length - 1)] }) } : {}),
     } });
+    await announceVideo(this.prisma, videoId);
     if (moveFrom) {
       // A custom thumbnail saved to the old place while this pass ran is picked up here (see the thumbnail upload).
       for (const dir of LATE_FOLDERS) await this.storage.copyPrefix(moveFrom + dir, prefix + dir);
