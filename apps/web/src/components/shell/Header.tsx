@@ -33,7 +33,8 @@ export function Header() {
       const t = e.target as HTMLElement | null;
       const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
       if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey) { e.preventDefault(); setFind(true); }
-      if (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); setFind(true); }
+      // Some keydown events (e.g. Chrome autofill) carry no key at all.
+      if ((e.key ?? '').toLowerCase() === 'k' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); setFind(true); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -41,7 +42,7 @@ export function Header() {
   useEffect(() => { setFind(false); }, [path]);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-transparent bg-bg/85 backdrop-blur-md supports-[backdrop-filter]:bg-bg/75">
+    <header className={`top-0 z-40 border-b border-transparent bg-bg/85 backdrop-blur-md supports-[backdrop-filter]:bg-bg/75 ${path === '/watch' ? 'relative sm:sticky' : 'sticky'}`}>
       <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-3 px-4 sm:px-6">
         <Logo />
         <nav aria-label="Main" className="mx-auto hidden rounded-2xl bg-surface p-1 md:flex">

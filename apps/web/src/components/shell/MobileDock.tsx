@@ -11,7 +11,8 @@ import { tabActive } from './Header';
 export function MobileDock() {
   const { viewer } = useShell();
   const path = usePathname();
-  if (path === '/login') return null;
+  // The login page and the watch page (where the video takes the screen, as in video apps) have no dock.
+  if (path === '/login' || path === '/watch') return null;
   const create = viewer?.channel ? '/hub?upload=1' : viewer ? '/channel/create' : '/login?returnTo=/channel/create';
   const item = (href: string, label: string, I: typeof Icon.Home) => {
     const on = tabActive(href, path);
