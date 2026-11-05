@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # Pinned: Playwright 1.56 installs its browser on Ubuntu 24.04 (not on 26.04, the current ubuntu-latest).
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://freeme:freeme@localhost:5432/freeme
