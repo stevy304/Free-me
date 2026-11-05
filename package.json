@@ -14,6 +14,7 @@
     "db:seed": "node --import tsx prisma/seed.ts",
     "dev:api": "npm run dev -w @free-me/api",
     "dev:web": "npm run dev -w @free-me/web",
+    "dev:worker": "npm run worker -w @free-me/api",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",

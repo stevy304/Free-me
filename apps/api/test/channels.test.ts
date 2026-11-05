@@ -77,7 +77,7 @@ describe('catalog', () => {
     const music = cats.find((c: any) => c.slug === 'music');
     const base = { channelId: ch.id, durationSeconds: 60 };
     const t0 = Date.now();
-    for (let i = 0; i < 5; i++) await ctx.prisma.video.create({ data: { ...base, title: `Public ${i}`, status: 'READY', visibility: 'PUBLIC', publishedAt: new Date(t0 - i * 60_000), categoryId: i % 2 ? music.id : null, isShort: i === 4 } });
+    for (let i = 0; i < 5; i++) await ctx.prisma.video.create({ data: { ...base, title: `Public ${i}`, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', publishedAt: new Date(t0 - i * 60_000), categoryId: i % 2 ? music.id : null, isShort: i === 4 } });
     await ctx.prisma.video.create({ data: { ...base, title: 'Private', status: 'READY', visibility: 'PRIVATE', publishedAt: new Date(t0) } });
     await ctx.prisma.video.create({ data: { ...base, title: 'Unlisted', status: 'READY', visibility: 'UNLISTED', publishedAt: new Date(t0) } });
     await ctx.prisma.video.create({ data: { ...base, title: 'Processing', status: 'PROCESSING', visibility: 'PUBLIC' } });
@@ -101,13 +101,13 @@ describe('watch page and search', () => {
     const owner = await signIn(ctx.http, ctx.mail, 'chef@example.com');
     const ch = (await owner.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'chef.amara', name: 'Chef Amara' }).expect(201)).body.channel;
     const mk = (title: string, extra: object) => ctx.prisma.video.create({ data: { channelId: ch.id, title, description: 'Recipes from home', durationSeconds: 300, ...extra } });
-    const pub = await mk('Jollof rice in 20 minutes', { status: 'READY', visibility: 'PUBLIC', publishedAt: new Date(), masterPlaylistUrl: 'https://cdn.example/v/1/master.m3u8' });
-    const unl = await mk('Unlisted dinner', { status: 'READY', visibility: 'UNLISTED', publishedAt: new Date() });
+    const pub = await mk('Jollof rice in 20 minutes', { status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', publishedAt: new Date(), hlsMasterKey: 'hls/master.m3u8' });
+    const unl = await mk('Unlisted dinner', { status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', publishedAt: new Date() });
     const priv = await mk('Private draft', { status: 'READY', visibility: 'PRIVATE', publishedAt: new Date() });
     const proc = await mk('Still processing', { status: 'PROCESSING', visibility: 'PUBLIC' });
 
     const v = (await request(ctx.http).get(`/api/videos/${pub.id}`).expect(200)).body.video;
-    expect(v).toMatchObject({ title: 'Jollof rice in 20 minutes', playbackUrl: 'https://cdn.example/v/1/master.m3u8', channel: { handle: 'chef.amara', subscriberCount: 0 } });
+    expect(v).toMatchObject({ title: 'Jollof rice in 20 minutes', playbackUrl: `${WEB}/api/storage/local/pub/${pub.id}/hls/master.m3u8`, channel: { handle: 'chef.amara', subscriberCount: 0 } });
     await request(ctx.http).get(`/api/videos/${unl.id}`).expect(200);
     await request(ctx.http).get(`/api/videos/${priv.id}`).expect(404);
     await request(ctx.http).get(`/api/videos/${proc.id}`).expect(404);

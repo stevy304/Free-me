@@ -26,6 +26,8 @@ Browser ──HTTPS──> Caddy (edge, TLS, load balancing)
 | `channels` | Channels, handles, subscriptions |
 | `catalog` | Categories, feeds, watch page data, search and suggestions |
 | `admin` | Accounts, roles, suspension, audit log (administrators only) |
+| `videos` | Uploads, Studio (my videos), playback playlists for private media, view reporting, local storage stand-in |
+| `media` | Storage drivers (S3 and local), rendition ladder, FFmpeg processing, jobs, view counting; shared with the worker |
 | `health` | Liveness and dependency status for the load balancer |
 
 Request pipeline: Helmet headers → cookie parser → session middleware (attaches the account) → origin guard (state-changing requests must come from the web app) → auth/role guard (routes marked `@RequireAuth`) → validation pipe (unknown fields rejected) → controller → error filter (known errors keep their message; anything else is logged and answered with a generic 500).
@@ -48,11 +50,33 @@ Countries are ISO 3166-1 codes, languages BCP 47 tags, time zones IANA names, cu
 | 1. Application node A | Caddy edge, API, web | Internet: 80/443 only |
 | 2. Application node B | API, web | Private network only (from the edge) |
 | 3. Database node | PostgreSQL, Redis, backups | Private network only (from servers 1, 2, 4) |
-| 4. Media node | FFmpeg workers (phase 2) | Private network only |
+| 4. Media node | FFmpeg workers | Private network only |
 
 Video files go to S3-compatible object storage and are delivered through a CDN; application disks never hold media. Firewall rules and private networking are in [DEPLOYMENT.md](DEPLOYMENT.md). Capacity claims (users, concurrent viewers) are made only after the load tests of phase 6.
 
+## Video pipeline
+
+```
+Browser ──1. POST /api/uploads──────────────> API: creates a private draft video and an S3 multipart upload
+        ──2. PUT parts (4 at a time) ───────> Object storage (presigned links; resumes after a lost connection)
+        ──3. POST /api/uploads/:id/complete─> API: checks size, queues "transcode" (BullMQ on Redis)
+Media worker: download source → ffprobe (rejects non-video) → 3 thumbnail frames
+            → fast pass 144p/240p/360p → upload → video READY, playable ("SD ready")
+            → full pass 480p…2160p (up to the source) → upload → master playlist rewritten ("Ready")
+Viewer: CDN serves pub/<id>/hls/master.m3u8 and its fMP4 segments; private videos go through the API, which
+        returns playlists whose segment links are signed for 4 hours.
+```
+
+- **One upload path for any size.** Parts of 16 MB go straight from the browser to storage, never through the API, so a 20 GB file costs the API a few small requests. Parts retry with backoff; choosing the same file after a closed tab continues where it stopped.
+- **Fast first, then complete.** One FFmpeg decode feeds all rungs of a pass (split filter). The low pass finishes quickly, so viewers can watch while HD is still encoding; players pick up new renditions on their next playlist load.
+- **Rendition ladder.** H.264 High + AAC, 4-second fMP4 segments, keyframes every 2 seconds, capped CRF 21 (quality first, with a bitrate ceiling per rung), named by the short side so vertical video gets proper ladders. Never upscaled; 60 fps sources keep 60 fps with 1.5× bitrate.
+- **Shorts.** Vertical or square videos up to 3 minutes are marked as Shorts automatically and appear in the Shorts feed.
+- **Visibility follows media.** Public and unlisted media live under `pub/` (CDN, cacheable for a year); private media under `prv/`. Changing visibility queues a `relocate` job that copies, switches, then deletes the old copy, so playback never breaks. Jobs on one video never overlap (Redis lock).
+- **Deleting** removes the database row at once and queues a `purge` of every file. Uploads left unfinished for 3 days are cancelled hourly, and videos whose processing was interrupted (a restarted server) are queued again after 30 minutes.
+- **Views.** The player reports a view after real watching (30 s, or half of a short video). The API de-duplicates per viewer for 6 hours in Redis and adds up views and watch time; the worker writes the totals to PostgreSQL every 15 seconds.
+- **Processes.** The worker (`apps/api/src/worker.ts`) shares code with the API but runs on the media node. Several instances can run on several servers; failed jobs retry (transcode 3 times, others with backoff), and a file that is not a video fails at once with a clear reason shown in Studio.
+
 ## Coming in later phases
 
-- **Phase 2:** resumable uploads straight to object storage (signed URLs), BullMQ queues in Redis, FFmpeg workers on the media node producing an HLS ladder and thumbnails, private-video access checks on manifests.
-- **Phase 3:** comments, likes, watch history and playlists. Views and watch time are counted through Redis and aggregated into PostgreSQL in batches, not one row per view.
+- **Phase 3:** comments, likes, watch history, playlists, captions (WebVTT), recommendations beyond "latest".
+- Optional AV1/VP9 renditions for smaller files on modern devices, once the extra encoding time is worth it.

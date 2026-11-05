@@ -9,11 +9,12 @@ import type { AppRequest, AuthContext } from '../common/request';
 import { publicChannel } from '../users/serialize';
 import { PUBLIC_VIDEO, videoCard } from '../catalog/serialize';
 import { CreateChannelDto, UpdateChannelDto } from './channels.dto';
+import { MediaUrls } from '../videos/media-urls';
 
 @ApiTags('channels')
 @Controller('channels')
 export class ChannelsController {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly limits: RateLimitService) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly limits: RateLimitService, private readonly urls: MediaUrls) {}
 
   @Get('handle-available')
   @ApiOperation({ summary: 'Whether a handle can be taken' })
@@ -71,7 +72,7 @@ export class ChannelsController {
       this.prisma.video.count({ where: { channelId: channel.id, ...PUBLIC_VIDEO } }),
       auth ? this.prisma.subscription.findUnique({ where: { userId_channelId: { userId: auth.user.id, channelId: channel.id } }, select: { id: true } }) : null,
     ]);
-    return { channel: publicChannel(channel), videoCount, videos: videos.map(videoCard), viewer: { subscribed: !!subscribed, isOwner: auth?.user.id === channel.userId } };
+    return { channel: publicChannel(channel), videoCount, videos: videos.map((v) => videoCard(v, this.urls)), viewer: { subscribed: !!subscribed, isOwner: auth?.user.id === channel.userId } };
   }
 
   @Post(':handle/subscription')

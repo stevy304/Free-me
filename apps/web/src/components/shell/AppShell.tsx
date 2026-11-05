@@ -7,6 +7,8 @@ import { ShellProvider, useShell } from './ShellContext';
 import { TopBar } from './TopBar';
 import { Sidebar } from './Sidebar';
 import { MobileNav } from './MobileNav';
+import { UploadsProvider } from '../studio/UploadsContext';
+import { UploadDialog } from '../studio/UploadDialog';
 
 function Main({ children }: { children: ReactNode }) {
   const { collapsed } = useShell();
@@ -24,10 +26,13 @@ export function AppShell({ viewer, locale, children }: { viewer: Viewer | null; 
   }, []);
   return (
     <ShellProvider viewer={viewer} locale={locale}>
-      <TopBar />
-      <Suspense><Sidebar /></Suspense>
-      <Main>{children}</Main>
-      <MobileNav />
+      <UploadsProvider>
+        <TopBar />
+        <Suspense><Sidebar /></Suspense>
+        <Main>{children}</Main>
+        <MobileNav />
+        {viewer?.channel && <UploadDialog />}
+      </UploadsProvider>
     </ShellProvider>
   );
 }

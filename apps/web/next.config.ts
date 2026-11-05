@@ -7,6 +7,11 @@ const config: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   output: 'standalone',
+  experimental: {
+    // Forwarded /api request bodies are capped at 10 MB by default; upload parts (UPLOAD_PART_MB, 16 MB) and
+    // thumbnails pass through here with the local storage driver. In production, parts go straight to object storage.
+    middlewareClientMaxBodySize: '64mb',
+  },
   async rewrites() {
     return [
       // The browser talks to one origin: /api/* is forwarded to the API, so session cookies stay first-party.

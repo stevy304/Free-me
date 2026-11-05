@@ -22,6 +22,14 @@
 - **Errors:** unexpected errors are logged with their stack and answered with a generic message; nothing internal leaks to clients.
 - **Proxies:** `TRUST_PROXY` tells the API how many proxies to trust for client IPs (1 behind Caddy).
 
+## Uploads and media
+
+- Uploads go straight to object storage through presigned part links that expire after an hour; the API checks the declared size, the assembled size and the file extension, and creators only (accounts with a channel) can upload, with daily and open-upload limits.
+- The media worker identifies every file with `ffprobe` before processing; anything that is not a playable video fails with a clear message and is never published. FFmpeg runs as the unprivileged `freeme` user under systemd hardening.
+- Custom thumbnails are accepted only as JPEG, PNG or WebP, checked by their bytes, up to 2 MB.
+- Private videos live under a separate `prv/` prefix that is never public; they play only for their owner, through playlists whose segment links are signed for 4 hours. Public and unlisted videos live under `pub/`, the only prefix the bucket policy makes readable.
+- The bucket allows browser access (CORS) only from the web app's origin.
+
 ## Authorization
 
 Roles are a set on the account. `@RequireAuth()` and `@RequireAuth('ADMIN')` guard routes on the server; the web app hides what a role cannot use, but the API is the authority. Administrators cannot remove their own administrator role or suspend themselves.
@@ -36,6 +44,6 @@ No secrets in the repository. Production values (database and Redis passwords, `
 
 ## Still to do (tracked in ROADMAP.md)
 
-Upload scanning and file-type checks (phase 2), reporting and moderation queues, copyright workflow and age-appropriate controls (phase 5), dependency scanning in CI, and a penetration test before public launch. Every operating country's data-protection, consumer, advertising and payment rules are reviewed before launch there.
+Malware scanning of uploaded files beyond media identification, reporting and moderation queues, copyright workflow and age-appropriate controls (phase 5), dependency scanning in CI, and a penetration test before public launch. Every operating country's data-protection, consumer, advertising and payment rules are reviewed before launch there.
 
 Report a vulnerability privately to the maintainers; do not open a public issue.

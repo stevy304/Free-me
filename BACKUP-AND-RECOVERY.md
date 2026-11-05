@@ -4,17 +4,11 @@
 
 | Data | Where | How | Frequency |
 | --- | --- | --- | --- |
-| PostgreSQL (all accounts, channels, money records, audit log) | Server 3 | `deploy/db-node/backup.sh`: `pg_dump` custom format, checked with `pg_restore --list`, uploaded to S3-compatible storage in another location | Nightly (02:15 UTC), kept 30 days |
-| Redis | Server 3 | Append-only file on a Docker volume | Continuous; Redis holds only rate-limit counters (and queues from phase 2), which can be rebuilt |
-| Video files (phase 2) | Object storage | Provider replication/versioning | Continuous |
+| PostgreSQL (all accounts, channels, money records, audit log) | Server 3 | `deploy/ubuntu/backup.sh`: `pg_dump` custom format, checked with `pg_restore --list`, uploaded to S3-compatible storage in another location | Nightly (02:15 UTC), kept 30 days |
+| Redis | Server 3 | Append-only file (`/var/lib/redis`) | Continuous; Redis holds rate-limit counters, the job queue and views not yet written (at most 15 s); videos whose processing was interrupted are queued again automatically after 30 minutes |
+| Video sources, renditions, thumbnails | Object storage | The provider keeps redundant copies; enable bucket versioning or replication to a second region for protection against deletion | Continuous |
 
-Install the backup on server 3:
-
-```bash
-install -m 700 deploy/db-node/backup.sh /opt/freeme/backup.sh
-# /etc/cron.d/freeme-backup (with the variables from ENVIRONMENT.md in /opt/freeme/backup.env, mode 600)
-15 2 * * * root set -a; . /opt/freeme/backup.env; set +a; /opt/freeme/backup.sh >> /var/log/freeme-backup.log 2>&1
-```
+`deploy/ubuntu/install.sh ROLE=db` installs the script as `/usr/local/bin/freeme-backup` and the cron entry (02:15 UTC). Fill `/etc/freeme/backup.env` (mode 600) with `DATABASE_URL`, `BACKUP_S3_URI`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_ENDPOINT_URL`. Keep backups in a different bucket (and ideally a different location) than the videos.
 
 ## Restore
 
@@ -27,7 +21,7 @@ pg_restore --no-owner --dbname=postgresql://freeme:…@10.0.1.20:5432/freeme_res
 
 ## Targets
 
-- **Recovery point objective:** 24 hours with nightly dumps. Before money starts flowing (phase 4), continuous WAL archiving (e.g. WAL-G to object storage) brings this to minutes; the database compose file already sets `wal_level=replica` for it.
+- **Recovery point objective:** 24 hours with nightly dumps. Before money starts flowing (phase 4), continuous WAL archiving (e.g. WAL-G to object storage) brings this to minutes; the installer already sets `wal_level=replica` for it.
 - **Recovery time objective:** under 2 hours for a full restore at launch size.
 
 ## Drills

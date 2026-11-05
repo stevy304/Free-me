@@ -12,6 +12,7 @@ import { UsersModule } from './users/users.module';
 import { ChannelsModule } from './channels/channels.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { AdminModule } from './admin/admin.module';
+import { VideosModule } from './videos/videos.module';
 import { HealthController } from './health/health.controller';
 
 @Module({})
@@ -20,7 +21,7 @@ export class AppModule {
     return {
       module: AppModule,
       global: true,
-      imports: [DatabaseModule, CommonModule, MailModule, AuthModule, UsersModule, ChannelsModule, CatalogModule, AdminModule],
+      imports: [DatabaseModule, CommonModule, MailModule, VideosModule, AuthModule, UsersModule, ChannelsModule, CatalogModule, AdminModule],
       controllers: [HealthController],
       providers: [
         { provide: APP_CONFIG, useValue: config },

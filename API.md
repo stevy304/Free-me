@@ -48,10 +48,40 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 | --- | --- | --- |
 | GET | `/categories` | Video categories |
 | GET | `/videos?category=&shorts=&cursor=&limit=` | Latest public videos |
-| GET | `/videos/:id` | One video for its watch page (playback URL when ready) |
+| GET | `/videos/:id` | One video for its watch page: `playbackUrl` (CDN for public and unlisted, API route for private), processing stage, size |
 | GET | `/search?q=&cursor=` | Matching channels (first page) and videos |
 | GET | `/search/suggest?q=` | Up to ten suggestions while typing |
 | GET | `/feed/subscriptions` 🔒 | Subscribed channels and their latest videos |
+
+## Uploads (creators) 🔒
+
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | `/uploads` | `{ fileName, sizeBytes }`: creates a private draft video and a multipart upload; `{ videoId, partSize, partCount }`. Video formats only; up to `MAX_UPLOAD_MB` |
+| POST | `/uploads/:id/parts` | `{ partNumbers }` (up to 100): signed addresses to `PUT` each part to (valid 1 hour). Each response's `ETag` header is the part's tag |
+| GET | `/uploads/:id` | Parts already stored, for resuming |
+| POST | `/uploads/:id/complete` | `{ parts: [{ partNumber, etag }] }`: assembles the file, checks its size and queues processing |
+| DELETE | `/uploads/:id` | Cancels an unfinished upload |
+
+## Studio (creators) 🔒
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/studio/videos?cursor=` | My videos in every state: processing progress and stage, errors, renditions, thumbnails (signed when private) |
+| GET | `/studio/videos/:id` | One of my videos |
+| PATCH | `/studio/videos/:id` | `title`, `description`, `visibility` (PUBLIC, UNLISTED, PRIVATE), `category` (slug), `tags`, `language`, `madeForKids`, `thumbnail` (0–2: a generated frame). Publishing sets the publish date; visibility changes move the media |
+| PUT | `/studio/videos/:id/thumbnail` | Body: a JPEG, PNG or WebP image (up to 2 MB), checked by its bytes |
+| DELETE | `/studio/videos/:id` | Deletes the video and every file |
+
+## Playback
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/videos/:id/hls/master.m3u8` | Master playlist for private media (owner only) or while media is moving |
+| GET | `/videos/:id/hls/:rendition/index.m3u8` | Variant playlist whose segment links are signed for 4 hours |
+| POST | `/videos/:id/views` | `{ watchedSeconds }`: counts a view after at least 30 s (or half of a short video); once per viewer per 6 hours; the owner's views do not count |
+
+Public and unlisted videos play from the CDN: `playbackUrl` in `/videos/:id` and feed items points at `MEDIA_PUBLIC_BASE_URL/<id>/hls/master.m3u8`.
 
 ## Administration 🛡
 

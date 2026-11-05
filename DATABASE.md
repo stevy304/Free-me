@@ -7,6 +7,7 @@ PostgreSQL 16 through Prisma 6. The schema is `prisma/schema.prisma`; every chan
 | Migration | What it does |
 | --- | --- |
 | `20261104000000_initial` | All platform tables: users, profiles, channels, videos, renditions, files, categories, tags, subscriptions, likes, comments, playlists, watch history, advertisers, campaigns, ad impressions and events, creator eligibility, balances, revenue ledger, payouts, reports, moderation actions, audit log |
+| `20261106000000_video_pipeline` | Storage keys instead of URLs (`hlsMasterKey`, `thumbnailKey`, rendition `playlistKey`), processing progress, stage and error, media location (public or private prefix), thumbnail choices, size and dimensions, audience flag (`madeForKids`), upload id; feed and channel indexes |
 | `20261105000000_passwordless_auth_worldwide` | Sign-in without passwords (`OAuthAccount`, `EmailOtp`, `Session`), roles as a set, account status; removes market-specific defaults (country, city, currency, payout methods); adds currency to every money table and the split in force to each ledger entry |
 
 The second migration adds required columns without defaults (currency, advertiser country, payout provider). That is safe because no production data existed yet; from now on, required columns on non-empty tables get a default or a backfill step.
@@ -26,7 +27,7 @@ Reference data: `npm run db:seed` upserts the video categories. Nothing else is 
 
 ## Content
 
-`Channel` (unique `handle`, one per user), `Video` (status, visibility, publish time, counters), `VideoRendition` and `VideoFile` (phase 2), `Category`, `Tag`/`VideoTag`, `Subscription` (unique per user and channel), `Like`, `Comment` (threaded), `Playlist`/`PlaylistItem`, `WatchHistory`.
+`Channel` (unique `handle`, one per user), `Video` (status, visibility, publish time, counters, processing state, media location), `VideoRendition` (one per quality: size, bitrate, codecs, playlist key), `VideoFile` (the uploaded source), `Category`, `Tag`/`VideoTag`, `Subscription` (unique per user and channel), `Like`, `Comment` (threaded), `Playlist`/`PlaylistItem`, `WatchHistory`.
 
 Only videos with `status = READY`, `visibility = PUBLIC` and a `publishedAt` appear in feeds and search. Unlisted videos open by link; private ones only for their owner.
 
@@ -45,7 +46,8 @@ Rules the code will enforce:
 - Feeds use keyset pagination on (`publishedAt`, `id`) with the existing `Video` indexes; there is no `OFFSET` on large tables.
 - Lookups by unique keys: `User.email`, `Channel.handle`, `Session.tokenHash`, `OAuthAccount (provider, providerAccountId)`.
 - `EmailOtp (email, createdAt)` finds the latest code; `Session (userId, revokedAt)` lists a user's devices.
-- Views and watch time (phase 3) will be counted in Redis and written to PostgreSQL in batches, so a popular video does not mean one database write per view.
+- Views and watch time are counted in Redis and written to PostgreSQL in batches every 15 seconds, so a popular video does not mean one database write per view.
+- Media files are not in the database: rows store storage keys; links (CDN or signed) are made when serving.
 
 ## Expired rows
 

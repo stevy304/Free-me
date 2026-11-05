@@ -1,6 +1,6 @@
 'use client';
 
-import { Clapperboard, Compass, Home, Settings, Shield, SquarePlay, UserPlus, Users } from 'lucide-react';
+import { Clapperboard, Compass, Film, Home, Settings, Shield, SquarePlay, UserPlus, Users } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -59,6 +59,7 @@ export function Sidebar() {
       <div className="space-y-0.5 border-b border-line py-3">
         <p className="px-3 pb-1 pt-1 text-[16px] font-semibold">You</p>
         <Row href={you.href} icon={icon(you.I, you.active)} label={you.label} active={you.active} />
+        {viewer?.channel && <Row href="/studio" icon={icon(Film, path === '/studio')} label="Your videos" active={path === '/studio'} />}
         {viewer && <Row href="/settings" icon={icon(Settings, path === '/settings')} label="Settings" active={path === '/settings'} />}
         {viewer?.user.roles.includes('ADMIN') && <Row href="/admin" icon={icon(Shield, path === '/admin')} label="Administration" active={path === '/admin'} />}
       </div>

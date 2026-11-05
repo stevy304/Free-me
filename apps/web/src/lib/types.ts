@@ -13,6 +13,7 @@ export interface Viewer {
 }
 export interface VideoCardData {
   id: string; title: string; thumbnailUrl: string | null; durationSeconds: number; isShort: boolean; viewCount: string; publishedAt: string | null;
+  playbackUrl?: string | null; width?: number | null; height?: number | null;
   channel: { handle: string; name: string; avatarUrl: string | null; isVerified: boolean };
 }
 export interface VideoPage { videos: VideoCardData[]; nextCursor: string | null }

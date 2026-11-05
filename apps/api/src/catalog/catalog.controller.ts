@@ -6,6 +6,7 @@ import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import type { AuthContext } from '../common/request';
 import { publicChannel } from '../users/serialize';
 import { PUBLIC_VIDEO, videoCard } from './serialize';
+import { MediaUrls } from '../videos/media-urls';
 
 /** Keyset pagination cursor: "<publishedAt ISO>_<id>", stable while new videos arrive. */
 function parseCursor(cursor?: string) {
@@ -20,7 +21,7 @@ const pageSize = (v?: string) => Math.min(48, Math.max(1, Number(v) || 24));
 @ApiTags('catalog')
 @Controller()
 export class CatalogController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly urls: MediaUrls) {}
 
   @Get('categories')
   @ApiOperation({ summary: 'Video categories' })
@@ -38,7 +39,7 @@ export class CatalogController {
     const more = rows.length > take;
     const items = rows.slice(0, take);
     const last = items.at(-1);
-    return { videos: items.map(videoCard), nextCursor: more && last ? `${last.publishedAt!.toISOString()}_${last.id}` : null };
+    return { videos: items.map((v) => videoCard(v, this.urls)), nextCursor: more && last ? `${last.publishedAt!.toISOString()}_${last.id}` : null };
   }
 
   @Get('videos')
@@ -59,9 +60,11 @@ export class CatalogController {
     const v = await this.prisma.video.findUnique({ where: { id }, include: { channel: true, category: true } });
     const owner = !!auth && v?.channel.userId === auth.user.id;
     if (!v || (!owner && (v.status !== 'READY' || v.visibility === 'PRIVATE'))) throw new NotFoundException('This video is not available.');
-    return { video: { ...videoCard(v), description: v.description, status: v.status, visibility: v.visibility, likeCount: v.likeCount, commentCount: v.commentCount,
-      category: v.category ? { name: v.category.name, slug: v.category.slug } : null, playbackUrl: v.status === 'READY' ? v.masterPlaylistUrl : null,
-      channel: { ...videoCard(v).channel, subscriberCount: v.channel.subscriberCount } } };
+    const card = videoCard(v, this.urls);
+    return { video: { ...card, thumbnailUrl: await this.urls.thumb(v), description: v.description, status: v.status, visibility: v.visibility, likeCount: v.likeCount, commentCount: v.commentCount,
+      category: v.category ? { name: v.category.name, slug: v.category.slug } : null, playbackUrl: this.urls.playback(v),
+      processingStage: v.processingStage, width: v.width, height: v.height, madeForKids: v.madeForKids,
+      channel: { ...card.channel, subscriberCount: v.channel.subscriberCount } } };
   }
 
   @Get('search')

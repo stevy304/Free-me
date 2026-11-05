@@ -1,0 +1,31 @@
+# Media worker instances: systemctl enable --now freeme-worker@1 freeme-worker@2 ...
+# Each instance transcodes WORKER_CONCURRENCY videos at once; run about one instance per 8 CPU cores.
+[Unit]
+Description=Free Me media worker %i (FFmpeg transcoding)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=freeme
+Group=freeme
+WorkingDirectory=/opt/freeme/app/apps/api
+EnvironmentFile=/etc/freeme/freeme.env
+Environment=NODE_ENV=production SCRATCH_DIR=/var/lib/freeme/scratch/%i
+ExecStart=/usr/bin/node dist/worker.js
+Restart=always
+RestartSec=5
+# Jobs interrupted by a stop are picked up again by another worker (or this one after restart).
+TimeoutStopSec=30
+LimitNOFILE=65536
+Nice=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/freeme
+
+[Install]
+WantedBy=multi-user.target

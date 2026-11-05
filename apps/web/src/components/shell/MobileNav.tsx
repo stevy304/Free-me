@@ -13,7 +13,7 @@ export function MobileNav() {
   const items = [
     { href: '/', label: 'Home', icon: <Home size={24} strokeWidth={path === '/' ? 2.2 : 1.6} />, active: path === '/' },
     { href: '/shorts', label: 'Shorts', icon: <Clapperboard size={24} strokeWidth={path === '/shorts' ? 2.2 : 1.6} />, active: path === '/shorts' },
-    ...(!viewer?.channel ? [{ href: viewer ? '/channel/create' : '/login?returnTo=/channel/create', label: 'Create', icon: <PlusCircle size={34} strokeWidth={1.2} />, active: false }] : []),
+    { href: viewer?.channel ? '/studio' : viewer ? '/channel/create' : '/login?returnTo=/channel/create', label: 'Create', icon: <PlusCircle size={34} strokeWidth={1.2} />, active: false },
     { href: '/feed/subscriptions', label: 'Subscriptions', icon: <Users size={24} strokeWidth={path === '/feed/subscriptions' ? 2.2 : 1.6} />, active: path === '/feed/subscriptions' },
     { href: '/you', label: 'You', icon: viewer ? <Avatar name={viewer.profile?.displayName ?? viewer.user.email} src={viewer.profile?.avatarUrl} size={24} /> : <UserRound size={24} strokeWidth={1.6} />, active: path === '/you' },
   ];

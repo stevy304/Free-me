@@ -25,6 +25,11 @@ enum OtpPurpose {
   SIGN_IN
 }
 
+enum MediaLocation {
+  PUBLIC   // pub/ prefix: served by the CDN (public and unlisted videos)
+  PRIVATE  // prv/ prefix: served only through short-lived signed links (private videos)
+}
+
 enum VideoStatus {
   UPLOADING
   PROCESSING
@@ -220,9 +225,19 @@ model Video {
   status                VideoStatus       @default(UPLOADING)
   visibility            Visibility        @default(PUBLIC)
   durationSeconds       Int               @default(0)
-  thumbnailUrl          String?
-  animatedPreviewUrl    String?
+  width                 Int?              // display size after rotation
+  height                Int?
+  thumbnailKey          String?           // storage key of the chosen thumbnail
+  thumbnailCandidates   String[]          // storage keys of generated frames the creator can choose from
+  customThumbnail       Boolean           @default(false)
   isShort               Boolean           @default(false)
+  madeForKids           Boolean           @default(false)
+  processingProgress    Int               @default(0)   // 0-100
+  processingStage       String?           // "Uploading", "SD ready", "HD processing", ...
+  processingError       String?
+  mediaLocation         MediaLocation     @default(PRIVATE)
+  uploadId              String?           // multipart upload in progress
+  sourceSizeBytes       BigInt?
   monetizationEnabled   Boolean           @default(false)
   viewCount             BigInt            @default(0)
   monetizedViewCount    BigInt            @default(0)
@@ -230,7 +245,7 @@ model Video {
   likeCount             Int               @default(0)
   commentCount          Int               @default(0)
   sourceFileS3Key       String?
-  masterPlaylistUrl     String?           // HLS .m3u8 master playlist
+  hlsMasterKey          String?           // HLS master playlist, relative to the video's media prefix
   publishedAt           DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
@@ -250,6 +265,8 @@ model Video {
   @@index([status, visibility])
   @@index([isShort])
   @@index([createdAt])
+  @@index([channelId, createdAt])
+  @@index([status, visibility, isShort, publishedAt])
 }
 
 model VideoRendition {
@@ -260,9 +277,11 @@ model VideoRendition {
   width                 Int
   height                Int
   bitrateKbps           Int
-  playlistUrl           String            // Sub-playlist .m3u8
+  playlistKey           String            // variant playlist, relative to the video's media prefix ("hls/720/index.m3u8")
   fileSizeBytes         BigInt
   codec                 String            @default("h264")
+  codecs                String            @default("avc1.640028,mp4a.40.2") // RFC 6381, for the master playlist
+  frameRate             Float             @default(30)
   createdAt             DateTime          @default(now())
 
   @@unique([videoId, resolution])

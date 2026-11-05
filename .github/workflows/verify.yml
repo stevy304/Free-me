@@ -40,6 +40,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: FFmpeg and an S3-compatible test server
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq ffmpeg
+          pip install --quiet "moto[server]"
+          (moto_server -p 5055 > /tmp/moto.log 2>&1 &)
       - name: Install (generates the Prisma client and builds the shared package)
         run: npm ci
       - name: Schema is valid and migrations match it
@@ -51,17 +56,21 @@ jobs:
         run: npx prisma migrate deploy && npm run db:seed
       - name: Typecheck
         run: npm run lint
-      - name: Unit and API tests (PostgreSQL and Redis)
+      - name: Unit and API tests (PostgreSQL, Redis, FFmpeg, S3 driver)
         run: npm test
+        env:
+          S3_TEST_ENDPOINT: http://127.0.0.1:5055
       - name: Build
         run: npm run build
       - name: End-to-end tests in a browser
         run: |
-          (cd apps/api && APP_URL=http://localhost:3000 MAIL_TRANSPORT=console SESSION_SECRET=ci-session-secret-0123456789abcdefghij node dist/main.js > /tmp/api.log 2>&1 &)
+          export APP_URL=http://localhost:3000 MAIL_TRANSPORT=console SESSION_SECRET=ci-session-secret-0123456789abcdefghij STORAGE_DRIVER=local LOCAL_STORAGE_DIR=/tmp/fm-storage SCRATCH_DIR=/tmp/fm-scratch
+          (cd apps/api && node dist/main.js > /tmp/api.log 2>&1 &)
+          (cd apps/api && node dist/worker.js > /tmp/worker.log 2>&1 &)
           (cd apps/web && API_INTERNAL_URL=http://127.0.0.1:4000 PORT=3000 HOSTNAME=127.0.0.1 node .next/standalone/apps/web/server.js > /tmp/web.log 2>&1 &)
           npx --prefix apps/web playwright install --with-deps chromium
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:4000/api/health > /dev/null && curl -sf http://127.0.0.1:3000/ > /dev/null && break; sleep 1; done
           cd apps/web && E2E_API_LOG=/tmp/api.log npx playwright test
       - name: Server logs on failure
         if: failure()
-        run: tail -n 100 /tmp/api.log /tmp/web.log || true
+        run: tail -n 100 /tmp/api.log /tmp/worker.log /tmp/web.log || true

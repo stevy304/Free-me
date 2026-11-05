@@ -1,0 +1,30 @@
+[Unit]
+Description=Free Me API (NestJS)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=freeme
+Group=freeme
+WorkingDirectory=/opt/freeme/app/apps/api
+EnvironmentFile=/etc/freeme/freeme.env
+Environment=NODE_ENV=production PORT=4000
+ExecStart=/usr/bin/node dist/main.js
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+LimitNOFILE=65536
+# Hardening: read-only system, private /tmp, no privilege escalation.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/freeme
+
+[Install]
+WantedBy=multi-user.target

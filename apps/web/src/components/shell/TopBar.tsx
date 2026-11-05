@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { Logo } from '../Logo';
 import { AccountMenu } from './AccountMenu';
+import { CreateMenu } from './CreateMenu';
 import { SearchBox } from './SearchBox';
 import { useShell } from './ShellContext';
 
@@ -24,7 +25,7 @@ export function TopBar() {
         <button type="button" onClick={() => setMobileSearch(true)} aria-label="Search" className="rounded-full p-2 hover:bg-surface sm:hidden"><Search size={22} strokeWidth={1.6} /></button>
         {viewer ? (
           <>
-            {!viewer.channel && (
+            {viewer.channel ? <CreateMenu /> : (
               <Link href="/channel/create" className="hidden h-9 items-center gap-1.5 rounded-full bg-surface pl-2.5 pr-3.5 text-[14px] font-medium hover:bg-surface-hover sm:flex">
                 <Plus size={22} strokeWidth={1.6} />Create
               </Link>
