@@ -8,13 +8,15 @@
     "apps/*"
   ],
   "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "setup": "bash scripts/dev-setup.sh",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "node --import tsx prisma/seed.ts",
-    "dev:api": "npm run dev -w @free-me/api",
-    "dev:web": "npm run dev -w @free-me/web",
-    "dev:worker": "npm run worker -w @free-me/api",
+    "dev:api": "npm run build -w @free-me/shared && npm run dev -w @free-me/api",
+    "dev:web": "npm run build -w @free-me/shared && npm run dev -w @free-me/web",
+    "dev:worker": "npm run build -w @free-me/shared && npm run worker -w @free-me/api",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",

@@ -32,21 +32,27 @@ prisma           PostgreSQL schema, migrations and reference-data seed
 deploy/ubuntu    Server installer, systemd services, Caddy edge, release, storage and backup scripts
 ```
 
-## Run it locally (Ubuntu, no containers)
+## Run it locally (Ubuntu or GitHub Codespaces, no containers)
+
+Node.js 22.12+ is required. Then one command starts everything:
 
 ```bash
-sudo apt install -y postgresql redis-server ffmpeg          # Node.js 22.12+ is also required
-sudo -u postgres createuser -P freeme && sudo -u postgres createdb -O freeme freeme   # password: freeme
-cp .env.example .env                                         # fill SESSION_SECRET (and Google keys if you have them)
-npm ci                                                       # also generates the Prisma client and builds packages/shared
-set -a; . ./.env; set +a
-npm run db:migrate && npm run db:seed                        # schema + video categories
-npm run dev:api                                              # API on http://localhost:4000 (docs: /api/docs)
-npm run dev:worker                                           # media worker (needs REDIS_URL)
-npm run dev:web                                              # web app on http://localhost:3000
+npm install
+npm run dev
 ```
 
-Videos are stored in `./.data/storage` (`STORAGE_DRIVER=local`). With `MAIL_TRANSPORT=console`, sign-in codes are printed in the API log. Put your address in `ADMIN_EMAILS` to become an administrator. Without `REDIS_URL` the API processes uploads itself (one machine, development only).
+`npm run dev` ([scripts/dev.mjs](scripts/dev.mjs)):
+
+1. creates `.env` from `.env.example` on the first run (with a random `SESSION_SECRET`);
+2. installs PostgreSQL, Redis and FFmpeg with apt if they are missing (first run only; `npm run setup` does just this), and starts them if they are stopped;
+3. creates the database user and database from `DATABASE_URL`, applies the migrations and seeds the video categories;
+4. runs the **API** (http://localhost:4000, docs at `/api/docs`, rebuilt when you edit it), the **media worker** and the **web app** (http://localhost:3000), with labelled logs in one terminal. Ctrl+C stops all of them.
+
+In GitHub Codespaces it uses the forwarded https address of port 3000 automatically (open it from the Ports tab).
+
+Videos are stored in `./.data/storage` (`STORAGE_DRIVER=local`). With `MAIL_TRANSPORT=console`, sign-in codes are printed in the `[api]` lines. Put your address in `ADMIN_EMAILS` in `.env` to become an administrator (and moderator).
+
+The parts can also be started separately, each in its own terminal: `npm run dev:api`, `npm run dev:worker`, `npm run dev:web` (PostgreSQL and Redis must already be running and migrated: `npm run db:migrate && npm run db:seed`).
 
 ## Checks
 

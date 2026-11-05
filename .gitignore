@@ -12,3 +12,4 @@ build/
 *.log
 .DS_Store
 .data/
+dump.rdb
