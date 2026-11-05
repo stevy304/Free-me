@@ -46,6 +46,11 @@ Values for local development are in [.env.example](.env.example). In production 
 | `QUEUE_PREFIX` | | `fm` | Redis key prefix for the job queue |
 | `WHISPER_CPP_PATH`, `WHISPER_MODEL` | | off | Automatic captions on the media server: the whisper.cpp program (e.g. `/opt/whisper.cpp/build/bin/whisper-cli`) and a model file (e.g. `ggml-small.bin`). Set both or neither. See DEPLOYMENT.md → Automatic captions |
 | `WHISPER_THREADS` | | `4` | CPU threads for one transcription |
+| `SAFETY_SCAN_URL` | | off | Optional outside matching service for uploads (e.g. a PDQ/TMK service such as Meta's Hasher-Matcher-Actioner behind a small adapter, or a vendor). Receives `POST { videoId, sha256, md5, durationSeconds, frames: [base64 JPEG] }`, answers `{ match: boolean, label? }` |
+| `SAFETY_SCAN_TOKEN` | | | Sent as `Authorization: Bearer …` to the scanner |
+| `SAFETY_SCAN_TIMEOUT_MS` | | `60000` | How long to wait for the scanner |
+| `SAFETY_SCAN_FAIL_CLOSED` | | `false` | `true`: hold uploads when the scanner cannot be reached, instead of letting them through |
+| `NEW_ACCOUNT_DAILY_UPLOADS` | | `5` | Uploads a day for accounts in their first week |
 
 ## Web (apps/web)
 

@@ -48,6 +48,7 @@ export function HubContent({ handle }: { handle: string }) {
     if (v.takenDownAt) return <button type="button" onClick={() => setTab('notices')} className="flex items-start gap-1.5 text-left text-danger hover:underline"><Icon.Warning size={15} className="mt-0.5 shrink-0" />Removed: {v.takedownReason === 'COPYRIGHT' ? 'copyright notice' : 'Community Guidelines'}</button>;
     if (v.status === 'FAILED') return <span className="flex items-start gap-1.5 text-danger"><Icon.Warning size={15} className="mt-0.5 shrink-0" />{v.processingError ?? 'Processing failed'}</span>;
     if (v.status === 'UPLOADING') return <span className="text-muted">Upload not finished</span>;
+    if (v.status === 'FLAGGED') return <span className="flex items-start gap-1.5 text-accent" title="Our automatic check asked a moderator to look at this video before it goes live."><Icon.Clock size={15} className="mt-0.5 shrink-0" />Being reviewed before it goes live</span>;
     if (v.status === 'PROCESSING' || v.processingStage !== 'Ready') return <span className="flex items-center gap-1.5 text-muted"><Icon.Spinner size={14} className="animate-spin" />{v.processingStage} {v.processingProgress}%</span>;
     return <span className="text-muted">{[v.renditions.at(-1), v.isShort ? 'Moment' : null].filter(Boolean).join(' · ')}</span>;
   };

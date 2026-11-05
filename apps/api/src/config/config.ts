@@ -4,6 +4,17 @@ import { normalizeEmail } from '@free-me/shared';
  * Configuration from environment variables, checked once at start-up. A missing or unsafe setting stops the API
  * with a message that names it, instead of failing later on a user's request.
  */
+export interface SafetyConfig {
+  /** Optional outside matching service: POST { videoId, sha256, md5, durationSeconds, frames: [base64 JPEG] } → { match, label? }. */
+  scanUrl: string | null;
+  scanToken: string | null;
+  timeoutMs: number;
+  /** When the scanner cannot be reached: hold the upload (true) or let it through (false, default). */
+  failClosed: boolean;
+  /** Uploads a day for accounts in their first week. */
+  newAccountDailyUploads: number;
+}
+
 export interface AppConfig {
   nodeEnv: 'development' | 'test' | 'production';
   port: number;
@@ -26,6 +37,7 @@ export interface AppConfig {
   trustProxy: number;
   docsEnabled: boolean;
   media: MediaConfig;
+  safety: SafetyConfig;
   /** Who runs the service, shown on the legal pages and in notices (see ENVIRONMENT.md). */
   legal: LegalConfig;
 }
@@ -134,6 +146,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)),
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
     media, legal,
+    safety: {
+      scanUrl: env.SAFETY_SCAN_URL?.trim() || null, scanToken: env.SAFETY_SCAN_TOKEN?.trim() || null,
+      timeoutMs: Math.max(1000, Number(env.SAFETY_SCAN_TIMEOUT_MS) || 60_000), failClosed: env.SAFETY_SCAN_FAIL_CLOSED === 'true',
+      newAccountDailyUploads: Math.max(1, Number(env.NEW_ACCOUNT_DAILY_UPLOADS) || 5),
+    },
   };
 }
 

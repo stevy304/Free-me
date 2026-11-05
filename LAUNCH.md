@@ -53,6 +53,12 @@ payment or a decision only the operator can make.
 - [ ] Minimum age decided and stated in the Terms.
 - [ ] At least one moderator account (Admin → roles) besides yourself.
 
+## 6b. Safety of uploads (you)
+
+- [ ] Apply for access to hash lists of known child sexual abuse material (NCMEC, the Tech Coalition, or a vendor). When granted, import them: `node dist/tools/import-hashes.js <file> "<list name>"` (in `apps/api`). Matching uploads are held for review.
+- [ ] Optionally run a perceptual matching service (e.g. Meta's open-source Hasher-Matcher-Actioner with PDQ/TMK) and set `SAFETY_SCAN_URL`; consider `SAFETY_SCAN_FAIL_CLOSED=true` once it is reliable.
+- [ ] Know your legal duty to report: in many countries, platforms must report child sexual abuse material to the authorities (in the US, to NCMEC). Write down who does this and how.
+
 ## 7. Before announcing it
 
 - [ ] Load test with the expected first audience (DEPLOYMENT.md → Scaling) and decide how many media workers you need.
@@ -66,4 +72,5 @@ payment or a decision only the operator can make.
 | Find files a video left in the wrong storage place (report only) | `node dist/tools/repair-media.js` in `apps/api` |
 | Repair them | `node dist/tools/repair-media.js --apply` (safe while the site runs; busy videos are skipped, run again later) |
 | System status | `GET /api/admin/system` signed in as an administrator |
+| Import a blocked-content hash list | `node dist/tools/import-hashes.js <file> "<list name>"` (MD5 or SHA-256, one per line) |
 | Upgrade older videos (HDR colour, even volume, previews, captions) | `POST /api/admin/system/reprocess` with `{ "limit": 50 }`, repeated until `remaining` is 0 (check `videosNeedingUpgrade` on the status page) |

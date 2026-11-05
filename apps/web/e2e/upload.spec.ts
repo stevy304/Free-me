@@ -26,7 +26,7 @@ test('upload, details, publish, processing to every quality, then on the home pa
   // A big, noisy photo (well over 2 MB): the browser shrinks it before uploading.
   const photo = join(dir, 'cover.png');
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=gray:s=3000x2000', '-vf', 'noise=alls=60:allf=t', '-frames:v', '1', photo]);
-  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30:duration=6', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-shortest', clip]);
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30:duration=6', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-shortest', '-metadata', `comment=e2e ${run}`, clip]);
 
   const email = `uploader.${run}@example.com`;
   await page.goto('/login?returnTo=/channel/create');

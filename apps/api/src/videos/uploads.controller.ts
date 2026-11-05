@@ -45,6 +45,11 @@ export class UploadsController {
   @ApiOperation({ summary: 'Start an upload: creates a private draft video and a multipart upload' })
   async start(@CurrentAuth() auth: AuthContext, @Body() body: StartUploadDto, @Req() req: AppRequest) {
     await this.limits.consume(`upload:start:${auth.user.id}`, 100, 24 * 3600, 'You reached the daily upload limit. Try again tomorrow.');
+    // New accounts start small: fewer uploads a day during their first week (abuse usually comes from fresh accounts).
+    if (auth.user.createdAt.getTime() > Date.now() - 7 * 24 * 3600_000) {
+      const n = this.config.safety.newAccountDailyUploads;
+      await this.limits.consume(`upload:new:${auth.user.id}`, n, 24 * 3600, `New accounts can upload up to ${n} videos a day during their first week.`);
+    }
     const channel = await this.prisma.channel.findUnique({ where: { userId: auth.user.id } });
     if (!channel) throw new BadRequestException('Create your channel before uploading.');
     const ext = extname(body.fileName).toLowerCase();

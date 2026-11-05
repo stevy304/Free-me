@@ -9,6 +9,7 @@ import { MediaError, probe, run, type ProbeResult } from './probe';
 import { mediaPrefix, wantedLocation } from './keys';
 import { LATE_FOLDERS } from './captions';
 import { extractSpeech } from './autocaptions';
+import { hold, screen } from './screening';
 import type { Storage } from './storage';
 
 const TYPES: Record<string, string> = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg' };
@@ -64,6 +65,9 @@ export class VideoProcessor {
       const filters = await ffmpegFilters(this.config.media.ffmpegPath);
       const hdr: Hdr = info.hdr && filters.has('zscale') && filters.has('tonemap') ? info.hdr : null;
       if (info.hdr && !hdr) this.log.warn(`${videoId}: HDR source but this ffmpeg lacks zscale/tonemap; colours will look flat`);
+      // Nothing is published before the safety check: a match holds the video for a moderator.
+      const held = await screen(this.prisma, this.config, video, source, info, work);
+      if (held) { await hold(this.prisma, videoId, held); this.log.warn(`${videoId}: held for review: ${held}`); return { speech: null }; }
       const thumbs = await this.thumbnails(source, work, info, hdr);
       const board = await this.storyboard(source, work, info, hdr).catch((e) => { this.log.warn(`${videoId}: no seek previews: ${(e as Error).message.slice(0, 200)}`); return null; });
       // Audio once, at the same loudness as every other video (measured first, then one linear gain).
