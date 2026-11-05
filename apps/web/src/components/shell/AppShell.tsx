@@ -15,7 +15,7 @@ function Main({ children }: { children: ReactNode }) {
   return <main className={`min-h-[calc(100dvh-3.5rem)] pb-16 md:pb-6 md:pl-[72px] ${collapsed ? '' : 'xl:pl-60'}`}>{children}</main>;
 }
 
-export function AppShell({ viewer, locale, children }: { viewer: Viewer | null; locale: string; children: ReactNode }) {
+export function AppShell({ viewer, locale, sidebarCollapsed = false, children }: { viewer: Viewer | null; locale: string; sidebarCollapsed?: boolean; children: ReactNode }) {
   // Keeps the theme right if React ever re-renders <html>, and follows the device when it switches light/dark.
   useEffect(() => {
     setTheme(currentTheme());
@@ -25,7 +25,7 @@ export function AppShell({ viewer, locale, children }: { viewer: Viewer | null; 
     return () => mq.removeEventListener('change', follow);
   }, []);
   return (
-    <ShellProvider viewer={viewer} locale={locale}>
+    <ShellProvider viewer={viewer} locale={locale} initialCollapsed={sidebarCollapsed}>
       <UploadsProvider>
         <TopBar />
         <Suspense><Sidebar /></Suspense>

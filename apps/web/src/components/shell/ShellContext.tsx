@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, type ReactNode } from 'react';
 import type { Viewer } from '@/lib/types';
 
 interface Shell {
@@ -17,13 +17,19 @@ interface Shell {
 const Ctx = createContext<Shell | null>(null);
 const WIDE = '(min-width: 1280px)';
 
-export function ShellProvider({ viewer, locale, children }: { viewer: Viewer | null; locale: string; children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
+/**
+ * The sidebar choice lives in a cookie (fm_sidebar) that the server reads too, so the page is rendered with the
+ * sidebar the visitor chose and hydration matches (a browser-only setting made the server and browser disagree).
+ */
+export function ShellProvider({ viewer, locale, initialCollapsed = false, children }: { viewer: Viewer | null; locale: string; initialCollapsed?: boolean; children: ReactNode }) {
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  useEffect(() => { try { setCollapsed(localStorage.getItem('fm_sidebar') === 'mini'); } catch { /* storage blocked */ } }, []);
   const toggleSidebar = () => {
     if (window.matchMedia(WIDE).matches) {
-      setCollapsed((c) => { try { localStorage.setItem('fm_sidebar', c ? 'full' : 'mini'); } catch { /* storage blocked */ } return !c; });
+      setCollapsed((c) => {
+        document.cookie = `fm_sidebar=${c ? 'full' : 'mini'}; Path=/; Max-Age=31536000; SameSite=Lax`;
+        return !c;
+      });
     } else setDrawerOpen((o) => !o);
   };
   const closeDrawer = () => setDrawerOpen(false);

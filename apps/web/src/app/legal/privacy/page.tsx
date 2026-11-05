@@ -57,8 +57,8 @@ export default async function Privacy() {
           <ul>
             <li><code>__Host-fm_session</code> (or <code>fm_session</code> on development servers): keeps you signed in.</li>
             <li><code>fm_oauth</code>: a short-lived cookie that protects the &ldquo;Sign in with Google&rdquo; step.</li>
-            <li><code>fm_theme</code>: your light or dark theme choice.</li>
-            <li>Browser storage for player settings (volume, mute, speed, theater mode), the sidebar layout and unfinished uploads, so you can resume them.</li>
+            <li><code>fm_theme</code> and <code>fm_sidebar</code>: your light or dark theme, and whether the sidebar is collapsed.</li>
+            <li>Browser storage for player settings (volume, mute, speed, theater mode) and unfinished uploads, so you can resume them.</li>
           </ul>
         </>},
         { id: 'rights', title: 'Your rights', body: <>

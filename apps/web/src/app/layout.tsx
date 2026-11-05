@@ -29,7 +29,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <head><script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} /></head>
       {/* Browser extensions (Grammarly, password managers…) add attributes to <body> before React loads. */}
       <body className="font-sans" suppressHydrationWarning>
-        <AppShell viewer={viewer} locale={locale}>{children}</AppShell>
+        <AppShell viewer={viewer} locale={locale} sidebarCollapsed={jar.get('fm_sidebar')?.value === 'mini'}>{children}</AppShell>
       </body>
     </html>
   );
