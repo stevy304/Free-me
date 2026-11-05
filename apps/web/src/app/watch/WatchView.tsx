@@ -226,6 +226,22 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
             <button type="button" onClick={share} className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-surface px-3 text-[13px] font-semibold"><Icon.PassAlong size={17} />{copied ? 'Copied' : 'Pass along'}</button>
             <button type="button" onClick={() => setMenu(true)} aria-label="More actions" className="flex h-9 shrink-0 items-center rounded-xl bg-surface px-3"><Icon.More size={17} /></button>
           </div>
+          {/* Phones: what plays next, right under the actions (the rail beside the video is for wide screens). */}
+          {next && (
+            <div className="mt-4 rounded-[18px] bg-surface p-2.5 sm:hidden">
+              <div className="flex items-center justify-between px-1 pb-2">
+                <p className="text-[13px] font-bold">Up next</p>
+                <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 text-[12px] font-semibold text-muted">Flow on<span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-brand' : 'bg-line'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span></button>
+              </div>
+              <Link href={`/watch?v=${next.id}`} className="flex gap-3">
+                <span className="relative block w-[128px] shrink-0 overflow-hidden rounded-xl bg-line">
+                  {next.thumbnailUrl ? <img src={next.thumbnailUrl} alt="" loading="lazy" className="aspect-video w-full object-cover" /> : <span className="block aspect-video w-full" />}
+                  {next.durationSeconds ? <span className="absolute bottom-1 right-1 rounded-md bg-black/75 px-1 text-[11px] font-semibold text-white">{duration(next.durationSeconds)}</span> : null}
+                </span>
+                <span className="min-w-0 py-0.5"><span className="line-clamp-2 text-[14px] font-semibold leading-snug">{next.title}</span><span className="mt-1 block truncate text-[12px] text-muted">{next.channel.name}</span></span>
+              </Link>
+            </div>
+          )}
           <div role="tablist" className="mt-5 flex gap-1 border-b border-line">
             {tabBtn('about', 'About')}{tabBtn('conversation', v.commentsOpen ? `Conversation · ${compactNumber(v.commentCount, locale)}` : 'Conversation')}{more.length > 0 && tabBtn('next', 'Keep watching')}
           </div>
@@ -240,7 +256,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
           {tab !== 'next' && more.length > 0 && (
             <section className="mt-10">
               <h2 className="flex items-center gap-3 text-[18px] font-bold"><span className="flex-1">Keep watching</span>
-                <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 font-sans text-[12px] font-semibold text-muted xl:hidden">Flow on<span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-brand' : 'bg-line'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span></button>
+                <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="hidden items-center gap-2 font-sans text-[12px] font-semibold text-muted sm:flex xl:hidden">Flow on<span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-brand' : 'bg-line'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span></button>
                 <button type="button" onClick={() => setTab('next')} className="font-sans text-[13px] font-semibold text-brand">See all</button></h2>
               <div className="no-scrollbar -mx-4 mt-3 flex gap-4 overflow-x-auto px-4 pb-2">
                 {more.slice(0, 8).map((x) => (
