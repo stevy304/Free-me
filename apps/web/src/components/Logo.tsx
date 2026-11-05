@@ -13,9 +13,9 @@ export function LogoMark({ size = 28 }: { size?: number }) {
 
 export function Logo() {
   return (
-    <Link href="/" aria-label="Free Me home" className="flex items-center gap-1.5 rounded-md px-1 py-1">
-      <LogoMark />
-      <span className="text-[19px] font-bold tracking-[-0.03em] text-ink">Free <span className="text-brand">Me</span></span>
+    <Link href="/" aria-label="Free Me home" className="flex shrink-0 items-center gap-2 rounded-xl px-1 py-1">
+      <LogoMark size={32} />
+      <span className="font-display text-[21px] font-extrabold tracking-[-0.04em] text-ink">Free <span className="text-brand">Me</span></span>
     </Link>
   );
 }

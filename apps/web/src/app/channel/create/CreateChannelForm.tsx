@@ -36,13 +36,13 @@ export function CreateChannelForm({ suggestedName, country: c0, language: l0, av
     try {
       const r = await api<{ channel: { handle: string } }>('/channels', { body: { handle, name, description: description || undefined, country: country ?? undefined, defaultLanguage: language ?? undefined } });
       window.location.href = `/@${r.channel.handle}`;
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create the channel.'); setBusy(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create your Space.'); setBusy(false); }
   };
 
   return (
     <div className="mx-auto max-w-xl px-4 py-10">
-      <h1 className="text-[28px] font-semibold tracking-tight">Create your channel</h1>
-      <p className="mt-1.5 text-[15px] text-muted">Your channel is your home on Free Me: where people find your videos and follow you.</p>
+      <h1 className="text-[28px] font-semibold tracking-tight">Create your Space</h1>
+      <p className="mt-1.5 text-[15px] text-muted">Your Space is your home on Free Me: where people find your videos and tune in to you.</p>
       <div className="mt-8 flex justify-center"><Avatar name={name || '?'} src={avatarUrl} size={112} /></div>
       <form className="mt-8 space-y-5" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
         <div>
@@ -60,11 +60,11 @@ export function CreateChannelForm({ suggestedName, country: c0, language: l0, av
               {check.state === 'bad' && <Icon.Close size={18} className="text-danger" aria-label="Not available" />}
             </span>
           </div>
-          <p id="handle-help" className={`mt-1.5 text-[13px] ${check.state === 'bad' ? 'text-danger' : 'text-muted'}`}>{check.state === 'bad' ? check.reason : `Your channel address: /@${handle || 'handle'}`}</p>
+          <p id="handle-help" className={`mt-1.5 text-[13px] ${check.state === 'bad' ? 'text-danger' : 'text-muted'}`}>{check.state === 'bad' ? check.reason : `Your Space address: /@${handle || 'handle'}`}</p>
         </div>
         <div>
           <label htmlFor="description" className="text-[14px] font-medium">Description <span className="font-normal text-muted">(optional)</span></label>
-          <textarea id="description" rows={4} maxLength={CHANNEL_DESCRIPTION_MAX} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Tell viewers what your channel is about"
+          <textarea id="description" rows={4} maxLength={CHANNEL_DESCRIPTION_MAX} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Tell viewers what your Space is about"
             className="mt-2 w-full rounded-xl border border-line bg-bg px-3 py-2.5 text-[15px] outline-none focus:border-brand" />
         </div>
         <div className="grid gap-5 sm:grid-cols-2">
@@ -73,8 +73,8 @@ export function CreateChannelForm({ suggestedName, country: c0, language: l0, av
         </div>
         {error && <p role="alert" className="rounded-xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
         <div className="flex justify-end gap-3 pt-2">
-          <button type="submit" disabled={busy || check.state !== 'ok' || !name.trim()} className="flex h-10 items-center gap-2 rounded-full bg-strong px-6 text-[14px] font-medium text-on-strong hover:opacity-90 disabled:opacity-40">
-            {busy && <Icon.Spinner size={16} className="animate-spin" />}Create channel
+          <button type="submit" disabled={busy || check.state !== 'ok' || !name.trim()} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-6 text-[14px] font-semibold text-on-brand hover:opacity-90 disabled:opacity-40">
+            {busy && <Icon.Spinner size={16} className="animate-spin" />}Create Space
           </button>
         </div>
       </form>

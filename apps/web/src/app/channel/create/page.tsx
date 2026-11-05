@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getViewer } from '@/lib/server-api';
 import { CreateChannelForm } from './CreateChannelForm';
 
-export const metadata: Metadata = { title: 'Create a channel' };
+export const metadata: Metadata = { title: 'Create your Space' };
 
 export default async function CreateChannel() {
   const viewer = await getViewer();

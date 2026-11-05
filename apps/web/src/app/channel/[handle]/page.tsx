@@ -36,26 +36,26 @@ export default async function Channel({ params, searchParams }: { params: Promis
         <div className="hidden sm:block"><Avatar name={c.name} src={c.avatarUrl} size={160} /></div>
         <div className="sm:hidden"><Avatar name={c.name} src={c.avatarUrl} size={72} /></div>
         <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-[28px] font-bold leading-tight sm:text-[36px]">{c.name}{c.isVerified && <Icon.Verified size={22} aria-label="Verified" className="text-muted" />}</h1>
+          <h1 className="flex items-center gap-2 text-[28px] font-extrabold leading-tight sm:text-[38px]">{c.name}{c.isVerified && <Icon.Verified size={22} aria-label="Verified" className="text-muted" />}</h1>
           <p className="mt-1.5 text-[14px] text-muted"><span className="font-medium text-ink">@{c.handle}</span> · {followersLabel(c.followerCount, locale)} · {compactNumber(videoCount, locale)} {videoCount === 1 ? 'video' : 'videos'}</p>
           {c.description && <Link href={`/@${c.handle}?tab=about`} className="mt-1.5 line-clamp-1 max-w-xl text-[14px] text-muted hover:text-ink">{c.description}</Link>}
           <div className="mt-4">
             {viewer.isOwner
-              ? <Link href="/settings#channel" className="inline-flex h-9 items-center rounded-full bg-surface px-4 text-[14px] font-medium hover:bg-surface-hover">Customize channel</Link>
+              ? <span className="flex flex-wrap gap-2"><Link href="/settings#channel" className="inline-flex h-10 items-center rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover">Edit your Space</Link><Link href="/hub" className="inline-flex h-10 items-center rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand hover:bg-brand-strong">Creator Hub</Link></span>
               : <FollowButton handle={c.handle} initial={viewer.following} initialCount={c.followerCount} />}
           </div>
         </div>
       </div>
-      <nav className="mt-6 flex gap-6 border-b border-line" aria-label="Channel">
+      <nav className="mt-6 flex gap-6 border-b border-line" aria-label="Space">
         <Link href={`/@${c.handle}`} className={tabClass(tab === 'videos')} aria-current={tab === 'videos' ? 'page' : undefined}>Videos</Link>
         <Link href={`/@${c.handle}?tab=about`} className={tabClass(tab === 'about')} aria-current={tab === 'about' ? 'page' : undefined}>About</Link>
       </nav>
       {tab === 'videos' ? (
         videos.length ? (
-          <div className="grid grid-cols-1 gap-x-4 gap-y-10 py-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{videos.map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}</div>
+          <div className="grid grid-cols-1 gap-x-5 gap-y-7 py-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{videos.map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}</div>
         ) : (
-          <EmptyState icon={<Icon.Moments size={36} strokeWidth={1.4} />} title={viewer.isOwner ? 'Your channel is ready' : 'No videos yet'}>
-            {viewer.isOwner ? 'Your videos will appear here once you publish them.' : 'This channel has not published any videos yet.'}
+          <EmptyState icon={<Icon.Moments size={36} strokeWidth={1.4} />} title={viewer.isOwner ? 'Your Space is ready' : 'No videos yet'}>
+            {viewer.isOwner ? 'Your videos will appear here once you publish them.' : 'This Space has not published any videos yet.'}
           </EmptyState>
         )
       ) : (

@@ -21,17 +21,17 @@ export function CreateMenu() {
   return (
     <div ref={box} className="relative flex items-center gap-2">
       {active.length > 0 && (
-        <button type="button" onClick={() => openDialog(active[0].id)} className="hidden h-9 items-center gap-2 rounded-full bg-brand-soft px-3 text-[13px] font-medium text-brand sm:flex" aria-label="Show upload">
+        <button type="button" onClick={() => openDialog(active[0].id)} className="hidden h-10 items-center gap-2 rounded-xl bg-brand-soft px-3 text-[13px] font-semibold text-brand sm:flex" aria-label="Show upload">
           <Icon.Spinner size={16} className="animate-spin" />{active.length === 1 ? 'Uploading' : `Uploading ${active.length}`} {total ? Math.floor((sent / total) * 100) : 0}%
         </button>
       )}
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} className="flex h-9 items-center gap-1.5 rounded-full bg-surface pl-2.5 pr-3.5 text-[14px] font-medium hover:bg-surface-hover">
-        <Icon.Plus size={22} strokeWidth={1.6} /><span className="hidden sm:inline">Create</span>
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand hover:bg-brand-strong">
+        <Icon.Plus size={20} /><span className="hidden sm:inline">Create</span>
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 top-11 z-50 w-56 overflow-hidden rounded-xl border border-line bg-elevated py-2 shadow-[var(--shadow)]">
+        <div role="menu" className="absolute right-0 top-12 z-50 w-60 overflow-hidden rounded-2xl border border-line bg-elevated py-2 shadow-[var(--shadow)]">
           <button role="menuitem" type="button" onClick={() => { setOpen(false); openDialog(); }} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Upload size={20} strokeWidth={1.6} />Upload video</button>
-          <Link role="menuitem" href="/hub" onClick={() => setOpen(false)} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Channel size={20} strokeWidth={1.6} />Your videos</Link>
+          <Link role="menuitem" href="/hub" onClick={() => setOpen(false)} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Hub size={20} />Creator Hub</Link>
         </div>
       )}
     </div>

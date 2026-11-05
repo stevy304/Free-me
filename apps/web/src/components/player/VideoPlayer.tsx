@@ -173,71 +173,76 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const pct = (n: number) => `${duration ? Math.min(100, (n / duration) * 100) : 0}%`;
   const VolIcon = muted || volume === 0 ? Icon.VolumeOff : volume < 0.5 ? Icon.VolumeLow : Icon.VolumeHigh;
   const autoLabel = level === -1 ? `Auto${playingLevel ? ` (${playingLevel}p)` : ''}` : levels.find((l) => l.index === level)?.label ?? 'Auto';
-  const btn = 'grid h-10 w-10 place-items-center rounded-full text-white hover:bg-white/10';
+  const btn = 'grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white hover:bg-white/10';
   const showUi = !playing || !idle || menu !== null;
 
   return (
     <div ref={box} onMouseMove={poke} onMouseLeave={() => playing && setIdle(true)}
-      className={`group relative aspect-video w-full select-none overflow-hidden bg-black ${full ? '' : 'rounded-xl'} ${showUi ? '' : 'cursor-none'}`}>
+      className={`group relative aspect-video w-full select-none overflow-hidden bg-black ${full ? '' : 'rounded-[24px]'} ${showUi ? '' : 'cursor-none'}`}>
       <video ref={video} playsInline poster={poster ?? undefined} className="h-full w-full" onClick={toggle} onDoubleClick={fullscreen}
         onPlay={() => setPlaying(true)} onPause={() => { setPlaying(false); save(); }} onWaiting={() => setWaiting(true)} onPlaying={() => setWaiting(false)} onCanPlay={() => setWaiting(false)}
         onTimeUpdate={onTime} onDurationChange={(e) => setDuration(e.currentTarget.duration)} onEnded={() => { setPlaying(false); save(true); onEnded?.(); }}
         onVolumeChange={(e) => { setMuted(e.currentTarget.muted); setVolume(e.currentTarget.volume); }} />
       {waiting && !error && <Icon.Spinner className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/90" />}
-      {flash && <div className="pointer-events-none absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 animate-ping place-items-center rounded-full bg-black/50 text-white [animation-iteration-count:1]">{flash === 'play' ? <Icon.Play size={30} /> : <Icon.Pause size={30} />}</div>}
+      {flash && <div className="pointer-events-none absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 animate-ping place-items-center rounded-full bg-[rgb(43_181_171/0.6)] text-white [animation-iteration-count:1]">{flash === 'play' ? <Icon.Play size={30} /> : <Icon.Pause size={30} />}</div>}
       {error && <div className="absolute inset-0 grid place-items-center bg-black/80 px-6 text-center text-[15px] text-white">{error}</div>}
 
-      <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-1 pt-10 transition-opacity duration-200 ${showUi ? 'opacity-100' : 'opacity-0'}`}>
-        {/* Seek bar */}
-        <div className="group/bar relative flex h-4 cursor-pointer items-center" role="slider" aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(time)} aria-valuetext={`${fmt(time)} of ${fmt(duration)}`} tabIndex={0}
-          onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHover({ x: e.clientX - r.left, t: ((e.clientX - r.left) / r.width) * duration }); }}
-          onMouseLeave={() => setHover(null)}
-          onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seek(((e.clientX - r.left) / r.width) * duration); }}>
-          <div className="relative h-[3px] w-full bg-white/30 transition-[height] group-hover/bar:h-[5px]">
-            <div className="absolute inset-y-0 left-0 bg-white/50" style={{ width: pct(buffered) }} />
-            <div className="absolute inset-y-0 left-0 bg-brand" style={{ width: pct(time) }} />
-            <div className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 scale-0 rounded-full bg-brand transition-transform group-hover/bar:scale-100" style={{ left: pct(time) }} />
-          </div>
-          {hover && <span className="absolute -top-8 -translate-x-1/2 rounded bg-black/80 px-2 py-0.5 text-[12px] font-medium text-white" style={{ left: Math.max(20, hover.x) }}>{fmt(hover.t)}</span>}
-        </div>
-        <div className="flex items-center gap-1">
-          <button type="button" className={btn} onClick={toggle} aria-label={playing ? 'Pause (k)' : 'Play (k)'}>{playing ? <Icon.Pause size={22} /> : <Icon.Play size={22} />}</button>
-          <div className="group/vol flex items-center">
-            <button type="button" className={btn} onClick={() => setVol(volume || 1, !muted)} aria-label={muted ? 'Unmute (m)' : 'Mute (m)'}><VolIcon size={22} /></button>
-            <input type="range" min={0} max={1} step={0.01} value={muted ? 0 : volume} onChange={(e) => setVol(Number(e.target.value))} aria-label="Volume"
-              className="w-0 accent-white opacity-0 transition-all group-hover/vol:w-20 group-hover/vol:opacity-100 focus:w-20 focus:opacity-100" />
-          </div>
-          <span className="ml-2 text-[13px] tabular-nums text-white">{fmt(time)} / {fmt(duration)}</span>
-          <div className="flex-1" />
-          <div className="relative">
-            <button type="button" className={btn} onClick={() => setMenu(menu ? null : 'main')} aria-label="Settings" aria-expanded={menu !== null}><Icon.Settings size={21} className={menu ? 'rotate-45 transition-transform' : 'transition-transform'} /></button>
-            {menu && (
-              <div className="absolute bottom-12 right-0 w-64 overflow-hidden rounded-xl bg-black/90 py-2 text-[14px] text-white shadow-lg backdrop-blur" role="menu">
-                {menu === 'main' && (
-                  <>
-                    <button type="button" className="flex w-full items-center justify-between px-4 py-2.5 hover:bg-white/10" onClick={() => setMenu('speed')}><span>Playback speed</span><span className="flex items-center gap-1 text-white/70">{speed === 1 ? 'Normal' : speed}<Icon.ChevronRight size={16} /></span></button>
-                    {levels.length > 0 && <button type="button" className="flex w-full items-center justify-between px-4 py-2.5 hover:bg-white/10" onClick={() => setMenu('quality')}><span>Quality</span><span className="flex items-center gap-1 text-white/70">{autoLabel}<Icon.ChevronRight size={16} /></span></button>}
-                  </>
-                )}
-                {menu === 'speed' && (
-                  <>
-                    <button type="button" className="flex w-full items-center gap-2 border-b border-white/10 px-3 pb-2.5 pt-1" onClick={() => setMenu('main')}><Icon.ChevronLeft size={18} />Playback speed</button>
-                    {SPEEDS.map((s) => <button key={s} type="button" role="menuitemradio" aria-checked={speed === s} className="flex w-full items-center gap-3 px-4 py-2 hover:bg-white/10" onClick={() => { setRate(s); setMenu(null); }}><span className="w-4">{speed === s && <Icon.Check size={16} />}</span>{s === 1 ? 'Normal' : s}</button>)}
-                  </>
-                )}
-                {menu === 'quality' && (
-                  <>
-                    <button type="button" className="flex w-full items-center gap-2 border-b border-white/10 px-3 pb-2.5 pt-1" onClick={() => setMenu('main')}><Icon.ChevronLeft size={18} />Quality</button>
-                    {levels.map((l) => <button key={l.index} type="button" role="menuitemradio" aria-checked={level === l.index} className="flex w-full items-center gap-3 px-4 py-2 hover:bg-white/10" onClick={() => chooseLevel(l.index)}><span className="w-4">{level === l.index && <Icon.Check size={16} />}</span>{l.label}{Math.min(l.height, l.width) >= 720 && <sup className="text-[10px] font-bold text-brand">HD</sup>}</button>)}
-                    <button type="button" role="menuitemradio" aria-checked={level === -1} className="flex w-full items-center gap-3 px-4 py-2 hover:bg-white/10" onClick={() => chooseLevel(-1)}><span className="w-4">{level === -1 && <Icon.Check size={16} />}</span>Auto{playingLevel ? <span className="text-white/60">({playingLevel}p)</span> : null}</button>
-                  </>
-                )}
-              </div>
+      {/* Controls: a floating capsule above the bottom edge, not a bar across it. */}
+      <div className={`absolute inset-x-2 bottom-2 transition-all duration-200 sm:inset-x-auto sm:bottom-3 sm:left-1/2 sm:w-[min(92%,860px)] sm:-translate-x-1/2 ${showUi ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0'}`}>
+        {menu && (
+          <div className="absolute bottom-[68px] right-0 w-[min(100%,300px)] overflow-hidden rounded-2xl border border-white/10 bg-[rgb(16_32_31/0.92)] p-2 text-[14px] text-white shadow-2xl backdrop-blur-md" role="menu">
+            {menu === 'main' && (
+              <>
+                <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/50">Playback</p>
+                <button type="button" className="flex w-full items-center justify-between rounded-xl px-3 py-3 hover:bg-white/10" onClick={() => setMenu('speed')}><span>Speed</span><span className="flex items-center gap-1 text-white/70">{speed === 1 ? 'Normal' : `${speed}×`}<Icon.ChevronRight size={16} /></span></button>
+                {levels.length > 0 && <button type="button" className="flex w-full items-center justify-between rounded-xl px-3 py-3 hover:bg-white/10" onClick={() => setMenu('quality')}><span>Quality</span><span className="flex items-center gap-1 text-white/70">{autoLabel}<Icon.ChevronRight size={16} /></span></button>}
+              </>
+            )}
+            {menu === 'speed' && (
+              <>
+                <button type="button" className="flex w-full items-center gap-2 rounded-xl px-2 py-2 font-semibold hover:bg-white/10" onClick={() => setMenu('main')}><Icon.ChevronLeft size={18} />Speed</button>
+                <div className="grid grid-cols-4 gap-1.5 p-1.5">
+                  {SPEEDS.map((sp) => <button key={sp} type="button" role="menuitemradio" aria-checked={speed === sp} className={`rounded-xl py-2.5 text-[13px] font-semibold ${speed === sp ? 'bg-[#2bb5ab] text-[#04201e]' : 'bg-white/10 hover:bg-white/20'}`} onClick={() => { setRate(sp); setMenu(null); }}>{sp === 1 ? '1×' : `${sp}×`}</button>)}
+                </div>
+              </>
+            )}
+            {menu === 'quality' && (
+              <>
+                <button type="button" className="flex w-full items-center gap-2 rounded-xl px-2 py-2 font-semibold hover:bg-white/10" onClick={() => setMenu('main')}><Icon.ChevronLeft size={18} />Quality</button>
+                <button type="button" role="menuitemradio" aria-checked={level === -1} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/10" onClick={() => chooseLevel(-1)}><span className="w-4">{level === -1 && <Icon.Check size={16} />}</span>Auto{playingLevel ? <span className="text-white/60">({playingLevel}p)</span> : null}</button>
+                {levels.map((l) => <button key={l.index} type="button" role="menuitemradio" aria-checked={level === l.index} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/10" onClick={() => chooseLevel(l.index)}><span className="w-4">{level === l.index && <Icon.Check size={16} />}</span>{l.label}{Math.min(l.height, l.width) >= 720 && <span className="rounded bg-[#f5b95c] px-1 text-[10px] font-bold text-[#10201f]">HD</span>}</button>)}
+              </>
             )}
           </div>
-          <button type="button" className={btn} onClick={pip} aria-label="Picture in picture"><Icon.MiniPlayer size={20} /></button>
-          {onTheater && !full && <button type="button" className={`${btn} hidden lg:grid`} onClick={onTheater} aria-label={theater ? 'Default view (t)' : 'Theater mode (t)'}><Icon.Theater size={22} strokeWidth={theater ? 2.4 : 1.8} /></button>}
-          <button type="button" className={btn} onClick={fullscreen} aria-label={full ? 'Exit full screen (f)' : 'Full screen (f)'}>{full ? <Icon.ExitFullscreen size={21} /> : <Icon.Fullscreen size={21} />}</button>
+        )}
+        <div className="flex h-14 items-center gap-1.5 rounded-[20px] border border-white/10 bg-[rgb(16_32_31/0.72)] pl-2 pr-1.5 text-white shadow-[0_8px_30px_rgb(0_0_0/0.35)] backdrop-blur-md">
+          <button type="button" onClick={toggle} aria-label={playing ? 'Pause (k)' : 'Play (k)'} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#2bb5ab] text-[#04201e] transition-transform hover:scale-105">{playing ? <Icon.Pause size={18} /> : <Icon.Play size={18} />}</button>
+          <span className="w-11 shrink-0 text-right text-[12px] font-semibold tabular-nums">{fmt(time)}</span>
+          {/* Seek track */}
+          <div className="group/bar relative mx-1.5 flex h-8 min-w-0 flex-1 cursor-pointer items-center" role="slider" aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(time)} aria-valuetext={`${fmt(time)} of ${fmt(duration)}`} tabIndex={0}
+            onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHover({ x: e.clientX - r.left, t: ((e.clientX - r.left) / r.width) * duration }); }}
+            onMouseLeave={() => setHover(null)}
+            onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seek(((e.clientX - r.left) / r.width) * duration); }}>
+            <div className="relative h-1.5 w-full rounded-full bg-white/20 transition-[height] group-hover/bar:h-2">
+              <div className="absolute inset-y-0 left-0 rounded-full bg-white/30" style={{ width: pct(buffered) }} />
+              <div className="absolute inset-y-0 left-0 rounded-full bg-[#f5b95c]" style={{ width: pct(time) }} />
+              <div className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_4px_rgb(245_185_92/0.35)] transition-transform group-hover/bar:scale-110" style={{ left: pct(time) }} />
+            </div>
+            {hover && <span className="absolute -top-9 -translate-x-1/2 rounded-lg bg-[rgb(16_32_31/0.92)] px-2 py-1 text-[12px] font-semibold tabular-nums text-white" style={{ left: Math.max(22, hover.x) }}>{fmt(hover.t)}</span>}
+          </div>
+          <span className="w-11 shrink-0 text-[12px] font-semibold tabular-nums text-white/60">{fmt(duration)}</span>
+          <div className="group/vol relative hidden items-center sm:flex">
+            <button type="button" className={btn} onClick={() => setVol(volume || 1, !muted)} aria-label={muted ? 'Unmute (m)' : 'Mute (m)'}><VolIcon size={20} /></button>
+            <div className="pointer-events-none absolute bottom-12 left-1/2 flex h-32 w-10 -translate-x-1/2 items-center justify-center rounded-2xl bg-[rgb(16_32_31/0.92)] opacity-0 transition-opacity group-hover/vol:pointer-events-auto group-hover/vol:opacity-100 group-focus-within/vol:pointer-events-auto group-focus-within/vol:opacity-100">
+              <input type="range" min={0} max={1} step={0.01} value={muted ? 0 : volume} onChange={(e) => setVol(Number(e.target.value))} aria-label="Volume" className="w-24 -rotate-90 accent-[#f5b95c]" />
+            </div>
+          </div>
+          <button type="button" className={`${btn} sm:hidden`} onClick={() => setVol(volume || 1, !muted)} aria-label={muted ? 'Unmute' : 'Mute'}><VolIcon size={20} /></button>
+          <button type="button" onClick={() => setMenu(menu ? null : 'main')} aria-label="Speed and quality" aria-expanded={menu !== null} className="hidden h-8 shrink-0 items-center rounded-lg bg-white/10 px-2 text-[12px] font-semibold hover:bg-white/20 sm:flex">{level === -1 ? (playingLevel ? `${playingLevel}p` : 'Auto') : autoLabel}{speed !== 1 && ` · ${speed}×`}</button>
+          <button type="button" onClick={() => setMenu(menu ? null : 'main')} aria-label="Settings" className={`${btn} sm:hidden`}><Icon.Settings size={19} /></button>
+          <button type="button" className={`${btn} hidden sm:grid`} onClick={pip} aria-label="Picture in picture"><Icon.MiniPlayer size={19} /></button>
+          {onTheater && !full && <button type="button" className={`${btn} hidden lg:grid`} onClick={onTheater} aria-label={theater ? 'Default view (t)' : 'Wide view (t)'}><Icon.Theater size={20} filled={theater} /></button>}
+          <button type="button" className={btn} onClick={fullscreen} aria-label={full ? 'Exit full screen (f)' : 'Full screen (f)'}>{full ? <Icon.ExitFullscreen size={19} /> : <Icon.Fullscreen size={19} />}</button>
         </div>
       </div>
     </div>

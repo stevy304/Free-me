@@ -69,7 +69,7 @@ export function LoginForm({ returnTo, google, initialError }: { returnTo: string
               <label htmlFor="email" className="text-[14px] font-medium">Email address</label>
               <input id="email" type="email" required autoComplete="email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
                 className="mt-2 h-12 w-full rounded-xl border border-line bg-bg px-4 text-[16px] outline-none focus:border-brand" />
-              <button type="submit" disabled={busy || !email} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-strong text-[15px] font-medium text-on-strong hover:opacity-90 disabled:opacity-50">
+              <button type="submit" disabled={busy || !email} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-brand text-[15px] font-semibold text-on-brand hover:opacity-90 disabled:opacity-50">
                 {busy ? <Icon.Spinner size={18} className="animate-spin" /> : <Icon.Mail size={18} />}Email me a sign-in code
               </button>
             </form>
@@ -86,7 +86,7 @@ export function LoginForm({ returnTo, google, initialError }: { returnTo: string
               <input id="code" ref={codeInput} value={code} inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="\d{6}"
                 onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 6); setCode(v); if (v.length === 6) void verify(v); }}
                 className="mt-2 h-14 w-full rounded-xl border border-line bg-bg px-4 text-center font-mono text-[28px] tracking-[0.5em] outline-none focus:border-brand" placeholder="••••••" />
-              <button type="submit" disabled={busy || code.length !== 6} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-strong text-[15px] font-medium text-on-strong hover:opacity-90 disabled:opacity-50">
+              <button type="submit" disabled={busy || code.length !== 6} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-brand text-[15px] font-semibold text-on-brand hover:opacity-90 disabled:opacity-50">
                 {busy && <Icon.Spinner size={18} className="animate-spin" />}Sign in
               </button>
             </form>

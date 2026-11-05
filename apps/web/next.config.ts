@@ -22,6 +22,7 @@ const config: NextConfig = {
       { source: '/shorts', destination: '/moments', permanent: true },
       { source: '/studio', destination: '/hub', permanent: true },
       { source: '/feed/subscriptions', destination: '/following', permanent: true },
+      { source: '/history', destination: '/trail', permanent: true },
     ];
   },
   async rewrites() {

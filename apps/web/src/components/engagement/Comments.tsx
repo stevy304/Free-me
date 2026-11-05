@@ -105,8 +105,8 @@ function CommentItem({ c, videoId, onChange, onRemoved, onReplied, isReply = fal
         {!editing && (
           <div className="mt-1 flex items-center gap-1">
             {viewer
-              ? <button type="button" onClick={() => setReplying(true)} className="flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-semibold hover:bg-surface"><Icon.Reply size={16} />Reply</button>
-              : <Link href={`/login?returnTo=${encodeURIComponent(`/watch?v=${videoId}`)}`} className="flex h-8 items-center rounded-full px-3 text-[12px] font-semibold hover:bg-surface">Reply</Link>}
+              ? <button type="button" onClick={() => setReplying(true)} className="flex h-8 items-center gap-1.5 rounded-xl px-3 text-[12px] font-semibold hover:bg-surface"><Icon.Reply size={16} />Reply</button>
+              : <Link href={`/login?returnTo=${encodeURIComponent(`/watch?v=${videoId}`)}`} className="flex h-8 items-center rounded-xl px-3 text-[12px] font-semibold hover:bg-surface">Reply</Link>}
           </div>
         )}
         {replying && (
@@ -156,7 +156,7 @@ function CommentItem({ c, videoId, onChange, onRemoved, onReplied, isReply = fal
 
 function RepliesToggle({ n, open, onClick }: { n: number; open: boolean; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="mt-1 flex h-9 items-center gap-2 rounded-full px-3 text-[14px] font-semibold text-brand hover:bg-brand-soft">
+    <button type="button" onClick={onClick} className="mt-1 flex h-9 items-center gap-2 rounded-xl px-3 text-[14px] font-semibold text-brand hover:bg-brand-soft">
       {open ? <Icon.ChevronUp size={18} /> : <Icon.ChevronDown size={18} />}{n} {n === 1 ? 'reply' : 'replies'}
     </button>
   );
@@ -185,13 +185,13 @@ export function Comments({ videoId, initialCount }: { videoId: string; initialCo
   const removed = (c: CommentData) => { setCount((n) => Math.max(0, n - 1)); if (!c.parentId) setPage((p) => p && ({ ...p, comments: c.replyCount > 0 ? p.comments.map((x) => x.id === c.id ? { ...x, deleted: true, content: '', author: null } : x) : p.comments.filter((x) => x.id !== c.id) })); };
 
   if (page && !page.open) {
-    return <section aria-label="Comments" className="mt-6 rounded-xl bg-surface px-4 py-3 text-[14px] text-muted"><Icon.Comment size={18} className="mr-2 inline" />{page.closedReason}</section>;
+    return <section aria-label="Conversation" className="mt-5 rounded-2xl bg-surface px-4 py-3 text-[14px] text-muted"><Icon.Comment size={18} className="mr-2 inline" />{page.closedReason}</section>;
   }
 
   return (
-    <section aria-label="Comments" className="mt-6">
+    <section aria-label="Conversation" className="mt-5">
       <div className="flex items-center gap-6">
-        <h2 className="text-[20px] font-bold" suppressHydrationWarning>{compactNumber(count, locale)} {count === 1 ? 'comment' : 'comments'}</h2>
+        <h2 className="text-[18px] font-bold" suppressHydrationWarning>Conversation <span className="font-sans text-[14px] font-medium text-muted">{compactNumber(count, locale)}</span></h2>
         <label className="flex items-center gap-2 text-[14px] font-medium">
           <Icon.Sort size={20} /><span className="sr-only">Sort by</span>
           <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} className="rounded-md bg-transparent py-1 outline-none hover:bg-surface">
@@ -202,18 +202,18 @@ export function Comments({ videoId, initialCount }: { videoId: string; initialCo
       <div className="mt-5 flex gap-3">
         {viewer
           ? <><Avatar name={viewer.profile?.displayName ?? viewer.user.email} src={viewer.profile?.avatarUrl} size={40} />
-            <Composer placeholder="Add a comment…" submitLabel="Comment" onSubmit={async (text) => {
+            <Composer placeholder="Join the conversation…" submitLabel="Post" onSubmit={async (text) => {
               const r = await api<{ comment: CommentData }>(`/videos/${videoId}/comments`, { body: { content: text } });
               setCount((n) => n + 1);
               setPage((p) => p && ({ ...p, comments: p.comments[0]?.isPinned ? [p.comments[0], r.comment, ...p.comments.slice(1)] : [r.comment, ...p.comments] }));
             }} /></>
-          : <Link href={`/login?returnTo=${encodeURIComponent(`/watch?v=${videoId}`)}`} className="flex w-full items-center gap-3 border-b border-line pb-2 text-[14px] text-muted hover:text-ink"><Icon.PersonCircle size={40} strokeWidth={1.3} />Sign in to comment</Link>}
+          : <Link href={`/login?returnTo=${encodeURIComponent(`/watch?v=${videoId}`)}`} className="flex w-full items-center gap-3 border-b border-line pb-2 text-[14px] text-muted hover:text-ink"><Icon.PersonCircle size={40} strokeWidth={1.3} />Sign in to join the conversation</Link>}
       </div>
       <div className="mt-4">
         {!page && !error && <div className="grid place-items-center py-6"><Icon.Spinner className="animate-spin text-muted" /></div>}
         {page?.comments.map((c) => <CommentItem key={c.id} c={c} videoId={videoId} onChange={update} onRemoved={removed} onReplied={() => setCount((n) => n + 1)} />)}
-        {page && page.comments.length === 0 && <p className="py-6 text-center text-[14px] text-muted">No comments yet. Be the first to say something.</p>}
-        {page?.nextCursor && <button type="button" className={`${buttonClass.soft} mt-2`} onClick={more} disabled={loadingMore}>{loadingMore && <Icon.Spinner size={14} className="animate-spin" />}Show more comments</button>}
+        {page && page.comments.length === 0 && <p className="py-6 text-center text-[14px] text-muted">No one has said anything yet. Start the conversation.</p>}
+        {page?.nextCursor && <button type="button" className={`${buttonClass.soft} mt-2`} onClick={more} disabled={loadingMore}>{loadingMore && <Icon.Spinner size={14} className="animate-spin" />}Show more</button>}
         {error && <p role="alert" className="text-[13px] text-danger">{error}</p>}
       </div>
     </section>

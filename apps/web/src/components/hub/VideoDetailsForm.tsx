@@ -122,7 +122,7 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
       </fieldset>
       <div className="flex items-center justify-end gap-4">
         {message && <p role="status" className={`text-[14px] ${message.ok ? 'text-brand' : 'text-danger'}`}>{message.text}</p>}
-        <button type="submit" disabled={busy || !title.trim()} className="flex h-10 items-center gap-2 rounded-full bg-strong px-6 text-[14px] font-medium text-on-strong hover:opacity-90 disabled:opacity-40">
+        <button type="submit" disabled={busy || !title.trim()} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-6 text-[14px] font-semibold text-on-brand hover:opacity-90 disabled:opacity-40">
           {busy && <Icon.Spinner size={16} className="animate-spin" />}{saveLabel}
         </button>
       </div>

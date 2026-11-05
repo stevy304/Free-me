@@ -22,7 +22,7 @@ export default async function Watch({ searchParams }: { searchParams: Promise<{ 
   const r = await load(sp.v);
   if (r?.status === 410) {
     return (
-      <EmptyState icon={<Icon.Warning size={36} strokeWidth={1.4} />} title="Video unavailable" action={<Link href="/" className="inline-flex h-10 items-center rounded-full bg-brand px-5 text-[14px] font-semibold text-on-brand">Go home</Link>}>
+      <EmptyState icon={<Icon.Warning size={36} strokeWidth={1.4} />} title="Video unavailable" action={<Link href="/" className="inline-flex h-10 items-center rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand">Go home</Link>}>
         {r.message} <Link href="/legal/guidelines" className="text-brand">How we decide</Link>
       </EmptyState>
     );

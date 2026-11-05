@@ -13,7 +13,7 @@ export default async function Copyright() {
       path="/legal/copyright" title="Copyright" updated={LAST_UPDATED}
       intro={<>
         <p>Creators on Free Me must own what they upload or have permission to use it. If someone uploads your work without permission, you can ask us to remove it. This process follows notice-and-takedown laws such as the US Digital Millennium Copyright Act (17 U.S.C. &sect; 512), the EU Digital Services Act and Rwanda&apos;s law on intellectual property.</p>
-        <p><Link href="/legal/copyright/notice" className="inline-flex h-10 items-center rounded-full bg-brand px-5 text-[14px] font-semibold text-on-brand no-underline hover:bg-brand-strong">Send a copyright notice</Link></p>
+        <p><Link href="/legal/copyright/notice" className="inline-flex h-10 items-center rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand no-underline hover:bg-brand-strong">Send a copyright notice</Link></p>
       </>}
       sections={[
         { id: 'before', title: 'Before you send a notice', body: <>

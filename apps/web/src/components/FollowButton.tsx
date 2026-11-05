@@ -7,7 +7,7 @@ import { api } from '@/lib/client-api';
 import { useShell } from './shell/ShellContext';
 import { followersLabel } from '@/lib/format';
 
-/** Follow a channel: its new videos appear in Following. */
+/** Tune in to a Space: its new videos appear in Following. */
 export function FollowButton({ handle, initial, initialCount, onCount }: { handle: string; initial: boolean; initialCount: number; onCount?: (n: number) => void }) {
   const { viewer, locale } = useShell();
   const router = useRouter();
@@ -25,9 +25,9 @@ export function FollowButton({ handle, initial, initialCount, onCount }: { handl
   };
   return (
     <div className="flex flex-col items-start gap-1">
-      <button type="button" onClick={toggle} disabled={busy} aria-pressed={following} title={following ? `Unfollow (${followersLabel(initialCount, locale)})` : undefined}
-        className={`flex h-9 items-center gap-1.5 rounded-full px-4 text-[14px] font-semibold disabled:opacity-60 ${following ? 'bg-surface hover:bg-surface-hover' : 'bg-brand text-on-brand hover:bg-brand-strong'}`}>
-        {following ? <Icon.Check size={18} strokeWidth={2.2} /> : <Icon.Plus size={18} strokeWidth={2.2} />}{following ? 'Following' : 'Follow'}
+      <button type="button" onClick={toggle} disabled={busy} aria-pressed={following} title={following ? `Stop tuning in (${followersLabel(initialCount, locale)})` : undefined}
+        className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold disabled:opacity-60 ${following ? 'bg-surface hover:bg-surface-hover' : 'bg-brand text-on-brand hover:bg-brand-strong'}`}>
+        {following ? <Icon.Check size={18} strokeWidth={2.2} /> : <Icon.Plus size={18} strokeWidth={2.2} />}{following ? 'Tuned in' : 'Tune in'}
       </button>
       {error && <span role="alert" className="text-[12px] text-danger">{error}</span>}
     </div>

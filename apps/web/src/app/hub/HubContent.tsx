@@ -19,6 +19,8 @@ export function HubContent({ handle }: { handle: string }) {
   const { locale } = useShell();
   const params = useSearchParams();
   const [tab, setTab] = useState<'videos' | 'notices'>(params.get('tab') === 'notices' ? 'notices' : 'videos');
+  // The Create button on phones opens the upload straight away.
+  useEffect(() => { if (params.get('upload') === '1') openDialog(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const { openDialog, items } = useUploads();
   const [videos, setVideos] = useState<HubVideo[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -54,7 +56,7 @@ export function HubContent({ handle }: { handle: string }) {
     <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h1 className="flex items-center gap-2 text-[28px] font-semibold tracking-tight"><Icon.Hub size={28} className="text-brand" />Creator Hub</h1><p className="text-[14px] text-muted">Channel <Link href={`/@${handle}`} className="text-brand">@{handle}</Link></p></div>
-        <button type="button" onClick={() => openDialog()} className="flex h-10 items-center gap-2 rounded-full bg-brand px-5 text-[14px] font-semibold text-on-brand hover:bg-brand-strong"><Icon.Upload size={18} />Upload video</button>
+        <button type="button" onClick={() => openDialog()} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand hover:bg-brand-strong"><Icon.Upload size={18} />Upload video</button>
       </div>
       <div role="tablist" className="mt-5 flex gap-1 border-b border-line">
         {([['videos', 'Videos', Icon.Videos], ['notices', 'Removals and notices', Icon.Shield]] as const).map(([k, l, I]) => (
@@ -68,7 +70,7 @@ export function HubContent({ handle }: { handle: string }) {
           <div className="mx-auto grid h-24 w-24 place-items-center rounded-full bg-surface text-muted"><Icon.Videos size={40} strokeWidth={1.4} /></div>
           <h2 className="mt-5 text-[18px] font-semibold">No videos yet</h2>
           <p className="mt-1 text-[14px] text-muted">Upload your first video. It stays private until you publish it.</p>
-          <button type="button" onClick={() => openDialog()} className="mt-5 h-10 rounded-full bg-strong px-5 text-[14px] font-medium text-on-strong">Upload video</button>
+          <button type="button" onClick={() => openDialog()} className="mt-5 h-10 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand">Upload video</button>
         </div>
       ) : (
         <div className="mt-6 overflow-x-auto rounded-2xl border border-line">

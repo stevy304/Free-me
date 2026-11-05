@@ -1,21 +1,15 @@
 'use client';
 
-import { Suspense, useEffect, type ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { currentTheme, setTheme } from './theme';
 import type { Viewer } from '@/lib/types';
-import { ShellProvider, useShell } from './ShellContext';
-import { TopBar } from './TopBar';
-import { Sidebar } from './Sidebar';
-import { MobileNav } from './MobileNav';
+import { ShellProvider } from './ShellContext';
+import { Header } from './Header';
+import { MobileDock } from './MobileDock';
 import { UploadsProvider } from '../hub/UploadsContext';
 import { UploadDialog } from '../hub/UploadDialog';
 
-function Main({ children }: { children: ReactNode }) {
-  const { collapsed } = useShell();
-  return <main className={`min-h-[calc(100dvh-3.5rem)] pb-16 md:pb-6 md:pl-[72px] ${collapsed ? '' : 'xl:pl-60'}`}>{children}</main>;
-}
-
-export function AppShell({ viewer, locale, sidebarCollapsed = false, children }: { viewer: Viewer | null; locale: string; sidebarCollapsed?: boolean; children: ReactNode }) {
+export function AppShell({ viewer, locale, children }: { viewer: Viewer | null; locale: string; children: ReactNode }) {
   // Keeps the theme right if React ever re-renders <html>, and follows the device when it switches light/dark.
   useEffect(() => {
     setTheme(currentTheme());
@@ -25,12 +19,11 @@ export function AppShell({ viewer, locale, sidebarCollapsed = false, children }:
     return () => mq.removeEventListener('change', follow);
   }, []);
   return (
-    <ShellProvider viewer={viewer} locale={locale} initialCollapsed={sidebarCollapsed}>
+    <ShellProvider viewer={viewer} locale={locale}>
       <UploadsProvider>
-        <TopBar />
-        <Suspense><Sidebar /></Suspense>
-        <Main>{children}</Main>
-        <MobileNav />
+        <Header />
+        <main className="min-h-[calc(100dvh-4rem)] pb-28 md:pb-10">{children}</main>
+        <MobileDock />
         {viewer?.channel && <UploadDialog />}
       </UploadsProvider>
     </ShellProvider>

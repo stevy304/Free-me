@@ -41,7 +41,7 @@ test('like, save, comment, history, report; a moderator removes the video; the c
   await creator.getByLabel('Name').fill('Lake Films');
   await creator.getByLabel('Handle').fill(`lake.${run}`);
   await expect(creator.getByLabel('Available')).toBeVisible();
-  await creator.getByRole('button', { name: 'Create channel' }).click();
+  await creator.getByRole('button', { name: 'Create Space' }).click();
   await expect(creator.getByRole('heading', { name: 'Lake Films' })).toBeVisible();
   await creator.getByRole('button', { name: 'Create' }).click();
   await creator.getByRole('menuitem', { name: 'Upload video' }).click();
@@ -61,35 +61,35 @@ test('like, save, comment, history, report; a moderator removes the video; the c
   const errors: string[] = [];
   viewer.on('pageerror', (e) => errors.push(e.message));
   await expect(async () => { await viewer.goto(`/watch?v=${videoId}`); await expect(viewer.getByRole('heading', { name: title })).toBeVisible({ timeout: 2000 }); }).toPass({ timeout: 30_000 });
-  await viewer.getByRole('button', { name: /^Like/ }).click();
-  await expect(viewer.getByRole('button', { name: 'Like (1)' })).toHaveAttribute('aria-pressed', 'true');
+  await viewer.getByRole('button', { name: /^Spark/ }).click();
+  await expect(viewer.getByRole('button', { name: 'Spark (1)' })).toHaveAttribute('aria-pressed', 'true');
 
-  await viewer.getByRole('button', { name: 'Save', exact: true }).click();
-  const save = viewer.getByRole('dialog', { name: 'Save to…' });
-  await save.getByRole('checkbox', { name: /Saved/ }).click();
-  await expect(save.getByRole('checkbox', { name: /Saved/ })).toHaveAttribute('aria-checked', 'true');
+  await viewer.getByRole('button', { name: 'Keep', exact: true }).click();
+  const save = viewer.getByRole('dialog', { name: 'Keep in…' });
+  await save.getByRole('checkbox', { name: /Kept/ }).click();
+  await expect(save.getByRole('checkbox', { name: /Kept/ })).toHaveAttribute('aria-checked', 'true');
   await save.getByRole('button', { name: 'New collection' }).click();
   await save.getByLabel('Name').fill('Calm mornings');
   await save.getByRole('button', { name: 'Create' }).click();
   await expect(save.getByRole('checkbox', { name: /Calm mornings/ })).toHaveAttribute('aria-checked', 'true');
   await save.getByRole('button', { name: 'Close' }).click();
-  await expect(viewer.getByRole('button', { name: 'Saved', exact: true })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Kept', exact: true })).toBeVisible();
 
-  await viewer.getByLabel('Add a comment…').fill('What a peaceful place.');
-  await viewer.getByRole('button', { name: 'Comment', exact: true }).click();
+  await viewer.getByLabel('Join the conversation…').fill('What a peaceful place.');
+  await viewer.getByRole('button', { name: 'Post', exact: true }).click();
   await expect(viewer.getByText('What a peaceful place.')).toBeVisible();
-  await expect(viewer.getByRole('heading', { name: '1 comment' })).toBeVisible();
+  await expect(viewer.getByRole('heading', { name: 'Conversation 1' })).toBeVisible();
   await viewer.getByRole('button', { name: 'Reply' }).first().click();
   await viewer.getByLabel('Add a reply…').fill('Where was this filmed?');
   await viewer.getByRole('button', { name: 'Reply', exact: true }).last().click();
   await expect(viewer.getByText('Where was this filmed?')).toBeVisible();
-  await expect(viewer.getByRole('heading', { name: '2 comments' })).toBeVisible();
+  await expect(viewer.getByRole('heading', { name: 'Conversation 2' })).toBeVisible();
 
   // Watching is remembered in History. Playwright's Chromium has no H.264 decoder, so the test sends the position
   // the way the player does after 10 seconds of playback.
   await viewer.evaluate(async (id) => { await fetch(`/api/videos/${id}/progress`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seconds: 2 }) }); }, videoId);
   await expect(async () => {
-    await viewer.goto('/history');
+    await viewer.goto('/trail');
     await expect(viewer.getByRole('heading', { name: title })).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 20_000 });
   await viewer.goto('/collections');

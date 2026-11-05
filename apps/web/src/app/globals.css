@@ -4,42 +4,50 @@
 
 /* Free Me design tokens. Light and dark share names; components never hard-code colours. */
 :root {
-  /* Free Me neutrals carry a little of the brand teal, so surfaces read as Free Me rather than plain grey. */
-  --bg: #ffffff;
+  /* Free Me: warm paper, lagoon teal and saffron. No red in the brand; red is reserved for errors. */
+  --bg: #f7f5ef;
   --bg-elevated: #ffffff;
-  --surface: #f0f4f3;
-  --surface-hover: #e2e9e8;
-  --surface-strong: #0e1716;
-  --on-surface-strong: #ffffff;
-  --text: #0e1716;
-  --muted: #56625f;
+  --surface: #e9efee;
+  --surface-hover: #dce5e3;
+  --surface-strong: #10201f;
+  --on-surface-strong: #f7f5ef;
+  --text: #10201f;
+  --muted: #5b6866;
   --faint: #8a9693;
-  --line: #e2e9e8;
+  --line: #e2e8e6;
   --brand: #0c827e;
-  --brand-strong: #075655;
-  --brand-soft: #e1f3f1;
+  --brand-strong: #0a6b67;
+  --brand-soft: #ddf1ee;
   --on-brand: #ffffff;
-  --danger: #c5221f;
-  --shadow: 0 4px 32px rgb(8 40 38 / 0.12);
+  --accent: #f2a93b;
+  --accent-soft: #fdf1dc;
+  --on-accent-soft: #8a5a10;
+  --danger: #b42318;
+  --shadow: 0 10px 40px rgb(8 40 38 / 0.14);
+  --stage: #050a0a;
   color-scheme: light;
 }
 .dark {
   --bg: #0a1110;
-  --bg-elevated: #16201f;
+  --bg-elevated: #121b1a;
   --surface: #1b2726;
-  --surface-hover: #283635;
+  --surface-hover: #243231;
   --surface-strong: #eef4f3;
   --on-surface-strong: #0a1110;
   --text: #eef4f3;
   --muted: #9fb0ad;
   --faint: #6b7d7a;
-  --line: #283635;
+  --line: #243231;
   --brand: #2bb5ab;
   --brand-strong: #5fd6cb;
   --brand-soft: #0f2e2c;
   --on-brand: #04201e;
+  --accent: #f5b95c;
+  --accent-soft: #3b2e14;
+  --on-accent-soft: #f5b95c;
   --danger: #ff6b6b;
-  --shadow: 0 4px 32px rgb(0 0 0 / 0.55);
+  --shadow: 0 12px 40px rgb(0 0 0 / 0.55);
+  --stage: #050a0a;
   color-scheme: dark;
 }
 
@@ -59,10 +67,16 @@
   --color-brand-strong: var(--brand-strong);
   --color-brand-soft: var(--brand-soft);
   --color-danger: var(--danger);
-  --font-sans: var(--font-inter), system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent-soft: var(--on-accent-soft);
+  --color-stage: var(--stage);
+  --font-sans: var(--font-inter), system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  --font-display: var(--font-jakarta), var(--font-inter), system-ui, sans-serif;
 }
 
 html, body { background: var(--bg); color: var(--text); }
+h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: -0.02em; }
 body { -webkit-font-smoothing: antialiased; }
 ::selection { background: color-mix(in srgb, var(--brand) 30%, transparent); }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }

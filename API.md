@@ -52,6 +52,9 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 | GET | `/search?q=&cursor=` | Matching channels (first page) and videos |
 | GET | `/search/suggest?q=` | Up to ten suggestions while typing |
 | GET | `/feed/following` 🔒 | Channels I follow and their latest videos |
+| GET | `/feed/home` | For you: `spotlight`, `interests` (with `picked`), `shelves` (one per picked topic, then the busiest topics this month), `fromCreators`, `moments`, `latest`. Built only from picked topics, followed creators and recency |
+| GET | `/feed/rising` | The most watched public videos published in the last 7 days |
+| GET / PUT | `/me/interests` 🔒 | My topics for For you: `{ categories: [slug] }` (up to 12) |
 | GET | `/site` | Operator name and contact details (from `LEGAL_*` settings) and the report reasons |
 
 ## Uploads (creators) 🔒

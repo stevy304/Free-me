@@ -136,7 +136,7 @@ describe('collections', () => {
     const other = await signIn(ctx.http, ctx.mail, 'nosy@example.com');
 
     let mine = (await fan.agent.get('/api/me/collections').expect(200)).body.collections;
-    expect(mine).toEqual([expect.objectContaining({ kind: 'SAVED', title: 'Saved', visibility: 'PRIVATE', videoCount: 0 })]);
+    expect(mine).toEqual([expect.objectContaining({ kind: 'SAVED', title: 'Kept', visibility: 'PRIVATE', videoCount: 0 })]);
     const saved = mine[0].id;
     await fan.agent.put(`/api/me/collections/saved/videos/${video.id}`).set('Origin', WEB).expect(200);
     await fan.agent.put(`/api/me/collections/saved/videos/${video.id}`).set('Origin', WEB).expect(200);
@@ -166,7 +166,7 @@ describe('collections', () => {
     expect((await fan.agent.delete(`/api/me/collections/${trip.id}/videos/${video.id}`).set('Origin', WEB).expect(200)).body.removed).toBe(true);
     await fan.agent.delete(`/api/me/collections/${trip.id}`).set('Origin', WEB).expect(200);
     mine = (await fan.agent.get('/api/me/collections')).body.collections;
-    expect(mine.map((c: any) => c.title)).toEqual(['Saved']);
+    expect(mine.map((c: any) => c.title)).toEqual(['Kept']);
   });
 });
 

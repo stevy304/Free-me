@@ -11,9 +11,9 @@ import { ReportDialog } from '@/components/engagement/ReportDialog';
 import { SaveDialog } from '@/components/engagement/SaveDialog';
 import { VideoPlayer } from '@/components/player/VideoPlayer';
 import { useShell } from '@/components/shell/ShellContext';
-import { VideoRow } from '@/components/video/VideoCard';
+import { Thumbnail, VideoRow } from '@/components/video/VideoCard';
 import { api } from '@/lib/client-api';
-import { compactNumber, followersLabel, fullDate, viewsLabel } from '@/lib/format';
+import { compactNumber, followersLabel, fullDate, timeAgo, viewsLabel } from '@/lib/format';
 import type { VideoCardData } from '@/lib/types';
 
 export interface WatchVideo extends VideoCardData {
@@ -22,13 +22,11 @@ export interface WatchVideo extends VideoCardData {
 }
 export interface WatchViewer { signedIn: boolean; isOwner: boolean; following: boolean; saved: boolean; reaction: 'like' | 'dislike' | 'none'; resumeAt: number }
 
-const pill = 'flex h-9 items-center gap-2 rounded-full bg-surface px-4 text-[14px] font-medium hover:bg-surface-hover';
 
 export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; more: VideoCardData[]; viewer: WatchViewer }) {
   const { locale } = useShell();
   const router = useRouter();
   const [theater, setTheater] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState(initialViewer.reaction);
   const [likes, setLikes] = useState(v.likeCount);
@@ -60,78 +58,94 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
     fetch(`/api/videos/${v.id}/progress`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seconds, ended }), credentials: 'same-origin', keepalive: true }).catch(() => undefined);
   }, [v.id, initialViewer.signedIn]);
   const need = (what: 'save' | 'report') => { setMenu(false); if (!initialViewer.signedIn) router.push(login); else setDialog(what); };
+  const [tab, setTab] = useState<'about' | 'conversation' | 'next'>('conversation');
 
   const player = v.playbackUrl
     ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} onProgress={progress} />
-    : <div className="grid aspect-video w-full place-items-center rounded-xl bg-surface text-center text-[15px] text-muted"><div><Icon.Spinner className="mx-auto mb-3 animate-spin" />{v.takenDownAt ? 'This video was removed. See Creator Hub for details.' : v.processingStage ?? 'This video is still being processed.'}</div></div>;
+    : <div className="grid aspect-video w-full place-items-center rounded-[24px] bg-[#0b1413] text-center text-[15px] text-[#9fb0ad]"><div><Icon.Spinner className="mx-auto mb-3 animate-spin" />{v.takenDownAt ? 'This video was removed. See Creator Hub for details.' : v.processingStage ?? 'This video is still being processed.'}</div></div>;
 
-  const details = (
-    <>
-      <h1 className="mt-3 text-[20px] font-bold leading-7">{v.title}</h1>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <Link href={`/@${v.channel.handle}`} className="shrink-0"><Avatar name={v.channel.name} src={v.channel.avatarUrl} size={40} /></Link>
-          <div className="mr-2 min-w-0"><Link href={`/@${v.channel.handle}`} className="flex items-center gap-1 truncate text-[16px] font-semibold">{v.channel.name}{v.channel.isVerified && <Icon.Verified size={14} aria-label="Verified" />}</Link><p className="text-[12px] text-muted" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</p></div>
-          {initialViewer.isOwner
-            ? <Link href="/hub" className={pill}><Icon.Hub size={18} />Creator Hub</Link>
-            : <FollowButton handle={v.channel.handle} initial={initialViewer.following} initialCount={v.channel.followerCount} />}
-        </div>
-        <div className="no-scrollbar -mx-1 flex max-w-full items-center gap-2 overflow-x-auto px-1">
-          <div className="flex h-9 shrink-0 items-center rounded-full bg-surface text-[14px] font-medium">
-            <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Like (${likes})`} className="flex h-full items-center gap-2 rounded-l-full pl-4 pr-3 hover:bg-surface-hover">
-              <Icon.ThumbUp size={20} filled={reaction === 'like'} /><span suppressHydrationWarning>{likes > 0 ? compactNumber(likes, locale) : 'Like'}</span>
-            </button>
-            <span className="h-6 w-px bg-line" />
-            <button type="button" onClick={() => react('dislike')} aria-pressed={reaction === 'dislike'} aria-label="Dislike" title="Only the creator sees dislikes" className="flex h-full items-center rounded-r-full pl-3 pr-4 hover:bg-surface-hover">
-              <Icon.ThumbDown size={20} filled={reaction === 'dislike'} />
-            </button>
-          </div>
-          <button type="button" onClick={share} className={`${pill} shrink-0`}><Icon.Share size={20} />{copied ? 'Link copied' : 'Share'}</button>
-          <button type="button" onClick={() => need('save')} aria-pressed={saved} className={`${pill} shrink-0`}><Icon.Bookmark size={20} filled={saved} />{saved ? 'Saved' : 'Save'}</button>
+  const dockBtn = 'flex h-10 shrink-0 items-center gap-2 rounded-xl px-3.5 text-[14px] font-semibold';
+  const meta = <span suppressHydrationWarning>{viewsLabel(v.viewCount, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : 'Not published'}</span>;
+  const tabBtn = (k: typeof tab, label: string) => <button type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`-mb-px border-b-2 px-3.5 py-2.5 text-[14px] font-semibold ${tab === k ? 'border-brand text-ink' : 'border-transparent text-muted hover:text-ink'}`}>{label}</button>;
+
+  return (
+    <div>
+      {/* Stage: the video on a dark band, lit softly by the brand colour. */}
+      <section className="relative bg-stage px-0 pb-9 pt-0 sm:px-6 sm:pt-5" style={{ backgroundImage: 'radial-gradient(ellipse at 50% 35%, rgb(12 130 126 / 0.32), transparent 62%)' }}>
+        <div className={`mx-auto transition-[max-width] duration-300 ${theater ? 'max-w-[min(1700px,calc((100dvh-9rem)*16/9))]' : 'max-w-[min(1120px,calc((100dvh-11rem)*16/9))]'}`}>{player}</div>
+        {/* Action dock: floats over the bottom edge of the stage. */}
+        <div className="absolute bottom-0 left-1/2 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-1/2 items-center gap-1.5 overflow-x-auto rounded-[18px] border border-line bg-elevated p-1.5 shadow-[var(--shadow)] no-scrollbar">
+          <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Spark (${likes})`} className={`${dockBtn} ${reaction === 'like' ? 'bg-accent-soft text-on-accent-soft' : 'hover:bg-surface'}`}>
+            <Icon.Spark size={20} filled={reaction === 'like'} className={reaction === 'like' ? 'text-accent' : ''} />Spark<span suppressHydrationWarning>{likes > 0 ? ` · ${compactNumber(likes, locale)}` : ''}</span>
+          </button>
+          <button type="button" onClick={() => need('save')} aria-pressed={saved} className={`${dockBtn} ${saved ? 'bg-brand-soft text-brand' : 'hover:bg-surface'}`}><Icon.Bookmark size={20} filled={saved} />{saved ? 'Kept' : 'Keep'}</button>
+          <button type="button" onClick={share} className={`${dockBtn} hover:bg-surface`}><Icon.PassAlong size={20} />{copied ? 'Link copied' : 'Pass along'}</button>
           <div className="relative shrink-0">
-            <button type="button" onClick={() => setMenu((m) => !m)} aria-label="More actions" aria-haspopup="menu" aria-expanded={menu} className="grid h-9 w-9 place-items-center rounded-full bg-surface hover:bg-surface-hover"><Icon.More size={20} /></button>
-            {menu && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
-                <div role="menu" className="absolute right-0 top-11 z-40 min-w-[220px] rounded-xl bg-elevated py-2 shadow-[var(--shadow)]">
-                  {!initialViewer.isOwner && <button type="button" role="menuitem" onClick={() => need('report')} className="flex w-full items-center gap-3 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Flag size={20} />Report</button>}
-                  {!initialViewer.isOwner && <Link role="menuitem" href={`/legal/copyright/notice?v=${v.id}`} className="flex w-full items-center gap-3 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Copyright size={20} />Copyright notice</Link>}
-                  <Link role="menuitem" href="/history" className="flex w-full items-center gap-3 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.History size={20} />Your history</Link>
-                </div>
-              </>
-            )}
+            <button type="button" onClick={() => setMenu((m) => !m)} aria-label="More actions" aria-haspopup="menu" aria-expanded={menu} className="grid h-10 w-10 place-items-center rounded-xl hover:bg-surface"><Icon.More size={20} /></button>
           </div>
         </div>
+        {menu && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
+            <div role="menu" className="absolute bottom-0 left-1/2 z-40 w-[240px] translate-x-[60px] translate-y-[calc(100%+30px)] rounded-2xl border border-line bg-elevated p-1.5 shadow-[var(--shadow)]">
+              {!initialViewer.isOwner && <button type="button" role="menuitemcheckbox" aria-checked={reaction === 'dislike'} onClick={() => { setMenu(false); void react('dislike'); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] hover:bg-surface"><Icon.NotForMe size={20} filled={reaction === 'dislike'} /><span className="flex-1 text-left">Not for me</span><span className="text-[11px] text-muted">private</span></button>}
+              {!initialViewer.isOwner && <button type="button" role="menuitem" onClick={() => need('report')} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] hover:bg-surface"><Icon.Flag size={20} />Report</button>}
+              {!initialViewer.isOwner && <Link role="menuitem" href={`/legal/copyright/notice?v=${v.id}`} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] hover:bg-surface"><Icon.Copyright size={20} />Copyright notice</Link>}
+              <Link role="menuitem" href="/trail" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] hover:bg-surface"><Icon.Trail size={20} />Your Trail</Link>
+            </div>
+          </>
+        )}
+      </section>
+      {error && <p role="alert" className="mx-auto mt-10 max-w-[1120px] px-4 text-[13px] text-danger">{error}</p>}
+
+      <div className="mx-auto mt-12 grid max-w-[1120px] gap-8 px-4 sm:px-6 lg:grid-cols-[300px_1fr]">
+        <aside className="h-fit rounded-[20px] border border-line bg-elevated p-4 lg:sticky lg:top-20">
+          <Link href={`/@${v.channel.handle}`} className="flex items-center gap-3">
+            <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={52} />
+            <div className="min-w-0"><p className="flex items-center gap-1 truncate font-display text-[17px] font-bold">{v.channel.name}{v.channel.isVerified && <Icon.Verified size={15} aria-label="Verified" className="text-brand" />}</p><p className="text-[13px] text-muted" suppressHydrationWarning>@{v.channel.handle} · {followersLabel(v.channel.followerCount, locale)}</p></div>
+          </Link>
+          <div className="mt-4 [&>div]:w-full [&_button]:w-full [&_button]:justify-center">
+            {initialViewer.isOwner
+              ? <Link href="/hub" className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-surface text-[14px] font-semibold hover:bg-surface-hover"><Icon.Hub size={18} />Creator Hub</Link>
+              : <FollowButton handle={v.channel.handle} initial={initialViewer.following} initialCount={v.channel.followerCount} />}
+          </div>
+        </aside>
+        <div className="min-w-0">
+          <p className="text-[13px] font-semibold text-brand">{v.category ? <><Link href={`/explore?topic=${v.category.slug}`} className="hover:underline">{v.category.name}</Link> · </> : null}{meta}</p>
+          <h1 className="mt-1.5 text-[26px] font-extrabold leading-[1.15] sm:text-[32px]">{v.title}</h1>
+          <div role="tablist" className="mt-5 flex gap-1 border-b border-line">
+            {tabBtn('about', 'About')}{tabBtn('conversation', v.commentsOpen ? `Conversation · ${compactNumber(v.commentCount, locale)}` : 'Conversation')}{more.length > 0 && tabBtn('next', 'Keep watching')}
+          </div>
+          {tab === 'about' && (
+            <div className="py-5 text-[15px] leading-relaxed">
+              <p className="font-semibold">{meta}{v.publishedAt && <span className="font-normal text-muted"> · {fullDate(v.publishedAt, locale)}</span>}</p>
+              <p className="mt-2 whitespace-pre-line break-words">{v.description || <span className="text-muted">No description.</span>}</p>
+            </div>
+          )}
+          {tab === 'conversation' && <Comments videoId={v.id} initialCount={v.commentCount} />}
+          {tab === 'next' && <div className="grid gap-4 py-5">{more.map((x) => <VideoRow key={x.id} v={x} locale={locale} large />)}</div>}
+          {tab !== 'next' && more.length > 0 && (
+            <section className="mt-10">
+              <h2 className="flex items-baseline justify-between text-[18px] font-bold">Keep watching<button type="button" onClick={() => setTab('next')} className="font-sans text-[13px] font-semibold text-brand">See all</button></h2>
+              <div className="no-scrollbar -mx-4 mt-3 flex gap-4 overflow-x-auto px-4 pb-2">
+                {more.slice(0, 8).map((x) => (
+                  <Link key={x.id} href={`/watch?v=${x.id}`} className="group w-[220px] shrink-0">
+                    <Thumbnail v={x} rounded="rounded-[16px]" />
+                    <p className="mt-2 line-clamp-2 text-[14px] font-semibold leading-tight">{x.title}</p>
+                    <p className="text-[12px] text-muted">{x.channel.name}</p>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
       </div>
-      {error && <p role="alert" className="mt-2 text-[13px] text-danger">{error}</p>}
-      <div className={`mt-4 rounded-xl bg-surface p-3 text-[14px] ${expanded ? '' : 'cursor-pointer hover:bg-surface-hover'}`} onClick={() => !expanded && setExpanded(true)}>
-        <p className="font-semibold" suppressHydrationWarning>{viewsLabel(v.viewCount, locale)} · {v.publishedAt ? fullDate(v.publishedAt, locale) : 'Not published'}{v.category && <> · <Link href={`/?category=${v.category.slug}`} className="text-brand" onClick={(e) => e.stopPropagation()}>{v.category.name}</Link></>}</p>
-        {v.description && <p className={`mt-1 whitespace-pre-line break-words ${expanded ? '' : 'line-clamp-2'}`}>{v.description}</p>}
-        {v.description && v.description.length > 120 && <button type="button" className="mt-1 font-semibold" onClick={(e) => { e.stopPropagation(); setExpanded((x) => !x); }}>{expanded ? 'Show less' : '...more'}</button>}
-      </div>
-      <Comments videoId={v.id} initialCount={v.commentCount} />
       {initialViewer.signedIn && (
         <>
           <SaveDialog videoId={v.id} open={dialog === 'save'} onClose={() => setDialog(null)} onSavedChange={setSaved} />
           <ReportDialog videoId={v.id} open={dialog === 'report'} onClose={() => setDialog(null)} currentTime={() => time.current} />
         </>
       )}
-    </>
-  );
-  const upNext = more.length > 0 && <aside className="space-y-3 lg:w-[402px] lg:shrink-0" aria-label="Up next">{more.map((x) => <VideoRow key={x.id} v={x} locale={locale} />)}</aside>;
-
-  if (theater) {
-    return (
-      <div>
-        <div className="mx-auto max-h-[calc(100dvh-10rem)] w-full max-w-[min(100%,calc((100dvh-10rem)*16/9))] bg-black">{player}</div>
-        <div className="mx-auto flex max-w-[1754px] flex-col gap-6 px-4 py-4 sm:px-6 lg:flex-row"><div className="min-w-0 flex-1">{details}</div>{upNext}</div>
-      </div>
-    );
-  }
-  return (
-    <div className="mx-auto flex max-w-[1754px] flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row">
-      <div className="min-w-0 flex-1">{player}{details}</div>
-      {upNext}
     </div>
   );
 }

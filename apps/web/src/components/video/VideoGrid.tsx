@@ -36,7 +36,7 @@ export function VideoGrid({ first, endpoint }: { first: VideoPage; endpoint: str
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-x-4 gap-y-10 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 min-[2200px]:grid-cols-5">
+      <div className="grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 min-[2200px]:grid-cols-5">
         {videos.map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}
       </div>
       <div ref={end} className="flex justify-center py-8">

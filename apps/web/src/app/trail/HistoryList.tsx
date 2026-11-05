@@ -30,19 +30,19 @@ export function HistoryList() {
   useEffect(() => { api<{ items: Item[]; nextCursor: string | null }>('/me/history').then((r) => { setItems(r.items); setCursor(r.nextCursor); }).catch((e) => setError((e as Error).message)); }, []);
   const more = async () => { if (!cursor) return; setBusy(true); try { const r = await api<{ items: Item[]; nextCursor: string | null }>(`/me/history?cursor=${encodeURIComponent(cursor)}`); setItems((l) => [...(l ?? []), ...r.items]); setCursor(r.nextCursor); } finally { setBusy(false); } };
   const forget = async (id: string) => { await api(`/me/history/${id}`, { method: 'DELETE', body: {} }); setItems((l) => l!.filter((i) => i.video.id !== id)); };
-  const clear = async () => { if (!window.confirm('Clear your whole watch history? This cannot be undone.')) return; await api('/me/history', { method: 'DELETE', body: {} }); setItems([]); setCursor(null); };
+  const clear = async () => { if (!window.confirm('Clear your whole Trail? This cannot be undone.')) return; await api('/me/history', { method: 'DELETE', body: {} }); setItems([]); setCursor(null); };
 
-  if (error) return <EmptyState icon={<Icon.Offline size={36} strokeWidth={1.4} />} title="History could not be loaded">{error}</EmptyState>;
+  if (error) return <EmptyState icon={<Icon.Offline size={36} strokeWidth={1.4} />} title="Your Trail could not be loaded">{error}</EmptyState>;
   if (!items) return <div className="grid place-items-center py-20"><Icon.Spinner className="animate-spin text-muted" /></div>;
-  if (!items.length) return <EmptyState icon={<Icon.History size={36} strokeWidth={1.4} />} title="Nothing watched yet">Videos you watch while signed in appear here, so you can find them again and continue where you stopped.</EmptyState>;
+  if (!items.length) return <EmptyState icon={<Icon.Trail size={36} strokeWidth={1.4} />} title="Your Trail is empty">Videos you watch while signed in appear here, so you can find them again and continue where you stopped.</EmptyState>;
 
   const groups: Array<[string, Item[]]> = [];
   for (const i of items) { const k = dayLabel(i.watchedAt, locale); const g = groups.at(-1); if (g && g[0] === k) g[1].push(i); else groups.push([k, [i]]); }
   return (
     <div className="mx-auto max-w-[1100px] px-4 py-6 sm:px-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[28px] font-bold sm:text-[36px]">Watch history</h1>
-        <button type="button" onClick={clear} className={buttonClass.soft}><Icon.Trash size={18} />Clear all history</button>
+        <div><h1 className="text-[30px] font-extrabold">Trail</h1><p className="text-[14px] text-muted">Everything you watched while signed in, and where you stopped.</p></div>
+        <button type="button" onClick={clear} className={buttonClass.soft}><Icon.Trash size={18} />Clear your Trail</button>
       </div>
       {groups.map(([day, list]) => (
         <section key={day} className="mb-8">
@@ -50,7 +50,7 @@ export function HistoryList() {
           <div className="space-y-4">
             {list.map((i) => (
               <VideoRow key={i.video.id} v={i.video} locale={locale} large progress={i.completed ? 1 : i.video.durationSeconds ? i.progressSeconds / i.video.durationSeconds : 0}
-                actions={<button type="button" onClick={() => forget(i.video.id)} aria-label={`Remove ${i.video.title} from history`} className="grid h-10 w-10 place-items-center rounded-full hover:bg-surface"><Icon.Close size={20} /></button>} />
+                actions={<button type="button" onClick={() => forget(i.video.id)} aria-label={`Remove ${i.video.title} from your Trail`} className="grid h-10 w-10 place-items-center rounded-full hover:bg-surface"><Icon.Close size={20} /></button>} />
             ))}
           </div>
         </section>

@@ -50,7 +50,7 @@ export function SaveDialog({ videoId, open, onClose, onSavedChange }: { videoId:
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title="Save to…"
+    <Dialog open={open} onClose={onClose} title="Keep in…"
       footer={creating
         ? <><button type="button" className={buttonClass.quiet} onClick={() => setCreating(false)}>Cancel</button><button type="button" className={buttonClass.primary} disabled={!title.trim() || busy === 'new'} onClick={create}>{busy === 'new' && <Icon.Spinner size={16} className="animate-spin" />}Create</button></>
         : <button type="button" className={`${buttonClass.soft} w-full`} onClick={() => setCreating(true)}><Icon.Plus size={18} />New collection</button>}>

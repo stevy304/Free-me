@@ -238,3 +238,14 @@ export const Spinner = ({ size = 24, className, strokeWidth = 2.2 }: IconProps) 
     <path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
   </svg>
 );
+
+/* ---------- Free Me vocabulary ---------- */
+
+/** Spark: public appreciation (in place of a thumbs-up). A four-point star. */
+export const Spark = icon('Spark', (f) => <path d="M12 3.2l2 6.6 6.6 2.2-6.6 2.2-2 6.6-2-6.6L3.4 12l6.6-2.2z" fill={F(f)} />);
+/** Not for me: private feedback to the creator. */
+export const NotForMe = icon('NotForMe', (f) => (<><circle cx="12" cy="12" r="8.4" fill={F(f)} /><path d="M8.5 15.5c1.7-1.6 5.3-1.6 7 0" stroke={f ? 'var(--bg)' : 'currentColor'} /><path d="M9 9.8h.01M15 9.8h.01" strokeWidth={2.4} stroke={f ? 'var(--bg)' : 'currentColor'} /></>));
+/** Pass along: share. An arrow leaving a bar. */
+export const PassAlong = icon('PassAlong', () => (<><path d="M5 5v14" /><path d="M9 12h11M15 6.5l5.5 5.5-5.5 5.5" /></>));
+/** Trail: watch history. A path between two points. */
+export const Trail = icon('Trail', () => (<><path d="M5.5 18.5c3.2-.8 4.2-4 6.2-7s4.7-4.6 7-5" /><circle cx="5" cy="18.8" r="1.8" /><circle cx="19" cy="6.2" r="1.8" /></>));

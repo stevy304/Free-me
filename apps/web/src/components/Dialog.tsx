@@ -19,7 +19,7 @@ export function Dialog({ open, onClose, title, children, footer, wide = false }:
     <dialog
       ref={ref} onClose={onClose} onCancel={(e) => { e.preventDefault(); onClose(); }} aria-label={title}
       onClick={(e) => { if (e.target === ref.current) onClose(); }}
-      className={`m-0 h-[100dvh] max-h-none w-full max-w-none bg-elevated p-0 text-ink backdrop:bg-black/60 sm:m-auto sm:h-auto sm:max-h-[min(88dvh,820px)] sm:rounded-2xl sm:shadow-[var(--shadow)] ${wide ? 'sm:w-[640px]' : 'sm:w-[440px]'}`}
+      className={`m-0 h-[100dvh] max-h-none w-full max-w-none bg-elevated p-0 text-ink backdrop:bg-black/60 sm:m-auto sm:h-auto sm:max-h-[min(88dvh,820px)] sm:rounded-3xl sm:shadow-[var(--shadow)] ${wide ? 'sm:w-[640px]' : 'sm:w-[440px]'}`}
     >
       {open && (
         <div className="flex h-full max-h-[inherit] flex-col">
@@ -36,8 +36,8 @@ export function Dialog({ open, onClose, title, children, footer, wide = false }:
 }
 
 export const buttonClass = {
-  primary: 'inline-flex h-9 items-center justify-center gap-2 rounded-full bg-brand px-4 text-[14px] font-semibold text-on-brand hover:bg-brand-strong disabled:opacity-50',
-  quiet: 'inline-flex h-9 items-center justify-center gap-2 rounded-full px-4 text-[14px] font-medium hover:bg-surface disabled:opacity-50',
-  soft: 'inline-flex h-9 items-center justify-center gap-2 rounded-full bg-surface px-4 text-[14px] font-medium hover:bg-surface-hover disabled:opacity-50',
+  primary: 'inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand hover:bg-brand-strong disabled:opacity-50',
+  quiet: 'inline-flex h-9 items-center justify-center gap-2 rounded-xl px-4 text-[14px] font-semibold hover:bg-surface disabled:opacity-50',
+  soft: 'inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover disabled:opacity-50',
 };
 export const inputClass = 'w-full rounded-lg border border-line bg-bg px-3 py-2 text-[14px] outline-none placeholder:text-faint focus:border-brand';

@@ -26,7 +26,7 @@ function SaveBar({ busy, message, disabled }: { busy: boolean; message: { ok: bo
   return (
     <div className="mt-6 flex items-center justify-end gap-4">
       {message && <p role="status" className={`text-[14px] ${message.ok ? 'text-brand' : 'text-danger'}`}>{message.text}</p>}
-      <button type="submit" disabled={busy || disabled} className="flex h-10 items-center gap-2 rounded-full bg-strong px-5 text-[14px] font-medium text-on-strong hover:opacity-90 disabled:opacity-40">{busy && <Icon.Spinner size={16} className="animate-spin" />}Save</button>
+      <button type="submit" disabled={busy || disabled} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand hover:opacity-90 disabled:opacity-40">{busy && <Icon.Spinner size={16} className="animate-spin" />}Save</button>
     </div>
   );
 }
@@ -77,7 +77,7 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
   return (
     <div className="mx-auto flex max-w-5xl gap-10 px-4 py-6 sm:px-6">
       <nav aria-label="Settings" className="sticky top-20 hidden h-fit w-48 shrink-0 space-y-1 md:block">
-        {[['account', 'Account'], ['profile', 'Profile'], ...(c ? [['channel', 'Channel']] : []), ['devices', 'Signed-in devices']].map(([id, t]) => (
+        {[['account', 'Account'], ['profile', 'Profile'], ...(c ? [['channel', 'Space']] : []), ['devices', 'Signed-in devices']].map(([id, t]) => (
           <a key={id} href={`#${id}`} className="block rounded-lg px-3 py-2 text-[14px] hover:bg-surface">{t}</a>
         ))}
       </nav>
@@ -112,7 +112,7 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
         </Section>
 
         {c && (
-          <Section id="channel" title="Channel" intro={`Shown on your channel page at /@${c.handle}.`}>
+          <Section id="channel" title="Space" intro={`Shown on your Space at /@${c.handle}.`}>
             <form onSubmit={(e) => { e.preventDefault(); void saveChannel(); }} className="grid gap-5 sm:grid-cols-2">
               <div className="sm:col-span-2"><label htmlFor="cn" className={label}>Channel name</label><input id="cn" required maxLength={CHANNEL_NAME_MAX} value={channel.name} onChange={(e) => setChannel({ ...channel, name: e.target.value })} className={`${inputClass} mt-2`} /></div>
               <div className="sm:col-span-2"><label htmlFor="cd" className={label}>Description</label><textarea id="cd" rows={5} maxLength={CHANNEL_DESCRIPTION_MAX} value={channel.description} onChange={(e) => setChannel({ ...channel, description: e.target.value })} className="mt-2 w-full rounded-xl border border-line bg-bg px-3 py-2.5 text-[15px] outline-none focus:border-brand" /></div>
@@ -141,7 +141,7 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
           </ul>
           <div className="mt-4 flex items-center justify-between gap-4">
             <p role="status" className="text-[14px] text-muted">{sMsg}</p>
-            {sessions.length > 1 && <button type="button" onClick={() => void revoke(null)} className="h-10 rounded-full bg-surface px-4 text-[14px] font-medium hover:bg-surface-hover">Sign out of all other devices</button>}
+            {sessions.length > 1 && <button type="button" onClick={() => void revoke(null)} className="h-10 rounded-xl bg-surface px-4 text-[14px] font-medium hover:bg-surface-hover">Sign out of all other devices</button>}
           </div>
         </Section>
       </div>

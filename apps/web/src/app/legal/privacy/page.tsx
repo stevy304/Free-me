@@ -46,7 +46,7 @@ export default async function Privacy() {
           <ul>
             <li>Sign-in codes: 10 minutes, and they work once.</li>
             <li>Signed-in sessions: until you sign out or they expire (30 days by default).</li>
-            <li>Watch history: until you remove it in <Link href="/history">History</Link>.</li>
+            <li>Watch history (your Trail): until you remove it in <Link href="/trail">Trail</Link>.</li>
             <li>Videos, comments, collections: until you delete them. Deleted videos are removed from storage with all their files.</li>
             <li>Reports, notices, moderation decisions and the security log: as long as needed for safety and legal claims.</li>
             <li>Your account: until you ask us to close it; then we delete or anonymise your data, except what the law requires us to keep.</li>
@@ -57,8 +57,8 @@ export default async function Privacy() {
           <ul>
             <li><code>__Host-fm_session</code> (or <code>fm_session</code> on development servers): keeps you signed in.</li>
             <li><code>fm_oauth</code>: a short-lived cookie that protects the &ldquo;Sign in with Google&rdquo; step.</li>
-            <li><code>fm_theme</code> and <code>fm_sidebar</code>: your light or dark theme, and whether the sidebar is collapsed.</li>
-            <li>Browser storage for player settings (volume, mute, speed, theater mode) and unfinished uploads, so you can resume them.</li>
+            <li><code>fm_theme</code>: your light or dark theme choice.</li>
+            <li>Browser storage for player settings (volume, mute, speed), your recent searches in Find, and unfinished uploads, so you can resume them.</li>
           </ul>
         </>},
         { id: 'rights', title: 'Your rights', body: <>
