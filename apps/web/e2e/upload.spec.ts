@@ -34,7 +34,7 @@ test('upload, details, publish, processing to every quality, then on the home pa
   await page.getByLabel('Name').fill('Kigali Mornings');
   await page.getByLabel('Handle').fill(`kigali.${run}`);
   await expect(page.getByLabel('Available')).toBeVisible();
-  await page.getByRole('button', { name: 'Create channel' }).click();
+  await page.getByRole('button', { name: 'Create Space' }).click();
   await expect(page.getByRole('heading', { name: 'Kigali Mornings' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Create' }).click();
@@ -56,11 +56,11 @@ test('upload, details, publish, processing to every quality, then on the home pa
   // Media moves to the public prefix in the background; then the video is on the home page with its thumbnail.
   await expect(async () => {
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: `Morning in Kigali ${run}` })).toBeVisible({ timeout: 2000 });
+    await expect(page.getByRole('heading', { name: `Morning in Kigali ${run}` }).first()).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 30_000 });
   const thumb = page.getByRole('link', { name: `Morning in Kigali ${run}` }).first().locator('img');
   await expect(thumb).toHaveAttribute('src', /\/pub\/[0-9a-f-]{36}\/thumbs\/\d\.jpg$/);
-  await page.getByRole('heading', { name: `Morning in Kigali ${run}` }).click();
+  await page.getByRole('heading', { name: `Morning in Kigali ${run}` }).first().click();
   await expect(page).toHaveURL(/\/watch\?v=/);
   await expect(page.locator('video')).toBeAttached();
   const master = await page.evaluate(async () => (await (await fetch(`/api/videos/${new URLSearchParams(location.search).get('v')}`)).json()).video.playbackUrl as string);

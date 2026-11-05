@@ -119,6 +119,7 @@ model User {
   comments              Comment[]
   playlists             Playlist[]
   watchHistories        WatchHistory[]
+  interests             UserInterest[]
   reportsFiled          Report[]          @relation("UserReportsFiled")
   moderatorActions      ModerationAction[]
   auditLogs             AuditLog[]
@@ -319,8 +320,22 @@ model Category {
   description           String?
   videos                Video[]
   campaigns             CampaignCategory[]
+  interestedUsers       UserInterest[]
 
   @@index([slug])
+}
+
+// Topics a person picked for their "For you" home. The home is built only from these, the creators they tune in
+// to and recency: no watch-behaviour ranking.
+model UserInterest {
+  userId                String
+  categoryId            String
+  createdAt             DateTime          @default(now())
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category              Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([userId, categoryId])
+  @@index([categoryId])
 }
 
 model Tag {

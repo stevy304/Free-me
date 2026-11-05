@@ -73,7 +73,7 @@ export function UploadDialog() {
             <div className="grid h-36 w-36 place-items-center rounded-full bg-surface text-muted"><Icon.Upload size={56} strokeWidth={1.4} /></div>
             <p className="mt-6 text-[15px]">Drag and drop a video file to upload</p>
             <p className="mt-1 text-[13px] text-muted">Your video stays private until you publish it.</p>
-            <button type="button" onClick={() => input.current?.click()} className="mt-6 h-10 rounded-full bg-strong px-5 text-[14px] font-medium text-on-strong hover:opacity-90">Select file</button>
+            <button type="button" onClick={() => input.current?.click()} className="mt-6 h-10 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand hover:opacity-90">Select file</button>
             <input ref={input} type="file" accept={ACCEPT} hidden onChange={(e) => { pick(e.target.files); e.target.value = ''; }} />
             <p className="mt-8 max-w-md text-[12px] leading-5 text-faint">MP4, MOV, MKV, WebM, AVI and other common formats. Large files upload in parts and resume if your connection drops: choose the same file again to continue.</p>
           </div>

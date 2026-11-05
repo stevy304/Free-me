@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, Plus_Jakarta_Sans } from 'next/font/google';
 import { cookies } from 'next/headers';
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
@@ -7,6 +7,7 @@ import { getLocale, getViewer } from '@/lib/server-api';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin', 'latin-ext'], variable: '--font-inter', display: 'swap' });
+const jakarta = Plus_Jakarta_Sans({ subsets: ['latin', 'latin-ext'], weight: ['600', '700', '800'], variable: '--font-jakarta', display: 'swap' });
 
 export const metadata: Metadata = {
   title: { default: 'Free Me', template: '%s - Free Me' },
@@ -14,7 +15,7 @@ export const metadata: Metadata = {
   applicationName: 'Free Me',
 };
 export const viewport: Viewport = {
-  themeColor: [{ media: '(prefers-color-scheme: light)', color: '#ffffff' }, { media: '(prefers-color-scheme: dark)', color: '#0a1110' }],
+  themeColor: [{ media: '(prefers-color-scheme: light)', color: '#f7f5ef' }, { media: '(prefers-color-scheme: dark)', color: '#0a1110' }],
   width: 'device-width', initialScale: 1,
 };
 
@@ -25,9 +26,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const [viewer, jar, locale] = await Promise.all([getViewer().catch(() => null), cookies(), getLocale()]);
   const theme = jar.get('fm_theme')?.value;
   return (
-    <html lang={viewer?.profile?.preferredLanguage ?? 'en'} className={`${inter.variable} ${theme === 'dark' ? 'dark' : ''}`} suppressHydrationWarning>
+    <html lang={viewer?.profile?.preferredLanguage ?? 'en'} className={`${inter.variable} ${jakarta.variable} ${theme === 'dark' ? 'dark' : ''}`} suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} /></head>
-      <body className="font-sans">
+      {/* Browser extensions (Grammarly, password managers…) add attributes to <body> before React loads. */}
+      <body className="font-sans" suppressHydrationWarning>
         <AppShell viewer={viewer} locale={locale}>{children}</AppShell>
       </body>
     </html>

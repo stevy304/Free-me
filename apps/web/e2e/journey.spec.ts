@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 
 /**
  * The main journeys, in a real browser, against the real API and database:
- * sign in with an emailed code, create a channel, follow from a second account, edit a profile, search, sign out.
+ * sign in with an emailed code, create a channel, tune in from a second account, edit a profile, search, sign out.
  * Needs: the web app at E2E_BASE_URL and an API started with MAIL_TRANSPORT=console logging to E2E_API_LOG.
  */
 const LOG = process.env.E2E_API_LOG ?? '';
@@ -28,7 +28,7 @@ async function signIn(page: Page, email: string, returnTo = '/') {
   await page.waitForURL((u) => u.pathname === returnTo.split('?')[0]);
 }
 
-test('a creator signs in, creates a channel; a viewer follows, edits their profile, searches and signs out', async ({ browser }) => {
+test('a creator signs in, creates a channel; a viewer tunes in, edits their profile, searches and signs out', async ({ browser }) => {
   test.skip(!LOG, 'Set E2E_API_LOG to the API log (MAIL_TRANSPORT=console).');
   const handle = `e2e.${run}`;
 
@@ -40,19 +40,19 @@ test('a creator signs in, creates a channel; a viewer follows, edits their profi
   await creator.getByLabel('Handle').fill(handle);
   await expect(creator.getByLabel('Available')).toBeVisible();
   await creator.getByLabel('Country').selectOption('KE');
-  await creator.getByRole('button', { name: 'Create channel' }).click();
+  await creator.getByRole('button', { name: 'Create Space' }).click();
   await expect(creator.getByRole('heading', { name: 'End to End Kitchen' })).toBeVisible();
-  await expect(creator.getByRole('link', { name: 'Customize channel' })).toBeVisible();
+  await expect(creator.getByRole('link', { name: 'Edit your Space' })).toBeVisible();
 
   const viewer = await (await browser.newContext({ locale: 'fr-FR' })).newPage();
   const errors: string[] = [];
   viewer.on('pageerror', (e) => errors.push(e.message));
   await signIn(viewer, `viewer.${run}@example.com`);
   await viewer.goto(`/@${handle}`);
-  await viewer.getByRole('button', { name: 'Follow', exact: true }).click();
-  await expect(viewer.getByRole('button', { name: 'Following' })).toBeVisible();
+  await viewer.getByRole('button', { name: 'Tune in', exact: true }).click();
+  await expect(viewer.getByRole('button', { name: 'Tuned in' })).toBeVisible();
   await viewer.reload();
-  await expect(viewer.getByText('1 follower')).toBeVisible();
+  await expect(viewer.getByText('1 tuned in').first()).toBeVisible();
   await viewer.goto('/following');
   await expect(viewer.getByRole('main').getByText('End to End Kitchen')).toBeVisible();
 
@@ -64,7 +64,9 @@ test('a creator signs in, creates a channel; a viewer follows, edits their profi
   await viewer.reload();
   await expect(viewer.locator('#country')).toHaveValue('JP');
 
-  await viewer.getByRole('combobox', { name: 'Search' }).fill('End to End');
+  // Find opens with "/" anywhere; Enter shows all results.
+  await viewer.keyboard.press('/');
+  await viewer.getByRole('dialog', { name: 'Find' }).getByRole('textbox', { name: 'Find' }).fill('End to End');
   await viewer.keyboard.press('Enter');
   await expect(viewer).toHaveURL(/\/results\?q=End/);
   await expect(viewer.getByText(`@${handle}`)).toBeVisible();
@@ -77,11 +79,11 @@ test('a creator signs in, creates a channel; a viewer follows, edits their profi
   expect(errors).toEqual([]);
 });
 
-test('unknown pages and channels show a clear message; phones get the bottom bar without sideways scrolling', async ({ browser }) => {
+test('unknown pages and channels show a clear message; phones get the floating dock without sideways scrolling', async ({ browser }) => {
   const page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })).newPage();
   await page.goto('/@no-such-channel-here');
   await expect(page.getByRole('heading', { name: "This page isn't available" })).toBeVisible();
   await page.goto('/');
-  await expect(page.getByRole('navigation', { name: 'Main' }).last().getByRole('link', { name: 'Home' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Main' }).last().getByRole('link', { name: 'For you' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
 });

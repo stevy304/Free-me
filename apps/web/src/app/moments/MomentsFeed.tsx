@@ -16,7 +16,7 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
   const [paused, setPaused] = useState(false);
   const [progress, setProgress] = useState(0);
   const watched = useRef(0); const last = useRef(0); const sent = useRef(false);
-  const { locale } = useShell();
+  const { locale, viewer } = useShell();
 
   useEffect(() => {
     const video = el.current; if (!video || !v.playbackUrl) return;
@@ -46,27 +46,47 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
       fetch(`/api/videos/${v.id}/views`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ watchedSeconds: Math.round(watched.current) }) }).catch(() => undefined);
     }
   };
-  const share = async () => { const url = `${location.origin}/watch?v=${v.id}`; try { if (navigator.share) await navigator.share({ title: v.title, url }); else await navigator.clipboard.writeText(url); } catch { /* dismissed */ } };
+  const share = async () => { const url = `${location.origin}/watch?v=${v.id}`; try { if (navigator.share) await navigator.share({ title: v.title, url }); else { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1800); } } catch { /* dismissed */ } };
+  // Spark state is read the first time this Moment comes on screen.
+  const [spark, setSpark] = useState<{ on: boolean; count: number } | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!active || spark) return;
+    fetch(`/api/videos/${v.id}`).then((r) => r.ok ? r.json() : null).then((d) => d && setSpark({ on: d.viewer?.reaction === 'like', count: d.video.likeCount })).catch(() => undefined);
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleSpark = async () => {
+    if (!viewer) { window.location.href = `/login?returnTo=${encodeURIComponent('/moments')}`; return; }
+    const cur = spark ?? { on: false, count: 0 };
+    const next = { on: !cur.on, count: cur.count + (cur.on ? -1 : 1) };
+    setSpark(next);
+    const r = await fetch(`/api/videos/${v.id}/reaction`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value: next.on ? 'like' : 'none' }) }).catch(() => null);
+    if (r?.ok) { const d = await r.json(); setSpark({ on: next.on, count: d.likeCount }); } else setSpark(cur);
+  };
+  const action = 'grid h-12 w-12 place-items-center rounded-2xl backdrop-blur';
 
   return (
-    <section className="flex h-full snap-start snap-always items-center justify-center gap-3 py-3" aria-label={v.title}>
-      <div className="relative h-full max-h-[calc(100dvh-7rem)] aspect-[9/16] overflow-hidden rounded-2xl bg-black">
+    <section className="relative flex h-full snap-start snap-always items-center justify-center gap-4 py-3" aria-label={v.title}>
+      <div className="relative aspect-[9/16] h-full max-h-[calc(100dvh-8rem)] overflow-hidden rounded-[26px] bg-black shadow-[var(--shadow)]">
         <video ref={el} loop playsInline poster={v.thumbnailUrl ?? undefined} className="h-full w-full object-cover"
           onClick={() => { const x = el.current!; if (x.paused) void x.play(); else x.pause(); }} onPlay={() => setPaused(false)} onPause={() => setPaused(true)} onTimeUpdate={onTime} />
         <div className="absolute inset-x-0 top-0 flex justify-between p-3">
-          <button type="button" onClick={() => { const x = el.current!; if (x.paused) void x.play(); else x.pause(); }} aria-label={paused ? 'Play' : 'Pause'} className="grid h-10 w-10 place-items-center rounded-full bg-black/40 text-white">{paused ? <Icon.Play size={20} /> : <Icon.Pause size={20} />}</button>
-          <button type="button" onClick={() => setMuted(!muted)} aria-label={muted ? 'Unmute' : 'Mute'} className="grid h-10 w-10 place-items-center rounded-full bg-black/40 text-white">{muted ? <Icon.VolumeOff size={20} /> : <Icon.VolumeHigh size={20} />}</button>
+          <button type="button" onClick={() => { const x = el.current!; if (x.paused) void x.play(); else x.pause(); }} aria-label={paused ? 'Play' : 'Pause'} className="grid h-10 w-10 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{paused ? <Icon.Play size={20} /> : <Icon.Pause size={20} />}</button>
+          <button type="button" onClick={() => setMuted(!muted)} aria-label={muted ? 'Unmute' : 'Mute'} className="grid h-10 w-10 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{muted ? <Icon.VolumeOff size={20} /> : <Icon.VolumeHigh size={20} />}</button>
         </div>
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-4 pt-16 text-white">
           <Link href={`/@${v.channel.handle}`} className="flex items-center gap-2 text-[14px] font-semibold"><Avatar name={v.channel.name} src={v.channel.avatarUrl} size={32} />@{v.channel.handle}</Link>
           <p className="mt-2 line-clamp-2 text-[14px]">{v.title}</p>
           <p className="mt-1 text-[12px] opacity-80" suppressHydrationWarning>{viewsLabel(v.viewCount, locale)}</p>
         </div>
-        <div className="absolute inset-x-0 bottom-0 h-0.5 bg-white/30"><div className="h-full bg-white" style={{ width: `${progress * 100}%` }} /></div>
+        <div className="absolute inset-x-4 bottom-2 h-1 overflow-hidden rounded-full bg-white/25"><div className="h-full rounded-full bg-[#f5b95c]" style={{ width: `${progress * 100}%` }} /></div>
       </div>
-      <div className="hidden flex-col items-center gap-1 self-end pb-6 sm:flex">
-        <button type="button" onClick={share} aria-label="Share" className="grid h-12 w-12 place-items-center rounded-full bg-surface hover:bg-surface-hover"><Icon.Share size={22} /></button>
-        <span className="text-[12px]">Share</span>
+      {/* Actions: beside the video on wide screens, over it on phones. */}
+      <div className="absolute bottom-24 right-5 flex flex-col items-center gap-3 text-[11px] font-semibold text-white sm:static sm:self-end sm:pb-6 sm:text-ink">
+        <button type="button" onClick={toggleSpark} aria-pressed={!!spark?.on} aria-label="Spark" className={`${action} ${spark?.on ? 'bg-accent-soft text-accent' : 'bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover'}`}><Icon.Spark size={24} filled={!!spark?.on} /></button>
+        <span suppressHydrationWarning>{spark ? spark.count : ''}</span>
+        <Link href={`/watch?v=${v.id}`} aria-label="Conversation" className={`${action} bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover`}><Icon.Comment size={22} /></Link>
+        <button type="button" onClick={share} aria-label="Pass along" className={`${action} bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover`}><Icon.PassAlong size={22} /></button>
+        <span>{copied ? 'Copied' : 'Pass'}</span>
       </div>
     </section>
   );
@@ -106,12 +126,12 @@ export function MomentsFeed({ first }: { first: VideoPage }) {
 
   return (
     <div className="relative">
-      <div ref={box} className="no-scrollbar mx-auto h-[calc(100dvh-3.5rem-3rem)] snap-y snap-mandatory overflow-y-auto md:h-[calc(100dvh-3.5rem)]">
+      <div ref={box} className="no-scrollbar mx-auto h-[calc(100dvh-4rem-6.5rem)] snap-y snap-mandatory overflow-y-auto md:h-[calc(100dvh-4rem-2.5rem)]">
         {items.map((v, i) => <div key={v.id} data-index={i} className="h-full"><Moment v={v} muted={muted} setMuted={setMuted} active={i === active} /></div>)}
       </div>
       <div className="absolute right-6 top-1/2 hidden -translate-y-1/2 flex-col gap-3 lg:flex">
-        <button type="button" onClick={() => go(-1)} disabled={active === 0} aria-label="Previous Moment" className="grid h-12 w-12 place-items-center rounded-full bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronUp size={24} /></button>
-        <button type="button" onClick={() => go(1)} disabled={active >= items.length - 1} aria-label="Next Moment" className="grid h-12 w-12 place-items-center rounded-full bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronDown size={24} /></button>
+        <button type="button" onClick={() => go(-1)} disabled={active === 0} aria-label="Previous Moment" className="grid h-12 w-12 place-items-center rounded-2xl bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronUp size={24} /></button>
+        <button type="button" onClick={() => go(1)} disabled={active >= items.length - 1} aria-label="Next Moment" className="grid h-12 w-12 place-items-center rounded-2xl bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronDown size={24} /></button>
       </div>
     </div>
   );

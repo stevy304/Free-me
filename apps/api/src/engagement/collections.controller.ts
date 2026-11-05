@@ -24,7 +24,7 @@ class EditCollectionDto {
 
 const MAX_COLLECTIONS = 200;
 
-/** Collections: the private "Saved" list every account has, plus named collections that can be shared. */
+/** Collections: the private "Kept" list every account has (stored as kind SAVED), plus named collections that can be shared. */
 @ApiTags('collections')
 @Controller()
 export class CollectionsController {
@@ -51,7 +51,7 @@ export class CollectionsController {
       this.prisma.playlistItem.count({ where }),
       this.prisma.playlistItem.findFirst({ where, orderBy: [{ position: 'desc' }], include: { video: { include: { channel: true } } } }),
     ]);
-    return { id: p.id, kind: p.kind, title: p.title, description: p.description, visibility: p.visibility, updatedAt: p.updatedAt, videoCount: count, thumbnailUrl: first ? this.urls.publicThumb(first.video) : null };
+    return { id: p.id, kind: p.kind, title: p.kind === 'SAVED' ? 'Kept' : p.title, description: p.description, visibility: p.visibility, updatedAt: p.updatedAt, videoCount: count, thumbnailUrl: first ? this.urls.publicThumb(first.video) : null };
   }
 
   @Get('me/collections')
@@ -88,7 +88,7 @@ export class CollectionsController {
   @ApiOperation({ summary: 'Rename a collection or change who can see it ("Saved" is always private)' })
   async edit(@Param('id') id: string, @Body() body: EditCollectionDto, @CurrentAuth() auth: AuthContext) {
     const p = await this.own(auth, id);
-    if (p.kind === 'SAVED') throw new BadRequestException('"Saved" cannot be renamed or shared.');
+    if (p.kind === 'SAVED') throw new BadRequestException('"Kept" cannot be renamed or shared.');
     const data: Record<string, unknown> = {};
     if (body.title !== undefined) { const t = body.title.trim(); if (!t) throw new BadRequestException('Give the collection a name.'); data.title = t; }
     if (body.description !== undefined) data.description = body.description.trim() || null;
@@ -102,7 +102,7 @@ export class CollectionsController {
   @ApiOperation({ summary: 'Delete a collection (the videos themselves are not affected)' })
   async remove(@Param('id') id: string, @CurrentAuth() auth: AuthContext) {
     const p = await this.own(auth, id);
-    if (p.kind === 'SAVED') throw new BadRequestException('"Saved" cannot be deleted. Remove videos from it instead.');
+    if (p.kind === 'SAVED') throw new BadRequestException('"Kept" cannot be deleted. Remove videos from it instead.');
     await this.prisma.playlist.delete({ where: { id: p.id } });
     return { deleted: true };
   }

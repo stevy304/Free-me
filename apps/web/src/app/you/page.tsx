@@ -13,13 +13,13 @@ export default async function You() {
     return (
       <div className="mx-auto max-w-md px-6 py-16 text-center">
         <h1 className="text-xl font-semibold">Enjoy your favourite videos</h1>
-        <p className="mt-2 text-[15px] text-muted">Sign in to follow channels, save videos and keep your settings on every device.</p>
-        <Link href="/login?returnTo=/you" className="mt-6 inline-flex h-10 items-center rounded-full border border-line px-5 text-[14px] font-medium text-brand">Sign in</Link>
+        <p className="mt-2 text-[15px] text-muted">Sign in to tune in to creators, keep videos for later and use your settings on every device.</p>
+        <Link href="/login?returnTo=/you" className="mt-6 inline-flex h-10 items-center rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand">Sign in</Link>
       </div>
     );
   }
   const name = viewer.profile?.displayName ?? viewer.user.email;
-  const row = 'flex items-center gap-4 rounded-xl px-3 py-3 text-[15px] hover:bg-surface';
+  const row = 'flex items-center gap-4 rounded-2xl px-3 py-3 text-[15px] font-medium hover:bg-surface';
   return (
     <div className="mx-auto max-w-xl px-4 py-6">
       <div className="flex items-center gap-4">
@@ -28,12 +28,12 @@ export default async function You() {
       </div>
       <nav className="mt-6">
         {viewer.channel
-          ? <Link href={`/@${viewer.channel.handle}`} className={row}><Icon.Channel size={22} strokeWidth={1.6} /><span className="flex-1">Your channel</span><Icon.ChevronRight size={18} /></Link>
-          : <Link href="/channel/create" className={row}><Icon.PersonAdd size={22} strokeWidth={1.6} /><span className="flex-1">Create a channel</span><Icon.ChevronRight size={18} /></Link>}
+          ? <Link href={`/@${viewer.channel.handle}`} className={row}><Icon.Channel size={22} strokeWidth={1.6} /><span className="flex-1">Your Space</span><Icon.ChevronRight size={18} /></Link>
+          : <Link href="/channel/create" className={row}><Icon.PersonAdd size={22} strokeWidth={1.6} /><span className="flex-1">Create your Space</span><Icon.ChevronRight size={18} /></Link>}
         {viewer.channel && <Link href="/hub" className={row}><Icon.Hub size={22} /><span className="flex-1">Creator Hub</span><Icon.ChevronRight size={18} /></Link>}
-        <Link href="/history" className={row}><Icon.History size={22} /><span className="flex-1">History</span><Icon.ChevronRight size={18} /></Link>
+        <Link href="/trail" className={row}><Icon.Trail size={22} /><span className="flex-1">Trail</span><Icon.ChevronRight size={18} /></Link>
         <Link href="/collections" className={row}><Icon.Collections size={22} /><span className="flex-1">Collections</span><Icon.ChevronRight size={18} /></Link>
-        <Link href="/collection/saved" className={row}><Icon.Bookmark size={22} /><span className="flex-1">Saved</span><Icon.ChevronRight size={18} /></Link>
+        <Link href="/collection/saved" className={row}><Icon.Bookmark size={22} /><span className="flex-1">Kept</span><Icon.ChevronRight size={18} /></Link>
         <Link href="/you/reports" className={row}><Icon.Flag size={22} /><span className="flex-1">Your reports</span><Icon.ChevronRight size={18} /></Link>
         <Link href="/settings" className={row}><Icon.Settings size={22} strokeWidth={1.6} /><span className="flex-1">Settings</span><Icon.ChevronRight size={18} /></Link>
         {viewer.user.roles.some((r) => r === 'ADMIN' || r === 'MODERATOR') && <Link href="/moderation" className={row}><Icon.Flag size={22} /><span className="flex-1">Moderation</span><Icon.ChevronRight size={18} /></Link>}

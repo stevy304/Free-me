@@ -15,7 +15,8 @@ Phases 1 (foundation) and 2 (video upload and playback) are built and tested. La
 | **Video upload**: resumable multipart uploads straight to object storage, up to 20 GB per file by default | Payouts (phase 5) |
 | **Processing**: FFmpeg worker turns every upload into adaptive HLS from 144p up to 4K (never upscaled), SD playable first, HD follows; thumbnails; Moments (short vertical videos) detected automatically | Monitoring, load tests, production rollout (phase 6) |
 | **Playback**: adaptive player (quality and speed menus, theater, picture-in-picture, keyboard shortcuts, resume where you stopped), Moments feed, home feed, search, Creator Hub to manage videos | |
-| **Community**: likes (dislikes visible only to the creator), comments with replies and pinning, watch history, Saved and shareable collections | |
+| **Community**: Spark (public) and Not for me (private, seen only by the creator), Conversation with replies and pinning, Trail (watch history with resume), Kept and shareable Collections, Tune in to Spaces | |
+| **Own identity**: header tabs (For you, Following, Moments, Explore), Find panel (press `/`), interest-based For you home with no behaviour tracking, stage-style watch page with a floating player capsule, Free Me icon set, Plus Jakarta Sans + Inter, lagoon/saffron/paper palette | |
 | **Trust and safety**: reports, copyright notices and counter-notices, a moderation queue with removal and restore, strikes, decision emails; Terms, Privacy Policy, Community Guidelines and Copyright pages | |
 | Public and unlisted videos from the CDN; private videos only through short-lived signed links; views counted in Redis and written in batches | |
 | Administration: roles, suspension, audit log | |

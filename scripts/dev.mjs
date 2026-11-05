@@ -22,7 +22,7 @@ const fail = (msg) => { console.error(`${C.err}[dev] ${msg}${C.off}`); process.e
 const has = (cmd) => spawnSync('sh', ['-c', `command -v ${cmd}`]).status === 0;
 const run = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', ...opts });
 const quiet = (cmd) => spawnSync('sh', ['-c', cmd], { stdio: 'ignore' }).status === 0;
-const sudo = process.getuid?.() === 0 ? '' : 'sudo ';
+const sudo = process.getuid?.() === 0 ? '' : 'sudo -n ';
 
 // 1. Configuration.
 if (!existsSync('node_modules')) { say('Installing packages (npm install)…'); run('npm install'); }
@@ -89,9 +89,11 @@ if (local(db.hostname) && has('psql')) {
       SELECT 'CREATE DATABASE "${name}" OWNER "${user}"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${q(name)}')\\gexec
 `;
     // Run psql as the postgres system user (peer authentication), with the SQL on standard input.
-    const asPostgres = sudo ? ['sudo', ['-u', 'postgres', 'psql', '-q', '-v', 'ON_ERROR_STOP=1']] : ['su', ['postgres', '-c', 'psql -q -v ON_ERROR_STOP=1']];
+    // `sudo su postgres` rather than `sudo -u postgres`: Codespaces and many servers allow password-free sudo only as root.
+    // -n: never stop to ask for a password.
+    const asPostgres = sudo ? ['sudo', ['-n', 'su', 'postgres', '-c', 'psql -q -v ON_ERROR_STOP=1']] : ['su', ['postgres', '-c', 'psql -q -v ON_ERROR_STOP=1']];
     const r = spawnSync(asPostgres[0], asPostgres[1], { input: sql, stdio: ['pipe', 'inherit', 'inherit'] });
-    if (r.status !== 0) fail('Could not create the database user. Check that PostgreSQL is running and DATABASE_URL in .env is right.');
+    if (r.status !== 0) fail(`Could not create the database user. Create it yourself, then run npm run dev again:\n  sudo su postgres -c "psql -c \\"CREATE ROLE ${user} LOGIN CREATEDB PASSWORD '${pass}'\\""\n  sudo su postgres -c "createdb -O ${user} ${name}"`);
   }
 }
 say('Applying database migrations…');

@@ -39,6 +39,8 @@ Request pipeline: Helmet headers → cookie parser → session middleware (attac
 - `components/shell`: top bar with search and suggestions, sidebar (full on wide screens, narrow rail on tablets, drawer on phones), bottom bar on phones, account menu with theme choice.
 - `components/video`: cards, rows, the infinite grid, category chips.
 - `app/*`: pages: home, Moments, Following, search results, watch (likes, save, share, report, comments, resume), channel (`/@handle`), create channel, Creator Hub (videos, removals and notices), History, Collections, Saved, Your reports, Moderation, legal pages (Terms, Privacy, Community Guidelines, Copyright and the notice form), settings, sign-in, You, administration.
+- Navigation: no sidebar. A header with four tabs (For you, Following, Moments, Explore), the Find panel (`/` or Ctrl/Cmd+K) and the account menu; a floating dock on phones.
+- Words: Space (channel), Tune in / Tuned in (follow), Spark (public like), Not for me (private dislike), Keep / Kept (save), Pass along (share), Conversation (comments), Trail (history), Keep watching (next videos).
 - `components/icons`: the Free Me icon set, drawn for this app (24 px grid, 1.75 px rounded stroke; filled variants mark the current page). No third-party icon library.
 - Old addresses redirect: `/shorts` → `/moments`, `/studio` → `/hub`, `/feed/subscriptions` → `/following`.
 - Design tokens (light and dark) are CSS variables in `globals.css`; components never hard-code colours.

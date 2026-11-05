@@ -10,8 +10,9 @@ export function viewsLabel(n: number | string, locale?: string): string {
   return `${compactNumber(v, locale)} ${v === 1 ? 'view' : 'views'}`;
 }
 
+/** "4.8K tuned in": how many people tune in to a Space. */
 export function followersLabel(n: number, locale?: string): string {
-  return `${compactNumber(n, locale)} ${n === 1 ? 'follower' : 'followers'}`;
+  return `${compactNumber(n, locale)} tuned in`;
 }
 
 const UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [['year', 31_536_000], ['month', 2_592_000], ['week', 604_800], ['day', 86_400], ['hour', 3600], ['minute', 60], ['second', 1]];
