@@ -7,6 +7,8 @@ import { AUDIO, FAST_RUNGS, codecsFor, masterPlaylist, planLadder, type MasterEn
 import { BT709_TAGS, ffmpegFilters, loudnessFilter, measureLoudness, toneMap, type Hdr, type Loudness } from './filters';
 import { MediaError, probe, run, type ProbeResult } from './probe';
 import { mediaPrefix, wantedLocation } from './keys';
+import { LATE_FOLDERS } from './captions';
+import { extractSpeech } from './autocaptions';
 import type { Storage } from './storage';
 
 const TYPES: Record<string, string> = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg' };
@@ -40,9 +42,10 @@ export class VideoProcessor {
     await this.prisma.video.update({ where: { id }, data: { processingProgress: Math.max(0, Math.min(100, Math.round(progress))), processingStage: stage, ...extra } as never });
   }
 
-  async process(videoId: string, signal?: AbortSignal): Promise<void> {
+  /** Returns the extracted speech track (outside the work folder) when automatic captions should be made from it. */
+  async process(videoId: string, signal?: AbortSignal): Promise<{ speech: string | null }> {
     const video = await this.prisma.video.findUnique({ where: { id: videoId } });
-    if (!video?.sourceFileS3Key) return; // deleted, or never uploaded
+    if (!video?.sourceFileS3Key) return { speech: null }; // deleted, or never uploaded
     const work = join(this.config.media.scratchDir, videoId);
     await rm(work, { recursive: true, force: true });
     await mkdir(work, { recursive: true });
@@ -74,6 +77,11 @@ export class VideoProcessor {
         await this.publish(videoId, work, full, info, done, null, 'Ready', 100);
       }
       this.log.log(`${videoId}: ${ladder.map((r) => r.name).join(', ')} from ${info.width}x${info.height} ${info.durationSeconds.toFixed(1)}s`);
+      if (!this.config.media.whisper || !info.hasAudio) return { speech: null };
+      // The speech track for automatic captions, kept after the work folder goes; captioning runs after the lock.
+      const speech = join(this.config.media.scratchDir, `${videoId}.speech.wav`);
+      try { await extractSpeech(this.config.media.ffmpegPath, source, speech, signal); return { speech }; }
+      catch (e) { this.log.warn(`${videoId}: could not extract speech: ${(e as Error).message.slice(0, 200)}`); return { speech: null }; }
     } finally {
       await rm(work, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -203,7 +211,7 @@ export class VideoProcessor {
     } });
     if (moveFrom) {
       // A custom thumbnail saved to the old place while this pass ran is picked up here (see the thumbnail upload).
-      await this.storage.copyPrefix(`${moveFrom}thumbs/`, `${prefix}thumbs/`);
+      for (const dir of LATE_FOLDERS) await this.storage.copyPrefix(moveFrom + dir, prefix + dir);
       await this.storage.deletePrefix(moveFrom);
     }
   }

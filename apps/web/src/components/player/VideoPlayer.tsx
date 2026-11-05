@@ -3,6 +3,9 @@
 import * as Icon from '@/components/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type Hls from 'hls.js';
+import { languageName } from '@free-me/shared';
+
+export interface CaptionTrack { language: string; auto: boolean; url: string }
 
 interface Level { index: number; height: number; width: number; label: string }
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -16,15 +19,17 @@ const label = (h: number, w: number) => `${Math.min(h, w)}p`;
 
 /**
  * Adaptive video player: hls.js (Safari plays HLS natively), quality and speed menus, theater mode, picture-in-picture,
- * fullscreen and the usual keyboard shortcuts (k/space, j/l, arrows, m, f, t, 0-9, <, >). A view is reported once,
+ * fullscreen, captions and the usual keyboard shortcuts (k/space, j/l, arrows, m, f, t, c, 0-9, <, >). A view is reported once,
  * after real watching (30 s, or half of a short video). `startAt` resumes where the viewer stopped; `onProgress` is
  * called every 10 seconds of playback, on pause, at the end and when the page is left, to remember the position.
  */
-export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange, storyboard }: {
+export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange, storyboard, captions = [] }: {
   src: string; poster?: string | null; videoId?: string; durationHint?: number; autoPlay?: boolean; theater?: boolean; onTheater?: () => void; onEnded?: () => void;
   startAt?: number; onProgress?: (seconds: number, ended: boolean) => void; onPlayingChange?: (playing: boolean) => void;
   /** WebVTT of seek-bar previews (cues point into a sprite sheet with #xywh). */
   storyboard?: string | null;
+  /** Subtitle tracks (WebVTT), drawn by the player above its controls. */
+  captions?: CaptionTrack[];
 }) {
   const box = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -40,7 +45,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const [levels, setLevels] = useState<Level[]>([]);
   const [level, setLevel] = useState(-1); // -1 = auto
   const [playingLevel, setPlayingLevel] = useState<number | null>(null);
-  const [menu, setMenu] = useState<null | 'main' | 'quality' | 'speed'>(null);
+  const [menu, setMenu] = useState<null | 'main' | 'quality' | 'speed' | 'captions'>(null);
+  const { cc, chooseCc, cueText } = useCaptions(video, captions);
   const [idle, setIdle] = useState(false);
   const [full, setFull] = useState(false);
   const [hover, setHover] = useState<{ x: number; t: number; w: number } | null>(null);
@@ -168,13 +174,14 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
       else if (k === 'm') { handled(); setVol(el.volume || 1, !el.muted); }
       else if (k === 'f') { handled(); fullscreen(); }
       else if (k === 't' && onTheater) { handled(); onTheater(); }
+      else if (k === 'c' && captions.length) { handled(); chooseCc(cc ? null : 'last'); }
       else if (/^[0-9]$/.test(k)) { handled(); seek(((el.duration || duration) * Number(k)) / 10); }
       else if (e.key === '>' ) { handled(); setRate(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(speed) + 1)]); }
       else if (e.key === '<') { handled(); setRate(SPEEDS[Math.max(0, SPEEDS.indexOf(speed) - 1)]); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toggle, seek, poke, onTheater, duration, speed]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [toggle, seek, poke, onTheater, duration, speed, cc, captions.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { const f = () => setFull(!!document.fullscreenElement); document.addEventListener('fullscreenchange', f); return () => document.removeEventListener('fullscreenchange', f); }, []);
 
@@ -205,7 +212,15 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
       <video ref={video} playsInline poster={poster ?? undefined} className="h-full w-full" onPointerUp={onTap} onClick={(e) => { if ((e.nativeEvent as PointerEvent).pointerType === 'touch') return; toggle(); }} onDoubleClick={(e) => { if ((e.nativeEvent as PointerEvent).pointerType === 'touch') return; fullscreen(); }}
         onPlay={() => setPlaying(true)} onPause={() => { setPlaying(false); save(); }} onWaiting={() => setWaiting(true)} onPlaying={() => setWaiting(false)} onCanPlay={() => setWaiting(false)}
         onTimeUpdate={onTime} onDurationChange={(e) => setDuration(e.currentTarget.duration)} onEnded={() => { setPlaying(false); save(true); onEnded?.(); }}
-        onVolumeChange={(e) => { setMuted(e.currentTarget.muted); setVolume(e.currentTarget.volume); }} />
+        onVolumeChange={(e) => { setMuted(e.currentTarget.muted); setVolume(e.currentTarget.volume); }}>
+        {captions.map((c) => <track key={c.language} kind="subtitles" src={c.url} srcLang={c.language} label={captionLabel(c)} />)}
+      </video>
+      {/* Captions: drawn here (not by the browser) so they sit above the floating controls and match the design. */}
+      {cueText && (
+        <div className={`pointer-events-none absolute inset-x-0 flex justify-center px-3 transition-[bottom] duration-200 ${showUi ? 'bottom-[60px] sm:bottom-[84px]' : 'bottom-3 sm:bottom-8'}`}>
+          <span className="max-w-[88%] whitespace-pre-line rounded-lg bg-[rgb(5_10_10/0.8)] px-2.5 py-1 text-center text-[13px] font-semibold leading-snug text-white sm:max-w-[72%] sm:px-3.5 sm:py-1.5 sm:text-[19px]">{cueText}</span>
+        </div>
+      )}
       {waiting && !error && <Icon.Spinner className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/90" />}
       {flash && <div className="pointer-events-none absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 animate-ping place-items-center rounded-full bg-[rgb(43_181_171/0.6)] text-white [animation-iteration-count:1]">{flash === 'play' ? <Icon.Play size={30} /> : <Icon.Pause size={30} />}</div>}
       {!playing && !waiting && !error && showUi && (
@@ -226,6 +241,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
                 <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/50">Playback</p>
                 <button type="button" className="flex w-full items-center justify-between rounded-xl px-3 py-3 hover:bg-white/10" onClick={() => setMenu('speed')}><span>Speed</span><span className="flex items-center gap-1 text-white/70">{speed === 1 ? 'Normal' : `${speed}×`}<Icon.ChevronRight size={16} /></span></button>
                 {levels.length > 0 && <button type="button" className="flex w-full items-center justify-between rounded-xl px-3 py-3 hover:bg-white/10" onClick={() => setMenu('quality')}><span>Quality</span><span className="flex items-center gap-1 text-white/70">{autoLabel}<Icon.ChevronRight size={16} /></span></button>}
+                {captions.length > 0 && <button type="button" className="flex w-full items-center justify-between rounded-xl px-3 py-3 hover:bg-white/10" onClick={() => setMenu('captions')}><span>Subtitles</span><span className="flex items-center gap-1 text-white/70">{cc ? captionLabel(captions.find((c) => c.language === cc)!) : 'Off'}<Icon.ChevronRight size={16} /></span></button>}
               </>
             )}
             {menu === 'speed' && (
@@ -234,6 +250,13 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
                 <div className="grid grid-cols-4 gap-1.5 p-1.5">
                   {SPEEDS.map((sp) => <button key={sp} type="button" role="menuitemradio" aria-checked={speed === sp} className={`rounded-xl py-2.5 text-[13px] font-semibold ${speed === sp ? 'bg-[#2bb5ab] text-[#04201e]' : 'bg-white/10 hover:bg-white/20'}`} onClick={() => { setRate(sp); setMenu(null); }}>{sp === 1 ? '1×' : `${sp}×`}</button>)}
                 </div>
+              </>
+            )}
+            {menu === 'captions' && (
+              <>
+                <button type="button" className="flex w-full items-center gap-2 rounded-xl px-2 py-2 font-semibold hover:bg-white/10" onClick={() => setMenu('main')}><Icon.ChevronLeft size={18} />Subtitles</button>
+                <button type="button" role="menuitemradio" aria-checked={!cc} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/10" onClick={() => { chooseCc(null); setMenu(null); }}><span className="w-4">{!cc && <Icon.Check size={16} />}</span>Off</button>
+                {captions.map((c) => <button key={c.language} type="button" role="menuitemradio" aria-checked={cc === c.language} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/10" onClick={() => { chooseCc(c.language); setMenu(null); }}><span className="w-4">{cc === c.language && <Icon.Check size={16} />}</span>{captionLabel(c)}</button>)}
               </>
             )}
             {menu === 'quality' && (
@@ -283,6 +306,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
             </div>
           </div>
           <button type="button" className={`${btn} sm:hidden`} onClick={() => setVol(volume || 1, !muted)} aria-label={muted ? 'Unmute' : 'Mute'}><VolIcon size={20} /></button>
+          {captions.length > 0 && <button type="button" onClick={() => chooseCc(cc ? null : 'last')} aria-label="Subtitles (c)" aria-pressed={!!cc} className={`grid h-8 shrink-0 place-items-center rounded-lg px-1.5 text-[11px] font-extrabold tracking-wide ${cc ? 'bg-white text-[#04201e]' : 'bg-white/10 text-white hover:bg-white/20'}`}>CC</button>}
           <button type="button" onClick={() => setMenu(menu ? null : 'main')} aria-label="Speed and quality" aria-expanded={menu !== null} className="hidden h-8 shrink-0 items-center rounded-lg bg-white/10 px-2 text-[12px] font-semibold hover:bg-white/20 sm:flex">{level === -1 ? (playingLevel ? `${playingLevel}p` : 'Auto') : autoLabel}{speed !== 1 && ` · ${speed}×`}</button>
           <button type="button" onClick={() => setMenu(menu ? null : 'main')} aria-label="Settings" className={`${btn} sm:hidden`}><Icon.Settings size={19} /></button>
           <button type="button" className={`${btn} hidden sm:grid`} onClick={pip} aria-label="Picture in picture"><Icon.MiniPlayer size={19} /></button>
@@ -332,3 +356,52 @@ function SeekPreview({ hover, cue, label }: { hover: { x: number; w: number }; c
     </span>
   );
 }
+
+const captionLabel = (c: CaptionTrack) => `${languageName(c.language)}${c.auto ? ' (automatic)' : ''}`;
+
+/**
+ * Which subtitle language is on (remembered: once turned on, captions stay on for the next video when its language
+ * is there) and the text of the cue showing now. Tracks run "hidden" so the player draws the text itself.
+ */
+function useCaptions(video: React.RefObject<HTMLVideoElement | null>, captions: CaptionTrack[]) {
+  const [cc, setCc] = useState<string | null>(null);
+  const [cueText, setCueText] = useState('');
+  const langs = captions.map((c) => c.language).join(',');
+  useEffect(() => {
+    const saved = store.get('fm_cc');
+    setCc(saved && saved !== 'off' && captions.some((c) => c.language === saved) ? saved : null);
+  }, [langs]); // eslint-disable-line react-hooks/exhaustive-deps
+  const chooseCc = useCallback((lang: string | null | 'last') => {
+    if (lang === 'last') {
+      const saved = store.get('fm_cc');
+      const nav = typeof navigator !== 'undefined' ? navigator.language.slice(0, 2) : '';
+      lang = captions.find((c) => c.language === saved)?.language ?? captions.find((c) => c.language === nav)?.language ?? captions[0]?.language ?? null;
+    }
+    setCc(lang);
+    store.set('fm_cc', lang ?? 'off');
+  }, [langs]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const el = video.current;
+    setCueText('');
+    if (!el) return;
+    let active: TextTrack | null = null;
+    const onCue = () => {
+      const list = active?.activeCues;
+      const text = list ? Array.from(list).map((c) => (c as VTTCue).text.replace(/<[^>]+>/g, '')).join('\n') : '';
+      setCueText(text);
+    };
+    const apply = () => {
+      for (const t of Array.from(el.textTracks)) {
+        const on = !!cc && t.language === cc;
+        t.mode = on ? 'hidden' : 'disabled';
+        if (on && active !== t) { active?.removeEventListener('cuechange', onCue); active = t; t.addEventListener('cuechange', onCue); }
+      }
+      onCue();
+    };
+    apply();
+    el.textTracks.addEventListener('addtrack', apply);
+    return () => { el.textTracks.removeEventListener('addtrack', apply); active?.removeEventListener('cuechange', onCue); };
+  }, [cc, langs, video]);
+  return { cc, chooseCc, cueText };
+}
+

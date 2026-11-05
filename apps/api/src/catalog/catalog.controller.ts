@@ -57,7 +57,7 @@ export class CatalogController {
   @Get('videos/:id')
   @ApiOperation({ summary: 'One video for its watch page (public and unlisted when ready; private only for its owner), with the viewer\'s own state' })
   async video(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null) {
-    const v = await this.prisma.video.findUnique({ where: { id }, include: { channel: true, category: true } });
+    const v = await this.prisma.video.findUnique({ where: { id }, include: { channel: true, category: true, captions: { select: { language: true, source: true }, orderBy: { language: 'asc' } } } });
     const owner = !!auth && v?.channel.userId === auth.user.id;
     if (v?.takenDownAt && !owner) {
       throw new GoneException(v.takedownReason === 'COPYRIGHT' ? 'This video is no longer available because of a copyright notice.' : 'This video was removed for breaking the Community Guidelines.');
@@ -76,6 +76,7 @@ export class CatalogController {
         category: v.category ? { name: v.category.name, slug: v.category.slug } : null, playbackUrl: this.urls.playback(v),
         processingStage: v.processingStage, width: v.width, height: v.height, madeForKids: v.madeForKids,
         storyboardUrl: v.storyboard && v.status === 'READY' ? `/api/videos/${v.id}/storyboard.vtt` : null,
+        captions: v.captions.map((c) => ({ language: c.language, auto: c.source === 'AUTO', url: `/api/videos/${v.id}/captions/${c.language}.vtt` })),
         channel: { ...card.channel, followerCount: v.channel.subscriberCount } },
       viewer: {
         signedIn: !!auth, isOwner: owner, following: !!following, saved: saved > 0,

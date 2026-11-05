@@ -77,6 +77,8 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 | GET | `/hub/videos/:id` | One of my videos |
 | PATCH | `/hub/videos/:id` | `title`, `description`, `visibility` (PUBLIC, UNLISTED, PRIVATE), `category` (slug), `tags`, `language`, `madeForKids`, `commentsEnabled`, `thumbnail` (0–2: a generated frame). Publishing sets the publish date; visibility changes move the media |
 | PUT | `/hub/videos/:id/thumbnail` | Body: a JPEG, PNG or WebP image (up to 2 MB), checked by its bytes |
+| PUT | `/hub/videos/:id/captions/:lang` | Body: a WebVTT or SubRip (.srt) file, up to 1 MB. Cleaned to WebVTT (times normalised; markup other than `<b>`, `<i>`, `<u>` removed). Replaces captions in that language, automatic ones included. `:lang` from the language list |
+| DELETE | `/hub/videos/:id/captions/:lang` | Removes captions in one language |
 | DELETE | `/hub/videos/:id` | Deletes the video and every file |
 | GET | `/hub/notices` | My removed videos, why, the copyright notice (claimant name and work, never their email), and strikes in the last 90 days |
 | POST | `/hub/notices/:reportId/counter` | Counter-notice for a copyright removal: `{ statement, name, address, goodFaith: true, consent: true, signature }` (signature = name); forwarded to the claimant |
@@ -87,6 +89,7 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 | --- | --- | --- |
 | GET | `/videos/:id/hls/master.m3u8` | Master playlist for private media (owner only) or while media is moving |
 | GET | `/videos/:id/hls/:rendition/index.m3u8` | Variant playlist whose segment links are signed for 4 hours (`144p`…`2160p`, and `audio` for the shared audio rendition) |
+| GET | `/videos/:id/captions/:lang.vtt` | Captions as WebVTT, with the video's own access rules (private: owner only). `captions` in `/videos/:id` lists them: `{ language, auto, url }` |
 | GET | `/videos/:id/storyboard.vtt` | Seek-bar previews as WebVTT: each cue is a time range and a tile of the sprite sheet (`#xywh=x,y,w,h`). `storyboardUrl` in `/videos/:id` points here when the video has them |
 | POST | `/videos/:id/views` | `{ watchedSeconds }`: counts a view after at least 30 s (or half of a short video); once per viewer per 6 hours; the owner's views do not count |
 

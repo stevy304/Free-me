@@ -4,5 +4,6 @@ export interface HubVideo {
   durationSeconds: number; width: number | null; height: number | null; processingProgress: number; processingStage: string | null; processingError: string | null;
   viewCount: string; likeCount: number; dislikeCount: number; commentCount: number; commentsEnabled: boolean; createdAt: string; publishedAt: string | null;
   takenDownAt: string | null; takedownReason: string | null;
-  thumbnailUrl: string | null; customThumbnail: boolean; thumbnailCandidates: string[]; renditions: string[]; playbackUrl: string | null; sourceSizeBytes: string | null;
+  thumbnailUrl: string | null; customThumbnail: boolean; thumbnailCandidates: string[]; renditions: string[];
+  captions?: Array<{ language: string; source: 'UPLOADED' | 'AUTO'; cues: number; updatedAt: string; url: string }>; playbackUrl: string | null; sourceSizeBytes: string | null;
 }

@@ -46,7 +46,7 @@ export class SystemController {
     return {
       ok: warnings.length === 0, warnings,
       app: { environment: this.config.nodeEnv, startedAt, uptimeSeconds: Math.round((now - startedAt.getTime()) / 1000), node: process.version, memoryMb: Math.round(process.memoryUsage().rss / 1048576) },
-      services: { database: db, redis, storage: this.config.media.driver, email: this.config.mail.transport, googleSignIn: !!this.config.google },
+      services: { database: db, redis, storage: this.config.media.driver, email: this.config.mail.transport, googleSignIn: !!this.config.google, autoCaptions: !!this.config.media.whisper },
       processing: { queue, stuckOver2h: stuck, failedLast24h: failed24h },
       videos: Object.fromEntries(byStatus.map((s) => [s.status, s._count._all])),
       storage: { sourceBytes: (sizes._sum.sourceSizeBytes ?? 0n).toString(), mediaBytes: (renditionBytes._sum.fileSizeBytes ?? 0n).toString() },

@@ -55,6 +55,16 @@ Copy the repository's `deploy/ubuntu` folder to each server (or clone the reposi
 9. **Google sign-in:** add `https://freeme.example/api/auth/google/callback` as an authorised redirect URI.
 10. **Check:** `https://freeme.example/api/health` shows `database: ok, redis: ok`; sign in, create a channel, upload a video, publish it, play it.
 
+## Automatic captions (optional)
+
+Captions are made on the media server with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (open source, no outside service, no per-minute fees). Without it, creators can still upload their own captions.
+
+1. On each media server: `sudo apt-get install -y build-essential cmake git`, then
+   `sudo git clone https://github.com/ggml-org/whisper.cpp /opt/whisper.cpp && cd /opt/whisper.cpp && sudo cmake -B build && sudo cmake --build build -j --config Release`
+2. A model: `sudo bash ./models/download-ggml-model.sh small` (multilingual; `base` is faster, `medium` more accurate). Model files are 0.1–1.5 GB.
+3. In `/etc/freeme/freeme.env`: `WHISPER_CPP_PATH=/opt/whisper.cpp/build/bin/whisper-cli`, `WHISPER_MODEL=/opt/whisper.cpp/models/ggml-small.bin`, optionally `WHISPER_THREADS=4`; restart the workers.
+4. `/api/admin/system` then shows `autoCaptions: true`. Transcription runs after a video is ready; on 4 cores, the `small` model takes roughly as long as the video, `base` about a third (estimates; measure on your hardware).
+
 ## Services
 
 | Unit | Server | Logs |

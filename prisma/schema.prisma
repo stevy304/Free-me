@@ -270,6 +270,7 @@ model Video {
   renditions            VideoRendition[]
   videoFiles            VideoFile[]
   tags                  VideoTag[]
+  captions              Caption[]
   likes                 Like[]
   comments              Comment[]
   playlistItems         PlaylistItem[]
@@ -696,4 +697,24 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+}
+
+enum CaptionSource {
+  UPLOADED
+  AUTO
+}
+
+/// Subtitles for one video in one language (WebVTT stored under the video's media prefix: captions/<language>.vtt).
+model Caption {
+  id                    String            @id @default(uuid())
+  videoId               String
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  language              String            // BCP 47, e.g. "en", "rw"
+  source                CaptionSource
+  key                   String            // relative to the video's media prefix
+  cueCount              Int
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@unique([videoId, language])
 }

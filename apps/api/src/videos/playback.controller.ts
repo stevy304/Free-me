@@ -64,6 +64,20 @@ export class PlaybackController {
     res.send(body);
   }
 
+  @Get(':id/captions/:file')
+  @ApiOperation({ summary: 'Captions in one language as WebVTT (file name is <language>.vtt)' })
+  async captions(@Param('id', ParseUUIDPipe) id: string, @Param('file') file: string, @CurrentAuth() auth: AuthContext | null, @Res() res: Response) {
+    const m = /^([a-z]{2,3})\.vtt$/.exec(file);
+    if (!m) throw new NotFoundException();
+    const v = await this.viewable(id, auth);
+    const c = await this.prisma.caption.findUnique({ where: { videoId_language: { videoId: id, language: m[1] } } });
+    const text = c ? await this.storage.getText(mediaPrefix(id, v.mediaLocation) + c.key) : null;
+    if (text === null) throw new NotFoundException('No captions in that language.');
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Cache-Control', v.visibility === 'PRIVATE' ? 'private, no-store' : 'public, max-age=300');
+    res.send(text);
+  }
+
   @Get(':id/storyboard.vtt')
   @ApiOperation({ summary: 'Seek-bar previews as WebVTT: each cue is a time range and the part of the sprite sheet (#xywh) to show' })
   async storyboard(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null, @Res() res: Response) {

@@ -4,6 +4,8 @@ import type Redis from 'ioredis';
 import { randomUUID } from 'node:crypto';
 import type { AppConfig } from '../config/config';
 import { mediaPrefix, wantedLocation } from './keys';
+import { LATE_FOLDERS } from './captions';
+import { autoCaptions } from './autocaptions';
 import { MediaError, VideoProcessor } from './process';
 import type { Storage } from './storage';
 import { ViewCounter } from './views';
@@ -41,9 +43,9 @@ export class MediaJobs {
 
   /** `final` = no retries left: a failure becomes visible to the creator. */
   async transcode(videoId: string, final: boolean, signal?: AbortSignal) {
-    await this.withLock(videoId, async () => {
+    const done = await this.withLock(videoId, async () => {
       try {
-        await this.processor.process(videoId, signal);
+        return await this.processor.process(videoId, signal);
       } catch (e) {
         const known = e instanceof MediaError;
         this.log.error(`${videoId}: ${(e as Error).message}`);
@@ -53,6 +55,8 @@ export class MediaJobs {
         throw e;
       }
     });
+    // Automatic captions after the video is ready and unlocked: publishing or moving it never waits for them.
+    if (done.speech) await autoCaptions(this.prisma, this.storage, this.config, videoId, done.speech, signal);
   }
 
   /** Moves media between the public (CDN) and private (signed links) prefixes after a visibility change or a removal. */
@@ -66,8 +70,8 @@ export class MediaJobs {
       const to = mediaPrefix(videoId, want);
       const n = await this.storage.copyPrefix(from, to);
       await this.prisma.video.update({ where: { id: videoId }, data: { mediaLocation: want } });
-      // A custom thumbnail written to the old place during the copy is moved too (see the thumbnail upload).
-      await this.storage.copyPrefix(`${from}thumbs/`, `${to}thumbs/`);
+      // Files written to the old place during the copy (custom thumbnail, captions) are moved too.
+      for (const dir of LATE_FOLDERS) await this.storage.copyPrefix(from + dir, to + dir);
       await this.storage.deletePrefix(from);
       this.log.log(`${videoId}: moved ${n} files to ${want.toLowerCase()} storage`);
     });

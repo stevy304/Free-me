@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -52,6 +52,13 @@ test('upload, details, publish, processing to every quality, then on the home pa
   expect(readFileSync(photo).length).toBeGreaterThan(2 * 1024 * 1024);
   await page.locator('input[type=file][accept="image/*"]').setInputFiles(photo);
   await expect(page.getByText('Thumbnail updated')).toBeVisible({ timeout: 20_000 });
+  // Captions: an SRT file in English.
+  const srt = join(dir, 'captions.srt');
+  writeFileSync(srt, '1\n00:00:00,500 --> 00:00:03,000\nGood morning, Kigali\n\n2\n00:00:03,000 --> 00:00:05,500\nWelcome to Free Me\n');
+  await page.locator('#v-cap-lang').selectOption('en');
+  await page.locator('input[type=file][accept^=".vtt"]').setInputFiles(srt);
+  await expect(page.getByText('English captions added')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('2 lines')).toBeVisible();
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByText('Published')).toBeVisible();
   await page.getByRole('button', { name: 'Close' }).click();
@@ -69,6 +76,8 @@ test('upload, details, publish, processing to every quality, then on the home pa
   expect((await page.request.get((await thumb.getAttribute('src'))!)).status()).toBe(200);
   await page.getByRole('heading', { name: `Morning in Kigali ${run}` }).first().click();
   await expect(page).toHaveURL(/\/watch\?v=/);
+  await expect(page.locator('video track[srclang="en"]')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Subtitles (c)' }).first()).toBeAttached();
   await expect(page.locator('video')).toBeAttached();
   const master = await page.evaluate(async () => (await (await fetch(`/api/videos/${new URLSearchParams(location.search).get('v')}`)).json()).video.playbackUrl as string);
   const text = await (await page.request.get(master)).text();

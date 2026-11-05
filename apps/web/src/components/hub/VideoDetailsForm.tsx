@@ -3,6 +3,7 @@
 import * as Icon from '@/components/icons';
 import { useEffect, useRef, useState } from 'react';
 import { LanguageSelect, inputClass } from '../Pickers';
+import { languageName } from '@free-me/shared';
 import { api } from '@/lib/client-api';
 import type { Category } from '@/lib/types';
 import type { HubVideo } from './types';
@@ -130,6 +131,7 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
           </select>
         </div>
         <div><label htmlFor="v-lang" className={label}>Video language</label><div className="mt-2"><LanguageSelect id="v-lang" allowEmpty value={language} onChange={setLanguage} /></div></div>
+        <div className="sm:col-span-2"><Captions video={video} onSaved={onSaved} /></div>
         <div className="sm:col-span-2"><label htmlFor="v-tags" className={label}>Tags</label><input id="v-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Separate tags with commas" className={`${inputClass} mt-2`} /></div>
       </div>
       <label className={`flex items-start gap-3 rounded-xl border border-line p-3 ${kids ? 'opacity-60' : 'cursor-pointer hover:bg-surface'}`}>
@@ -156,3 +158,55 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
     </form>
   );
 }
+
+/** Subtitles per language: upload a .vtt or .srt file; automatic ones (when the server makes them) are marked. */
+function Captions({ video, onSaved }: { video: HubVideo; onSaved: (v: HubVideo) => void }) {
+  const [lang, setLang] = useState<string | null>(video.language ?? null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const file = useRef<HTMLInputElement>(null);
+  const caps = video.captions ?? [];
+  const upload = async (f: File) => {
+    if (!lang) { setMessage({ ok: false, text: 'Choose the language of the captions first.' }); return; }
+    if (f.size > 1024 * 1024) { setMessage({ ok: false, text: 'A caption file must be 1 MB or smaller.' }); return; }
+    setBusy(true); setMessage(null);
+    try {
+      const res = await fetch(`/api/hub/videos/${video.id}/captions/${lang}`, { method: 'PUT', body: await f.text(), headers: { 'content-type': f.name.toLowerCase().endsWith('.srt') ? 'application/x-subrip' : 'text/vtt' }, credentials: 'same-origin' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.message ?? 'Could not add the captions.');
+      onSaved(d.video); setMessage({ ok: true, text: `${languageName(lang)} captions added` });
+    } catch (e) { setMessage({ ok: false, text: (e as Error).message }); } finally { setBusy(false); }
+  };
+  const remove = async (language: string) => {
+    setBusy(true); setMessage(null);
+    try { const r = await api<{ video: HubVideo }>(`/hub/videos/${video.id}/captions/${language}`, { method: 'DELETE', body: {} }); onSaved(r.video); }
+    catch (e) { setMessage({ ok: false, text: (e as Error).message }); } finally { setBusy(false); }
+  };
+  return (
+    <div>
+      <p className="text-[14px] font-medium">Captions</p>
+      <p className="text-[13px] text-muted">Help people who watch without sound or in another language. Upload a WebVTT (.vtt) or SubRip (.srt) file per language.</p>
+      {caps.length > 0 && (
+        <ul className="mt-3 divide-y divide-line rounded-xl border border-line">
+          {caps.map((c) => (
+            <li key={c.language} className="flex items-center gap-3 px-3 py-2.5 text-[14px]">
+              <span className="grid h-7 min-w-9 place-items-center rounded-md bg-surface px-1.5 text-[11px] font-extrabold uppercase">{c.language}</span>
+              <span className="min-w-0 flex-1"><span className="font-medium">{languageName(c.language)}</span>{c.source === 'AUTO' && <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-on-accent-soft">Automatic</span>}<span className="block text-[12px] text-muted">{c.cues} lines</span></span>
+              <a href={c.url} target="_blank" rel="noreferrer" className="rounded-lg px-2 py-1 text-[13px] font-semibold text-brand hover:bg-surface">View</a>
+              <button type="button" disabled={busy} onClick={() => remove(c.language)} aria-label={`Remove ${languageName(c.language)} captions`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-danger"><Icon.Trash size={17} /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="min-w-[200px] flex-1"><LanguageSelect id="v-cap-lang" allowEmpty value={lang} onChange={setLang} /></div>
+        <button type="button" disabled={busy} onClick={() => file.current?.click()} className="flex h-10 items-center gap-2 rounded-xl border border-line px-4 text-[14px] font-semibold hover:bg-surface disabled:opacity-50">
+          {busy ? <Icon.Spinner size={16} className="animate-spin" /> : <Icon.Upload size={18} />}Add captions
+        </button>
+        <input ref={file} type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ''; }} />
+      </div>
+      {message && <p role={message.ok ? 'status' : 'alert'} className={`mt-2 text-[13px] ${message.ok ? 'text-brand' : 'text-danger'}`}>{message.text}</p>}
+    </div>
+  );
+}
+
