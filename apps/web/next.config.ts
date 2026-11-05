@@ -5,6 +5,8 @@ const api = (process.env.API_INTERNAL_URL ?? 'http://localhost:4000').replace(/\
 
 const config: NextConfig = {
   reactStrictMode: true,
+  // No Next.js developer badge in the corner while running `npm run dev`.
+  devIndicators: false,
   poweredByHeader: false,
   output: 'standalone',
   // `npm run dev` in GitHub Codespaces is opened through the forwarded https address.
