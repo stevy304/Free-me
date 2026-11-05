@@ -1,77 +1,67 @@
-# Free Me — REST API Specification (OpenAPI Compatible)
+# API
 
-All API requests are prefixed with `/api/v1`. Requests requiring authentication require the standard `Authorization: Bearer <JWT>` header or secure HTTP-only cookies.
+REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is served at `/api/docs` and the raw document at `/api/openapi.json` (enabled outside production, or with `API_DOCS=true`).
 
----
+## Conventions
 
-## 1. Authentication Endpoints (`/api/v1/auth`)
+- **Authentication:** the `fm_session` cookie (`__Host-fm_session` over HTTPS), set by sign-in. Routes marked 🔒 need it; 🛡 needs the administrator role.
+- **CSRF:** `POST`, `PATCH` and `DELETE` must carry an `Origin` (or `Referer`) of the web app, or they get 403.
+- **Validation:** unknown fields are rejected (400). Errors look like `{ "statusCode": 400, "message": "..." }`; messages are written for people.
+- **Rate limits:** 429 with `retryAfterSeconds`.
+- **Pagination:** `?cursor=` with `nextCursor` in the response (`null` at the end).
+- **Big numbers** (views, totals) are strings.
 
-| Method | Endpoint | Description | Access |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/auth/register` | Register new Viewer, Creator, or Advertiser account | Public |
-| `POST` | `/auth/login` | Email/password login with JWT token issuance | Public |
-| `POST` | `/auth/verify-email` | Confirm email verification token | Authenticated |
-| `POST` | `/auth/refresh` | Refresh access token using HTTP-only refresh token | Authenticated |
-| `POST` | `/auth/switch-role` | Switch active context (Viewer ↔ Creator ↔ Advertiser) | Authenticated |
+## Sign-in
 
----
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/auth/providers` | Which sign-in methods this server offers (`google`, `emailCode`) |
+| POST | `/auth/email/request` | `{ email }`: emails a 6-digit code (one a minute, five an hour per address) |
+| POST | `/auth/email/verify` | `{ email, code }`: signs in, creates the account on first use; `{ signedIn, newAccount }` |
+| GET | `/auth/google?returnTo=/path` | Starts Google sign-in (redirect) |
+| GET | `/auth/google/callback` | Google returns here; signs in and redirects to `returnTo`, or to `/login?error=...` |
+| POST | `/auth/logout` | Signs out this device |
 
-## 2. Video & Stream Endpoints (`/api/v1/videos`)
+## Me 🔒
 
-| Method | Endpoint | Description | Access |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/videos` | Feed of published videos (category, search, sorting) | Public |
-| `GET` | `/videos/:id` | Video details, metadata, playback URLs, like count | Public |
-| `GET` | `/videos/:id/hls/master.m3u8` | Master adaptive bitrate playlist | Public |
-| `POST` | `/videos/init-upload` | Request presigned S3 upload URL for raw media | Creator |
-| `POST` | `/videos/:id/complete-upload` | Dispatch media worker for FFmpeg HLS transcoding | Creator |
-| `POST` | `/videos/:id/like` | Like or remove like on video | Authenticated |
-| `GET` | `/videos/:id/comments` | Paginated comments with nested replies | Public |
-| `POST` | `/videos/:id/comments` | Post comment | Authenticated |
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/me` | Account, profile and channel |
+| PATCH | `/me/profile` | `displayName`, `bio`, `country` (ISO 3166), `city`, `preferredLanguage` (BCP 47), `timezone` (IANA) |
+| GET | `/me/sessions` | Signed-in devices (`current` marks this one) |
+| DELETE | `/me/sessions/:id` | Signs out one device |
+| DELETE | `/me/sessions` | Signs out every other device |
 
----
+## Channels
 
-## 3. Shorts Vertical Feed (`/api/v1/shorts`)
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/channels/handle-available?handle=` | `{ available, reason? }` |
+| POST | `/channels` 🔒 | `{ handle, name, description?, country?, defaultLanguage? }`: one channel per account; adds the creator role |
+| PATCH | `/channels/mine` 🔒 | Edit name, description, country, language |
+| GET | `/channels/:handle` | Channel, video count, latest public videos, and the viewer's relation (`subscribed`, `isOwner`) |
+| POST / DELETE | `/channels/:handle/subscription` 🔒 | Subscribe / unsubscribe; returns the exact subscriber count |
 
-| Method | Endpoint | Description | Access |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/shorts/feed` | Infinite vertical 9:16 short video feed | Public |
-| `POST` | `/shorts/:id/view` | Track valid short playback completion | Public/Auth |
+## Catalogue
 
----
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/categories` | Video categories |
+| GET | `/videos?category=&shorts=&cursor=&limit=` | Latest public videos |
+| GET | `/videos/:id` | One video for its watch page (playback URL when ready) |
+| GET | `/search?q=&cursor=` | Matching channels (first page) and videos |
+| GET | `/search/suggest?q=` | Up to ten suggestions while typing |
+| GET | `/feed/subscriptions` 🔒 | Subscribed channels and their latest videos |
 
-## 4. Creator Studio Endpoints (`/api/v1/studio`)
+## Administration 🛡
 
-| Method | Endpoint | Description | Access |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/studio/channel` | Current creator channel settings & metrics | Creator |
-| `GET` | `/studio/analytics` | Views, watch time, subscribers, CPM analytics | Creator |
-| `GET` | `/studio/monetization` | Monetization eligibility status (subs & hours) | Creator |
-| `POST` | `/studio/monetization/apply` | Apply for platform monetization program | Creator |
-| `GET` | `/studio/ledger` | Detailed 60% revenue sharing ledger entries | Creator |
-| `POST` | `/studio/payouts/request` | Request Mobile Money (MoMo) or Bank withdrawal | Creator |
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/admin/users?q=&cursor=` | Find accounts by email, name or @handle |
+| PATCH | `/admin/users/:id/roles` | `{ roles }`; you cannot remove your own administrator role |
+| PATCH | `/admin/users/:id/status` | `{ status: ACTIVE or SUSPENDED }`; suspension signs the account out everywhere |
+| GET | `/admin/audit?cursor=` | Latest audit entries |
 
----
+## Health
 
-## 5. Local Advertising Engine (`/api/v1/ads`)
-
-| Method | Endpoint | Description | Access |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/ads/campaigns` | List active & past campaigns for advertiser | Advertiser |
-| `POST` | `/ads/campaigns` | Create new campaign with budget and targeting | Advertiser |
-| `GET` | `/ads/dispatch` | Fetch matching pre-roll ad for video playback | Player/System |
-| `POST` | `/ads/events` | Record start, quartile, complete, or click event | Player/System |
-
----
-
-## 6. Administration & Governance (`/api/v1/admin`)
-
-| Method | Endpoint | Description | Access |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/admin/metrics` | Platform overview (total users, creators, GMV) | Admin |
-| `GET` | `/admin/campaigns/pending` | Review local ad campaigns awaiting approval | Admin |
-| `POST` | `/admin/campaigns/:id/review` | Approve or reject advertising campaign | Admin |
-| `GET` | `/admin/payouts/pending` | Review pending creator payout requests | Admin |
-| `POST` | `/admin/payouts/:id/approve` | Process payout via MTN MoMo / Bank API | Admin |
-| `POST` | `/admin/settings/revenue-split` | Update platform split ratio (e.g. 60/30/10) | Admin |
-| `GET` | `/admin/audit-logs` | Tamper-evident administrative action history | Admin |
+`GET /health`: `200 { status: "ok", database, redis }` or `503` when a dependency is down (production also requires Redis).

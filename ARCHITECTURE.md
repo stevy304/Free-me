@@ -1,104 +1,58 @@
-# Free Me — Platform Architecture Specification
+# Architecture
 
-## 1. System Philosophy & Target Capacity
-
-- **Initial Market**: Rwanda (Kigali flagship hub)
-- **Immediate Capacity Target**: 50,000 registered accounts, 1,000 concurrent video streams
-- **Traffic Profile**: High read concurrency on CDN edge, asynchronous video ingestion, batch-aggregated financial metrics to prevent write contention on primary PostgreSQL.
-
----
-
-## 2. Four-Server Hetzner Physical Topology
-
-Free Me leverages dedicated bare-metal servers from Hetzner (AX42 / AX52 line) interconnected via an isolated private vSwitch (10G internal LAN):
-
-### Server 1: Application Node A (IP: 10.0.1.10)
-- **Role**: Active Web Frontend & Primary REST API Gateway
-- **Specs**: AMD Ryzen 7 7700, 64GB DDR5 RAM, 2x 1TB NVMe (RAID 1)
-- **Services**:
-  - Next.js / React SSR & SPA runtime
-  - NestJS / Express REST API Gateway
-  - JWT / Session Authentication & Role Authorization
-  - Prometheus Node Exporter
-
-### Server 2: Application Node B (IP: 10.0.1.11)
-- **Role**: Secondary Horizontal Application Node
-- **Specs**: AMD Ryzen 7 7700, 64GB DDR5 RAM, 2x 1TB NVMe (RAID 1)
-- **Services**:
-  - Clustered API worker instance
-  - BullMQ job dispatchers & event listeners
-  - Notification dispatch (SMS via Africa's Talking / MTN Rwanda SMS Gateway)
-
-### Server 3: Database & State Node (IP: 10.0.1.20)
-- **Role**: Persistent Data Storage & In-Memory Caching
-- **Specs**: AMD Ryzen 9 7950X, 128GB DDR5 ECC RAM, 2x 1.92TB Enterprise NVMe
-- **Firewall Policy**: STRICT. No public IP exposure. Only accessible on ports 5432 (Postgres) and 6379 (Redis) via private vSwitch subnet `10.0.1.0/24`.
-- **Services**:
-  - PostgreSQL 16 (Tuned buffer cache, connection pool via PgBouncer)
-  - Redis 7 (In-memory token blacklist, view counting aggregates, BullMQ queues)
-  - Automated WAL-G replication to remote Hetzner Storage Box
-
-### Server 4: Media Processing Node (IP: 10.0.1.30)
-- **Role**: Dedicated FFmpeg Transcoding & Asset Generation
-- **Specs**: AMD Ryzen 9 7950X (16 cores / 32 threads), 128GB RAM, 2x 1.92TB NVMe scratch disk
-- **Services**:
-  - BullMQ Media Processing Workers (`concurrency: 4`)
-  - FFmpeg 6.1 with libx264, libaac, and hls muxer
-  - Video rendition ladder:
-    - `1080p`: 1920x1080 @ 4500 kbps, 60fps/30fps
-    - `720p`: 1280x720 @ 2200 kbps, 30fps
-    - `480p`: 854x480 @ 900 kbps (Optimized for 3G/4G African mobile users)
-    - `360p`: 640x360 @ 450 kbps (Ultra-low bandwidth data saving)
-  - WebVTT thumbnail strip extraction & animated WebP preview generation
-
----
-
-## 3. Video Processing & Transcoding Pipeline
+## Components
 
 ```
-[ Client Upload ] 
-       │ 1. Presigned S3 Multipart Upload (Chunked 10MB)
-       ▼
-[ Raw Storage Bucket ]
-       │ 2. SQS / BullMQ Event triggered
-       ▼
-[ Media Worker (Server 4) ]
-       │ 3. Fetch Raw Video to NVMe Scratch (/tmp/transcode/<job_id>)
-       │ 4. Probe Metadata (ffprobe: codec, resolution, rotation, audio channels)
-       │ 5. Execute 2-Pass FFmpeg HLS Transcoding
-       │    ├─ Master playlist: master.m3u8
-       │    ├─ 1080p/index.m3u8 & ts chunks (6s keyframe intervals)
-       │    ├─ 720p/index.m3u8 & ts chunks
-       │    ├─ 480p/index.m3u8 & ts chunks
-       │    └─ 360p/index.m3u8 & ts chunks
-       │ 6. Generate 3 representative thumbnails (25%, 50%, 75% timestamps)
-       │ 7. Upload Transcoded Directory to HLS Distribution Bucket
-       │ 8. Notify API Gateway: UPDATE Video SET status = 'READY', masterPlaylistUrl = ...
-       ▼
-[ Cloudflare / BunnyCDN Edge Caching ]
-       │ 9. Low-latency HLS Segment Streaming to Viewer Devices
-       ▼
-[ Viewer Video Player ]
+Browser ──HTTPS──> Caddy (edge, TLS, load balancing)
+                     ├── /api/*  → NestJS API   (apps/api, port 4000)  ──> PostgreSQL 16 (Prisma)
+                     │                                                 └─> Redis 7 (shared rate limits; queues from phase 2)
+                     └── /*      → Next.js web  (apps/web, port 3000)  ──> API over the private network
 ```
 
----
+- **One origin for the browser.** The web app and the API share the public domain. The browser calls `/api/*`; Caddy (production) or the Next.js rewrite (development) forwards it to the API. Session cookies therefore stay first-party, `SameSite=Lax` works, and no CORS is needed.
+- **Server rendering with the visitor's session.** Next.js server components call the API on the private network (`API_INTERNAL_URL`), forwarding the visitor's cookie and language, so pages arrive complete. Interactive parts (sign-in, subscribe, settings, admin) call `/api/*` from the browser.
+- **Stateless application nodes.** Sessions live in PostgreSQL; rate-limit counters in Redis. Any API instance can serve any request, so nodes can be added behind the load balancer.
+- **Shared rules.** `packages/shared` holds the rules both sides must agree on (handle format, reserved names, country and language lists, revenue maths). The API enforces them; the web app uses them for instant form feedback.
 
-## 4. Advertising & Revenue Engine Architecture
+## API structure (apps/api/src)
 
-To eliminate write locks on PostgreSQL, view counts and ad impressions follow a high-throughput event buffer pattern:
+| Module | Responsibility |
+| --- | --- |
+| `config` | Reads and checks every environment variable at start-up; refuses unsafe production settings |
+| `database` | Prisma client; Redis client with an in-process fallback for single-instance development |
+| `common` | CSRF origin guard, authentication and role guard, rate limiter, audit log, error filter |
+| `auth` | Email one-time codes, Google OpenID Connect, sessions, account creation and linking |
+| `users` | The signed-in account: profile, devices |
+| `channels` | Channels, handles, subscriptions |
+| `catalog` | Categories, feeds, watch page data, search and suggestions |
+| `admin` | Accounts, roles, suspension, audit log (administrators only) |
+| `health` | Liveness and dependency status for the load balancer |
 
-1. **Client Event**: Viewer plays video and completes ad impression.
-2. **Fast Ingestion Route**: `/api/v1/ads/impression` records impression to Redis HyperLogLog and Stream.
-3. **Scheduled Aggregation Job**: Every 5 minutes, BullMQ pulls stream batches, deduplicates bot traffic, checks viewer geography, and executes atomic ledger entry:
-   - Creator Pool Share (60%): Credited to `CreatorBalance.pendingBalanceCents`.
-   - Platform Maintenance (30%): Credited to operations account.
-   - Growth Fund (10%): Credited to creator grant pool.
-4. **End-of-Month Settlement**: Admin/System runs reconciliation, transferring `pendingBalanceCents` to `confirmedBalanceCents` after fraud filtering.
+Request pipeline: Helmet headers → cookie parser → session middleware (attaches the account) → origin guard (state-changing requests must come from the web app) → auth/role guard (routes marked `@RequireAuth`) → validation pipe (unknown fields rejected) → controller → error filter (known errors keep their message; anything else is logged and answered with a generic 500).
 
----
+## Web structure (apps/web/src)
 
-## 5. Security & Isolation
+- `components/shell`: top bar with search and suggestions, sidebar (full on wide screens, narrow rail on tablets, drawer on phones), bottom bar on phones, account menu with theme choice.
+- `components/video`: cards, rows, the infinite grid, category chips.
+- `app/*`: pages: home, Shorts, subscriptions, search results, watch, channel (`/@handle`), create channel, settings, sign-in, You, administration.
+- Design tokens (light and dark) are CSS variables in `globals.css`; components never hard-code colours.
 
-- All internal inter-server communication uses private VLAN or WireGuard VPN.
-- Public web traffic terminates at Caddy / Cloudflare with automatic TLS 1.3 certificates.
-- Rate limiting enforced at both edge and application layers via Redis token bucket.
+## Worldwide by design
+
+Countries are ISO 3166-1 codes, languages BCP 47 tags, time zones IANA names, currencies ISO 4217 codes; names come from the runtime's Unicode data in the reader's language. Money is stored as integers in each currency's minor unit, and revenue maths never uses floating point. Nothing defaults to one country.
+
+## Four-server topology (proposal to validate in staging)
+
+| Server | Runs | Reachable from |
+| --- | --- | --- |
+| 1. Application node A | Caddy edge, API, web | Internet: 80/443 only |
+| 2. Application node B | API, web | Private network only (from the edge) |
+| 3. Database node | PostgreSQL, Redis, backups | Private network only (from servers 1, 2, 4) |
+| 4. Media node | FFmpeg workers (phase 2) | Private network only |
+
+Video files go to S3-compatible object storage and are delivered through a CDN; application disks never hold media. Firewall rules and private networking are in [DEPLOYMENT.md](DEPLOYMENT.md). Capacity claims (users, concurrent viewers) are made only after the load tests of phase 6.
+
+## Coming in later phases
+
+- **Phase 2:** resumable uploads straight to object storage (signed URLs), BullMQ queues in Redis, FFmpeg workers on the media node producing an HLS ladder and thumbnails, private-video access checks on manifests.
+- **Phase 3:** comments, likes, watch history and playlists. Views and watch time are counted through Redis and aggregated into PostgreSQL in batches, not one row per view.

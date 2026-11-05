@@ -1,0 +1,38 @@
+# Free Me edge (Caddy): HTTPS, security headers and load balancing across the two application nodes.
+# Set FREEME_DOMAIN, ACME_EMAIL, APP_NODE_A and APP_NODE_B (private addresses) in the environment.
+{
+	email {$ACME_EMAIL}
+	admin off
+}
+
+{$FREEME_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	# The API (NestJS, port 4000). Health checks take a node out of rotation when it fails.
+	handle /api/* {
+		reverse_proxy {$APP_NODE_A}:4000 {$APP_NODE_B}:4000 {
+			lb_policy least_conn
+			health_uri /api/health
+			health_interval 5s
+			health_timeout 2s
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+
+	# The web app (Next.js, port 3000).
+	handle {
+		reverse_proxy {$APP_NODE_A}:3000 {$APP_NODE_B}:3000 {
+			lb_policy least_conn
+			health_uri /
+			health_interval 10s
+		}
+	}
+}

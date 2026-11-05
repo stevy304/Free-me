@@ -1,0 +1,14 @@
+# Local development dependencies only (PostgreSQL and Redis). The API and web app run with npm (see README).
+services:
+  postgres:
+    image: postgres:16
+    environment: { POSTGRES_USER: freeme, POSTGRES_PASSWORD: freeme, POSTGRES_DB: freeme }
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U freeme -d freeme"], interval: 5s, retries: 12 }
+  redis:
+    image: redis:7
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["127.0.0.1:6379:6379"]
+volumes:
+  pgdata:

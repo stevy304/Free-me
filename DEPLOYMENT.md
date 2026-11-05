@@ -1,148 +1,71 @@
-# Free Me — Hetzner 4-Server Deployment & Provisioning Guide
+# Deployment (Hetzner, four servers)
 
-## 1. Network Topology & Firewall Matrix
+Nothing here has been provisioned yet. Buying servers, pointing a domain and opening the platform to the public each need the owner's explicit go-ahead. This is the plan the files in `deploy/` implement; it is validated in a staging environment before production.
 
-All servers reside in a dedicated Hetzner Cloud vSwitch / Private Subnet `10.0.1.0/24`.
+## Servers and private network
 
-| Server | Role | Private IP | Public Ports Allowed | Internal Ports Allowed |
-| :--- | :--- | :--- | :--- | :--- |
-| **Server 1** | App Node A | `10.0.1.10` | `80, 443` (Caddy/Edge) | `3000, 4000, 9100` |
-| **Server 2** | App Node B | `10.0.1.11` | None (Traffic via Node A / LB) | `3000, 4000, 9100` |
-| **Server 3** | Database Node | `10.0.1.20` | None (STRICT) | `5432` (Postgres), `6379` (Redis) |
-| **Server 4** | Media Node | `10.0.1.30` | None (STRICT) | `9100` (Node exporter) |
+All four servers join one Hetzner private network (vSwitch or Cloud Network), e.g. `10.0.1.0/24`.
 
----
+| Server | Private IP | Runs | Files |
+| --- | --- | --- | --- |
+| 1. App node A | 10.0.1.10 | Caddy edge, API, web | `deploy/edge/Caddyfile`, `deploy/app-node/docker-compose.yml` |
+| 2. App node B | 10.0.1.11 | API, web | `deploy/app-node/docker-compose.yml` |
+| 3. Database node | 10.0.1.20 | PostgreSQL 16, Redis 7, backups | `deploy/db-node/` |
+| 4. Media node | 10.0.1.30 | FFmpeg workers (phase 2) | `deploy/media-node/` |
 
-## 2. Server 1 (App Node A) Docker Setup
+A Hetzner Load Balancer can replace Caddy-on-server-1 as the entry point later; the app nodes do not change.
 
-Directory: `/opt/freeme/server1-app-a/docker-compose.yml`
+## Firewall rules
 
-```yaml
-version: '3.8'
-services:
-  caddy:
-    image: caddy:2.7-alpine
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - web_net
+Default deny incoming on every server (Hetzner Cloud Firewall and `ufw`). Allow only:
 
-  app_frontend:
-    image: freeme/frontend:latest
-    restart: always
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - NEXT_PUBLIC_API_URL=https://freeme.rw/api/v1
-    networks:
-      - web_net
+| Server | From | Port | Why |
+| --- | --- | --- | --- |
+| 1 | Internet | 80, 443/tcp, 443/udp | HTTPS (HTTP redirects; UDP for HTTP/3) |
+| 1, 2 | 10.0.1.10 | 3000, 4000 | Edge to web and API |
+| 3 | 10.0.1.10, 10.0.1.11, 10.0.1.30 | 5432, 6379 | Database and Redis from app and media nodes |
+| all | Admin IPs only | 22 | SSH with keys; password login disabled |
+| all | Monitoring host | 9100 | Node exporter (phase 6) |
 
-  api_gateway:
-    image: freeme/api:latest
-    restart: always
-    environment:
-      - NODE_ENV=production
-      - PORT=4000
-      - DATABASE_URL=postgresql://freeme_user:${DB_PASS}@10.0.1.20:5432/freeme_prod?schema=public
-      - REDIS_URL=redis://10.0.1.20:6379
-      - S3_ENDPOINT=https://fsn1.your-objectstorage.com
-      - S3_BUCKET_NAME=freeme-rwanda-production
-    networks:
-      - web_net
-
-volumes:
-  caddy_data:
-  caddy_config:
-
-networks:
-  web_net:
-    driver: bridge
+```bash
+# Example for server 3
+ufw default deny incoming && ufw default allow outgoing
+for ip in 10.0.1.10 10.0.1.11 10.0.1.30; do ufw allow from $ip to any port 5432 proto tcp; ufw allow from $ip to any port 6379 proto tcp; done
+ufw allow from <admin-ip> to any port 22 proto tcp
+ufw enable
 ```
 
----
+PostgreSQL and Redis bind to the private address only (`PRIVATE_IP` in the compose file) and Redis requires a password, so neither is reachable from the internet even if a firewall rule is wrong.
 
-## 3. Server 3 (Database Node) Docker Setup
+## Images
 
-Directory: `/opt/freeme/server3-database/docker-compose.yml`
+Built from the repository root (CI or a build host), pushed to a private registry:
 
-```yaml
-version: '3.8'
-services:
-  postgres:
-    image: postgres:16-alpine
-    restart: always
-    environment:
-      POSTGRES_DB: freeme_prod
-      POSTGRES_USER: freeme_user
-      POSTGRES_PASSWORD: ${DB_PASS}
-    ports:
-      - "10.0.1.20:5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
-    command: postgres -c config_file=/etc/postgresql/postgresql.conf
-
-  redis:
-    image: redis:7-alpine
-    restart: always
-    command: redis-server --requirepass ${REDIS_PASS} --maxmemory 8gb --maxmemory-policy volatile-lru
-    ports:
-      - "10.0.1.20:6379:6379"
-    volumes:
-      - redisdata:/data
-
-volumes:
-  pgdata:
-  redisdata:
+```bash
+docker build -f apps/api/Dockerfile --target runtime -t <registry>/freeme/api:<version> .
+docker build -f apps/api/Dockerfile --target migrate -t <registry>/freeme/api-migrate:<version> .
+docker build -f apps/web/Dockerfile -t <registry>/freeme/web:<version> .
 ```
 
----
+Containers run as the unprivileged `node` user with `no-new-privileges`; the API container's filesystem is read-only.
 
-## 4. Server 4 (Media Processing Node) Docker Setup
+## First installation
 
-Directory: `/opt/freeme/server4-media/docker-compose.yml`
+1. **Server 3:** install Docker; copy `deploy/db-node/`; `PRIVATE_IP=10.0.1.20 POSTGRES_PASSWORD=… REDIS_PASSWORD=… docker compose up -d`; install the backup cron (see [BACKUP-AND-RECOVERY.md](BACKUP-AND-RECOVERY.md)).
+2. **Migrations:** from server 1, `docker run --rm --env-file api.env <registry>/freeme/api-migrate:<version>`. It applies migrations and upserts the video categories (safe to repeat).
+3. **Servers 1 and 2:** write `api.env` (see [ENVIRONMENT.md](ENVIRONMENT.md); `chmod 600`); `PRIVATE_IP=<own ip> FREEME_API_IMAGE=… FREEME_WEB_IMAGE=… docker compose up -d`.
+4. **Server 1 edge:** run Caddy with `deploy/edge/Caddyfile` and `FREEME_DOMAIN`, `ACME_EMAIL`, `APP_NODE_A=10.0.1.10`, `APP_NODE_B=10.0.1.11`. Caddy obtains the TLS certificate.
+5. **Google sign-in:** in Google Cloud Console, add `https://<domain>/api/auth/google/callback` as an authorised redirect URI.
+6. **Check:** `https://<domain>/api/health` returns `ok` with `database: ok, redis: ok`; sign in with an email code; confirm the admin account from `ADMIN_EMAILS`.
 
-```yaml
-version: '3.8'
-services:
-  transcoding_worker:
-    image: freeme/media-worker:latest
-    restart: always
-    deploy:
-      resources:
-        limits:
-          cpus: '28.0'
-          memory: 96G
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASS}@10.0.1.20:6379
-      - QUEUE_NAME=video-transcoding
-      - CONCURRENCY=4
-      - S3_ENDPOINT=https://fsn1.your-objectstorage.com
-      - S3_ACCESS_KEY=${S3_KEY}
-      - S3_SECRET_KEY=${S3_SECRET}
-      - S3_BUCKET_RAW=freeme-raw-uploads
-      - S3_BUCKET_HLS=freeme-hls-streaming
-    volumes:
-      - /tmp/transcode:/tmp/transcode
-```
+## Releasing a new version
 
----
+1. CI green on `main`.
+2. Build and push images tagged with the commit.
+3. Run the migrate image (migrations are additive and backward-compatible with the running version).
+4. Update server 2, wait for `/api/health`, then server 1. Caddy's health checks keep traffic on the healthy node during each restart.
+5. Roll back by redeploying the previous tags (and only rolling back a migration with a written down-migration).
 
-## 5. Provisioning Steps
+## Not yet covered (phase 6)
 
-1. **Private Subnet Setup**: Enable Hetzner vSwitch and bind all 4 servers to interface `enp7s0`.
-2. **UFW Rules on Node 3**:
-   ```bash
-   sudo ufw default deny incoming
-   sudo ufw allow in on enp7s0 from 10.0.1.0/24 to any port 5432
-   sudo ufw allow in on enp7s0 from 10.0.1.0/24 to any port 6379
-   sudo ufw enable
-   ```
-3. **Run Migrations**: On Node 1 or CI runner, run `npx prisma migrate deploy`.
-4. **SSL / DNS**: Point `freeme.rw` to Node 1 public IP. Caddy auto-provisions Let's Encrypt certificates.
+Monitoring (Prometheus, Grafana, alerting), centralised logs and error tracking, CDN configuration, object storage buckets, staged load tests at 100, 500 and 1,000 concurrent viewers, and a recorded restore drill. Capacity for 50,000 users is not claimed until those measurements exist.

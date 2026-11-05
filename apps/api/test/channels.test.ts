@@ -95,3 +95,31 @@ describe('catalog', () => {
     await request(ctx.http).get('/api/videos?cursor=garbage').expect(400);
   });
 });
+
+describe('watch page and search', () => {
+  test('a video is visible when public or unlisted and ready; private only to its owner; search finds videos and channels', async () => {
+    const owner = await signIn(ctx.http, ctx.mail, 'chef@example.com');
+    const ch = (await owner.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'chef.amara', name: 'Chef Amara' }).expect(201)).body.channel;
+    const mk = (title: string, extra: object) => ctx.prisma.video.create({ data: { channelId: ch.id, title, description: 'Recipes from home', durationSeconds: 300, ...extra } });
+    const pub = await mk('Jollof rice in 20 minutes', { status: 'READY', visibility: 'PUBLIC', publishedAt: new Date(), masterPlaylistUrl: 'https://cdn.example/v/1/master.m3u8' });
+    const unl = await mk('Unlisted dinner', { status: 'READY', visibility: 'UNLISTED', publishedAt: new Date() });
+    const priv = await mk('Private draft', { status: 'READY', visibility: 'PRIVATE', publishedAt: new Date() });
+    const proc = await mk('Still processing', { status: 'PROCESSING', visibility: 'PUBLIC' });
+
+    const v = (await request(ctx.http).get(`/api/videos/${pub.id}`).expect(200)).body.video;
+    expect(v).toMatchObject({ title: 'Jollof rice in 20 minutes', playbackUrl: 'https://cdn.example/v/1/master.m3u8', channel: { handle: 'chef.amara', subscriberCount: 0 } });
+    await request(ctx.http).get(`/api/videos/${unl.id}`).expect(200);
+    await request(ctx.http).get(`/api/videos/${priv.id}`).expect(404);
+    await request(ctx.http).get(`/api/videos/${proc.id}`).expect(404);
+    expect((await owner.agent.get(`/api/videos/${priv.id}`).expect(200)).body.video.visibility).toBe('PRIVATE');
+    expect((await owner.agent.get(`/api/videos/${proc.id}`).expect(200)).body.video.playbackUrl).toBeNull();
+    await request(ctx.http).get('/api/videos/not-a-uuid').expect(400);
+
+    const s = (await request(ctx.http).get('/api/search?q=jollof rice').expect(200)).body;
+    expect(s.videos.map((x: any) => x.title)).toEqual(['Jollof rice in 20 minutes']);
+    expect((await request(ctx.http).get('/api/search?q=dinner')).body.videos).toEqual([]);
+    expect((await request(ctx.http).get('/api/search?q=amara')).body.channels.map((c: any) => c.handle)).toEqual(['chef.amara']);
+    expect((await request(ctx.http).get('/api/search/suggest?q=jol')).body.suggestions).toEqual(['Jollof rice in 20 minutes']);
+    expect((await request(ctx.http).get('/api/search/suggest?q=j')).body.suggestions).toEqual([]);
+  });
+});

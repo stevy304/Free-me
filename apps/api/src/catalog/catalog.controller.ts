@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
@@ -51,6 +51,43 @@ export class CatalogController {
       ...(shorts === 'true' ? { isShort: true } : shorts === 'false' ? { isShort: false } : {}),
     };
     return this.page(where, cursor, limit);
+  }
+
+  @Get('videos/:id')
+  @ApiOperation({ summary: 'One video for its watch page (public and unlisted when ready; private only for its owner)' })
+  async video(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null) {
+    const v = await this.prisma.video.findUnique({ where: { id }, include: { channel: true, category: true } });
+    const owner = !!auth && v?.channel.userId === auth.user.id;
+    if (!v || (!owner && (v.status !== 'READY' || v.visibility === 'PRIVATE'))) throw new NotFoundException('This video is not available.');
+    return { video: { ...videoCard(v), description: v.description, status: v.status, visibility: v.visibility, likeCount: v.likeCount, commentCount: v.commentCount,
+      category: v.category ? { name: v.category.name, slug: v.category.slug } : null, playbackUrl: v.status === 'READY' ? v.masterPlaylistUrl : null,
+      channel: { ...videoCard(v).channel, subscriberCount: v.channel.subscriberCount } } };
+  }
+
+  @Get('search')
+  @ApiOperation({ summary: 'Search public videos and channels' })
+  async search(@Query('q') q = '', @Query('cursor') cursor?: string) {
+    const term = q.trim().slice(0, 100);
+    if (!term) return { query: '', channels: [], videos: [], nextCursor: null };
+    const words = term.split(/\s+/).filter(Boolean).slice(0, 6);
+    const channels = cursor ? [] : await this.prisma.channel.findMany({
+      where: { OR: [{ name: { contains: term, mode: 'insensitive' } }, { handle: { contains: term.replace(/^@/, '').toLowerCase() } }] },
+      orderBy: { subscriberCount: 'desc' }, take: 5,
+    });
+    const page = await this.page({ AND: words.map((w) => ({ OR: [{ title: { contains: w, mode: 'insensitive' as const } }, { description: { contains: w, mode: 'insensitive' as const } }, { tags: { some: { tag: { name: { equals: w.toLowerCase() } } } } }] })) }, cursor);
+    return { query: term, channels: channels.map(publicChannel), ...page };
+  }
+
+  @Get('search/suggest')
+  @ApiOperation({ summary: 'Search suggestions while typing (titles and channels)' })
+  async suggest(@Query('q') q = '') {
+    const term = q.trim().slice(0, 60);
+    if (term.length < 2) return { suggestions: [] };
+    const [videos, channels] = await Promise.all([
+      this.prisma.video.findMany({ where: { ...PUBLIC_VIDEO, title: { contains: term, mode: 'insensitive' } }, orderBy: { viewCount: 'desc' }, take: 8, select: { title: true } }),
+      this.prisma.channel.findMany({ where: { OR: [{ name: { contains: term, mode: 'insensitive' } }, { handle: { startsWith: term.replace(/^@/, '').toLowerCase() } }] }, orderBy: { subscriberCount: 'desc' }, take: 3, select: { name: true } }),
+    ]);
+    return { suggestions: [...new Set([...channels.map((c) => c.name), ...videos.map((v) => v.title)])].slice(0, 10) };
   }
 
   @Get('feed/subscriptions')

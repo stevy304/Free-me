@@ -1,104 +1,73 @@
-# Free Me — African Video Sharing & Creator Monetization Platform
+# Free Me
 
 > **Your content. Your freedom. Your opportunity.**
 
-Free Me is an independent video-sharing platform engineered to give African creators fair monetization, direct audience relationships, and transparent revenue-sharing powered by local advertisers and businesses.
+Free Me is an independent video-sharing platform where creators publish videos, grow audiences and earn a transparent share of advertising revenue. It launches first in Rwanda and is built for viewers, creators and advertisers in every country: countries, languages, time zones and currencies are data, not assumptions.
 
-Launching initially in **Rwanda** with expansion planned across East Africa (Kenya, Uganda, Tanzania) and the wider African continent, Free Me bridges the gap between local enterprise marketing budgets and African digital creators.
+## Status
 
----
+Phase 1 (foundation) is built and tested. Later phases follow [ROADMAP.md](ROADMAP.md).
 
-## Core Pillars & Values
+| Works today | Arrives later |
+| --- | --- |
+| Sign-in with Google or a one-time email code (no passwords), server-side sessions, signing out other devices | Video upload and transcoding (phase 2) |
+| Profiles with country, language and time zone for anyone in the world | Comments, likes, watch history, playlists (phase 3) |
+| Channels with unique @handles, subscriptions, subscription feed | Creator Studio, advertiser studio, revenue ledger (phase 4) |
+| Home feed, categories, search with suggestions, watch page with adaptive (HLS) playback, Shorts feed, all reading real data | Payouts, moderation queues, analytics (phase 5) |
+| Administration: roles, suspension, audit log | Hetzner rollout, monitoring, load tests (phase 6) |
 
-1. **Creator-First Monetization**: 60% of verified local advertising revenue is directly deposited into creator balances, strictly audited on an immutable ledger.
-2. **Transparent Platform Split**: Configurable and clearly disclosed:
-   - **60%** Creator Revenue Pool
-   - **30%** Platform Infrastructure & Operations
-   - **10%** Community Reinvestment & Creator Grants
-3. **Local Advertising Engine**: Built for Rwandan and African businesses (RDB/RRA registered merchants, telcos, hospitality, fintech, SMEs) with targeting by country, district, and niche category.
-4. **Adaptive Video Streaming**: Resilient HLS (HTTP Live Streaming) supporting 1080p, 720p, 480p, and 360p with low data consumption optimization for African cellular networks.
-5. **Shorts & Long-Form Harmony**: Unified video architecture serving both cinematic long-form stories and viral 9:16 vertical short videos.
-6. **Local Payout Adapters**: Integration with MTN Mobile Money (MoMo Rwanda), Airtel Money, Bank of Kigali (BK), and regional switches with transparent minimum thresholds.
+Nothing in the app is sample data: an empty platform shows empty states until people sign up and publish.
 
----
-
-## System Architecture Overview
-
-The proposed production deployment uses four Hetzner servers:
+## Repository
 
 ```
-                          [ Internet Traffic / CDN Cloudflare ]
-                                          │
-                                          ▼
-                      [ Hetzner Load Balancer / Caddy Edge ]
-                                          │
-                   ┌──────────────────────┴──────────────────────┐
-                   │                                             │
-                   ▼                                             ▼
-       [ SERVER 1: App Node A ]                      [ SERVER 2: App Node B ]
-       • Next.js / React Client                      • Second Web Instance
-       • NestJS/Express API Server                   • Horizontal Scaling Node
-       • Auth & Session Services                     • Background Job Dispatch
-                   │                                             │
-                   └──────────────────────┬──────────────────────┘
-                                          │ Private WireGuard / Hetzner vSwitch
-                   ┌──────────────────────┴──────────────────────┐
-                   │                                             │
-                   ▼                                             ▼
-       [ SERVER 3: Database Node ]                   [ SERVER 4: Media Node ]
-       • PostgreSQL (Prisma ORM)                     • BullMQ Worker Fleet
-       • Redis Cache & Session Store                 • FFmpeg HLS Transcoding
-       • Automated Barman Backups                    • Thumbnail & Sprite Generator
-       • Private Isolated Network                    • Direct-to-S3 Uploader
-                                                                 │
-                                                                 ▼
-                                                  [ S3-Compatible Object Store ]
-                                                  • MinIO / Hetzner Storage Box / Wasabi
+apps/api         NestJS REST API (OpenAPI at /api/docs)
+apps/web         Next.js web app (App Router, Tailwind CSS)
+packages/shared  Rules shared by both: handles, countries, languages, revenue maths
+prisma           PostgreSQL schema, migrations and reference-data seed
+deploy           Per-server Docker Compose files, Caddy edge, backup script
 ```
 
----
+## Run it locally
 
-## Run the web prototype
-
-The current repository runs a Vite preview of the product. It uses sample media and in-memory demo accounts, campaigns and balances. See the [production roadmap](ROADMAP.md) for the current phase and release gates.
+Requirements: Node.js 22.12+ and Docker (for PostgreSQL and Redis), or your own PostgreSQL 16 and Redis 7.
 
 ```bash
-git clone https://github.com/stevy304/Free-me.git
-cd Free-me
-# Use Node.js 24
-npm ci
-npm run dev
+docker compose -f docker-compose.dev.yml up -d   # PostgreSQL + Redis on localhost
+cp .env.example .env                             # then fill SESSION_SECRET (and Google keys if you have them)
+npm ci                                           # also generates the Prisma client and builds packages/shared
+set -a; . ./.env; set +a
+npm run db:migrate && npm run db:seed            # schema + video categories
+npm run dev:api                                  # API on http://localhost:4000 (docs: /api/docs)
+npm run dev:web                                  # web app on http://localhost:3000
 ```
 
-Open http://localhost:3000. Run `npm run lint`, `npm test`, and `npm run build` to check the preview.
+With `MAIL_TRANSPORT=console`, sign-in codes are printed in the API log instead of being emailed. Put your address in `ADMIN_EMAILS` to become an administrator when you sign in.
 
-To bootstrap an empty PostgreSQL development database, set `DATABASE_URL` to its connection string and run `npx prisma migrate deploy`. The web preview still uses demo data.
+## Checks
 
-## Platform Documentation Directory
+```bash
+npm run lint    # TypeScript in every workspace
+npm test        # shared unit tests and API tests (needs DATABASE_URL to a migrated test database)
+npm run build   # API and web production builds
+cd apps/web && E2E_API_LOG=/path/to/api.log npx playwright test   # browser tests against running servers
+```
 
-| Document | Description |
-| :--- | :--- |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Full architectural blueprint, data flow, queue specs, and 4-server topology |
-| [`DATABASE.md`](DATABASE.md) | Relational schema diagrams, Prisma models, indexing strategy, and read-replicas |
-| [`API.md`](API.md) | OpenAPI / REST endpoints for Auth, Videos, Studio, Ads, and Admin |
-| [`DEPLOYMENT.md`](DEPLOYMENT.md) | Hetzner provisioning guide, Docker Compose configurations, and Caddy reverse proxy |
-| [`SECURITY.md`](SECURITY.md) | Threat model, CSRF/XSS mitigations, upload sanitization, and audit logs |
-| [`ENVIRONMENT.md`](ENVIRONMENT.md) | Complete inventory of environment variables and production secrets |
-| [`BACKUP-AND-RECOVERY.md`](BACKUP-AND-RECOVERY.md) | Automated PostgreSQL WAL-G/Barman snapshots, S3 replication, and RTO/RPO |
+CI runs all of these on every pull request ([.github/workflows/verify.yml](.github/workflows/verify.yml)).
 
----
+## Documentation
+
+| Document | Contents |
+| --- | --- |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Components, request flow, four-server topology |
+| [DATABASE.md](DATABASE.md) | Schema, migrations, indexes, data rules |
+| [API.md](API.md) | Endpoints and conventions |
+| [SECURITY.md](SECURITY.md) | Authentication, sessions, CSRF, rate limits, audit |
+| [ENVIRONMENT.md](ENVIRONMENT.md) | Every environment variable |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Hetzner servers, firewall rules, release steps |
+| [BACKUP-AND-RECOVERY.md](BACKUP-AND-RECOVERY.md) | Backups, restore drill, recovery targets |
+| [ROADMAP.md](ROADMAP.md) | Phases and their exit criteria |
 
 ## License
 
-Proprietary — All rights reserved by Free Me Platform Ltd. (Rwanda).
-
-## Try real upload and playback locally
-
-Install FFmpeg, then run the video service in one terminal and the web app in another.
-
-```bash
-node prototypes/video-backend.mjs
-npm run dev
-```
-
-The **Upload** button accepts a raw MP4 of up to 25 MiB. On mobile, open the account menu to find it. The backend processes the first 60 seconds into an adaptive HLS playlist with up to three quality levels, stores media on disk, and records status in SQLite. SQLite stores the upload catalog, and FFmpeg generates a thumbnail. The backend serves ready videos to any browser connected to the same local instance. Data defaults to `~/.free-me-video`. To reopen an earlier prototype catalog, set `FREEME_DATA_DIR` to its previous directory before starting the backend. The discovery fixtures, persona switching, and monetization screens use sample data.
+Proprietary. All rights reserved.

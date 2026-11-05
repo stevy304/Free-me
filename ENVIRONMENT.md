@@ -1,73 +1,42 @@
-# Free Me — Environment Configuration Matrix
+# Environment variables
 
-This document defines the configuration parameters for development, staging, and production environments across all four Hetzner nodes.
+Values for local development are in [.env.example](.env.example). In production they come from the deployment secret store as `api.env` (mode 600, owned by root) on each application node. The API checks them at start-up and stops with a clear message if something required or unsafe is set.
 
-## 1. Application Nodes (Server 1 & 2)
+## API (apps/api)
 
-```env
-# Runtime
-NODE_ENV="production"
-PORT=3000
-API_PORT=4000
-APP_URL="https://freeme.rw"
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `NODE_ENV` | | `development` | `production` turns on the strict checks below |
+| `PORT` | | `4000` | Listening port |
+| `DATABASE_URL` | yes | | PostgreSQL connection string (private address of server 3) |
+| `REDIS_URL` | production | | Redis for rate limits shared by all instances. Without it, limits are per process (development only; production health reports degraded) |
+| `APP_URL` | production | `http://localhost:3000` | Public origin of the web app, e.g. `https://freeme.example`. Must be https in production |
+| `EXTRA_ORIGINS` | | | Other web origins allowed to send changes (comma-separated) |
+| `SESSION_SECRET` | production | development value | 32+ random characters (`openssl rand -base64 48`). Keys code hashes and the OAuth state cookie. Changing it invalidates pending codes and Google sign-ins in progress (not sessions) |
+| `SESSION_TTL_DAYS` | | `30` | Session lifetime, sliding, 1–90 |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | for Google sign-in | | OAuth client ("Web application"). Authorised redirect URI: `${APP_URL}/api/auth/google/callback` |
+| `MAIL_TRANSPORT` | | `console` (dev), `smtp` (prod) | `smtp`, `console` (prints codes in the log) or `memory` (tests). Production requires `smtp` |
+| `MAIL_FROM` | production | | Sender, e.g. `Free Me <no-reply@freeme.example>` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` | with smtp | port 587 | Mail provider credentials (`SMTP_SECURE=true` or port 465 for implicit TLS) |
+| `ADMIN_EMAILS` | | | Addresses that get the administrator role when they sign in |
+| `TRUST_PROXY` | | `1` in production | Number of proxies in front of the API |
+| `API_DOCS` | | on outside production | `true` serves OpenAPI at `/api/docs` |
 
-# Database & Cache (Server 3 Private IP)
-DATABASE_URL="postgresql://freeme_user:${DB_PASSWORD}@10.0.1.20:5432/freeme_prod?schema=public&sslmode=prefer"
-REDIS_URL="redis://:${REDIS_PASSWORD}@10.0.1.20:6379"
+## Web (apps/web)
 
-# Security & Authentication
-JWT_ACCESS_SECRET="CHANGE_ME_IN_PRODUCTION_MIN_64_CHAR_HEX"
-JWT_REFRESH_SECRET="CHANGE_ME_IN_PRODUCTION_MIN_64_CHAR_HEX"
-JWT_ACCESS_EXPIRES_IN="15m"
-JWT_REFRESH_EXPIRES_IN="7d"
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `API_INTERNAL_URL` | yes | `http://localhost:4000` | Where the web server reaches the API (private network, or `http://api:4000` inside the app-node compose) |
+| `PORT`, `HOSTNAME` | | `3000`, `0.0.0.0` | Listening address of the standalone server |
 
-# S3-Compatible Object Storage (Hetzner / MinIO / Wasabi)
-S3_ENDPOINT="https://fsn1.your-objectstorage.com"
-S3_REGION="eu-central-1"
-S3_ACCESS_KEY="S3_ACCESS_KEY_ID"
-S3_SECRET_KEY="S3_SECRET_ACCESS_KEY"
-S3_BUCKET_RAW="freeme-raw-uploads"
-S3_BUCKET_HLS="freeme-hls-streaming"
-S3_BUCKET_THUMBNAILS="freeme-thumbnails"
-CDN_BASE_URL="https://cdn.freeme.rw"
+## Database node (deploy/db-node)
 
-# Creator Revenue Sharing Default Splits (Audited)
-REVENUE_SPLIT_CREATOR_PERCENT=60
-REVENUE_SPLIT_PLATFORM_PERCENT=30
-REVENUE_SPLIT_REINVEST_PERCENT=10
+`PRIVATE_IP`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`; for backups `BACKUP_S3_URI`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL`, `BACKUP_KEEP_DAYS`.
 
-# Local Payment Gateway Adapters
-MTN_MOMO_API_KEY="MOMO_API_KEY"
-MTN_MOMO_SUBSCRIPTION_KEY="MOMO_SUBSCRIPTION_KEY"
-MTN_MOMO_ENVIRONMENT="production"
-BANK_OF_KIGALI_MERCHANT_ID="BK_MERCHANT_ID"
-BANK_OF_KIGALI_API_SECRET="BK_SECRET"
-```
+## Edge (deploy/edge)
 
-## 2. Media Node (Server 4)
+`FREEME_DOMAIN`, `ACME_EMAIL`, `APP_NODE_A`, `APP_NODE_B` (private addresses of servers 1 and 2).
 
-```env
-# Transcoding Engine
-REDIS_URL="redis://:${REDIS_PASSWORD}@10.0.1.20:6379"
-FFMPEG_PATH="/usr/bin/ffmpeg"
-FFPROBE_PATH="/usr/bin/ffprobe"
-TRANSCODE_CONCURRENCY=4
-TMP_SCRATCH_DIR="/tmp/transcode"
+## Coming with later phases
 
-# S3 Access
-S3_ENDPOINT="https://fsn1.your-objectstorage.com"
-S3_ACCESS_KEY="S3_ACCESS_KEY_ID"
-S3_SECRET_KEY="S3_SECRET_ACCESS_KEY"
-S3_BUCKET_RAW="freeme-raw-uploads"
-S3_BUCKET_HLS="freeme-hls-streaming"
-```
-
-## 3. Database Node (Server 3)
-
-```env
-POSTGRES_DB="freeme_prod"
-POSTGRES_USER="freeme_user"
-POSTGRES_PASSWORD="STRONG_SECURE_PASSWORD"
-REDIS_PASSWORD="STRONG_REDIS_PASSWORD"
-WALG_S3_PREFIX="s3://freeme-db-backups/postgres-wal"
-```
+Object storage (`S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`), `CDN_BASE_URL`, upload and transcoding limits (phase 2); payment provider credentials per country (phase 5). They will be added here when code uses them.
