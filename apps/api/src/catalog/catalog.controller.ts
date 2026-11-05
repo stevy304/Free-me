@@ -75,6 +75,7 @@ export class CatalogController {
         commentsOpen: v.commentsEnabled && !v.madeForKids, takenDownAt: v.takenDownAt,
         category: v.category ? { name: v.category.name, slug: v.category.slug } : null, playbackUrl: this.urls.playback(v),
         processingStage: v.processingStage, width: v.width, height: v.height, madeForKids: v.madeForKids,
+        storyboardUrl: v.storyboard && v.status === 'READY' ? `/api/videos/${v.id}/storyboard.vtt` : null,
         channel: { ...card.channel, followerCount: v.channel.subscriberCount } },
       viewer: {
         signedIn: !!auth, isOwner: owner, following: !!following, saved: saved > 0,

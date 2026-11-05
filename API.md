@@ -86,7 +86,8 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/videos/:id/hls/master.m3u8` | Master playlist for private media (owner only) or while media is moving |
-| GET | `/videos/:id/hls/:rendition/index.m3u8` | Variant playlist whose segment links are signed for 4 hours |
+| GET | `/videos/:id/hls/:rendition/index.m3u8` | Variant playlist whose segment links are signed for 4 hours (`144p`…`2160p`, and `audio` for the shared audio rendition) |
+| GET | `/videos/:id/storyboard.vtt` | Seek-bar previews as WebVTT: each cue is a time range and a tile of the sprite sheet (`#xywh=x,y,w,h`). `storyboardUrl` in `/videos/:id` points here when the video has them |
 | POST | `/videos/:id/views` | `{ watchedSeconds }`: counts a view after at least 30 s (or half of a short video); once per viewer per 6 hours; the owner's views do not count |
 
 Public and unlisted videos play from the CDN: `playbackUrl` in `/videos/:id` and feed items points at `MEDIA_PUBLIC_BASE_URL/<id>/hls/master.m3u8`.

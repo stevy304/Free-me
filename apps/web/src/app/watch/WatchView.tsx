@@ -18,7 +18,7 @@ import type { VideoCardData } from '@/lib/types';
 
 export interface WatchVideo extends VideoCardData {
   description: string | null; status: string; visibility: string; likeCount: number; commentCount: number; commentsOpen: boolean; playbackUrl: string | null; processingStage: string | null;
-  takenDownAt: string | null; category: { name: string; slug: string } | null; channel: VideoCardData['channel'] & { followerCount: number };
+  takenDownAt: string | null; storyboardUrl?: string | null; category: { name: string; slug: string } | null; channel: VideoCardData['channel'] & { followerCount: number };
 }
 export interface WatchViewer { signedIn: boolean; isOwner: boolean; following: boolean; saved: boolean; reaction: 'like' | 'dislike' | 'none'; resumeAt: number }
 
@@ -117,7 +117,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   }, [v.id, v.commentsOpen, v.commentCount]);
 
   const player = v.playbackUrl
-    ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
+    ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} storyboard={v.storyboardUrl} onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
     : <div className="grid aspect-video w-full place-items-center rounded-[24px] bg-[#0b1413] text-center text-[15px] text-[#9fb0ad]"><div><Icon.Spinner className="mx-auto mb-3 animate-spin" />{v.takenDownAt ? 'This video was removed. See Creator Hub for details.' : v.processingStage ?? 'This video is still being processed.'}</div></div>;
 
   const pill = 'flex h-11 shrink-0 items-center gap-2 rounded-full border border-[#2bb5ab]/70 px-5 text-[14px] font-semibold text-white shadow-[0_0_14px_rgb(43_181_171/0.16)] transition-colors hover:bg-[#2bb5ab]/12';

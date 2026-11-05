@@ -44,7 +44,7 @@ export class PlaybackController {
   }
 
   private async playlist(id: string, path: string, auth: AuthContext | null, res: Response) {
-    if (!/^(master\.m3u8|\d{3,4}p\/index\.m3u8)$/.test(path)) throw new NotFoundException();
+    if (!/^(master\.m3u8|(\d{3,4}p|audio)\/index\.m3u8)$/.test(path)) throw new NotFoundException();
     const v = await this.viewable(id, auth);
     const prefix = mediaPrefix(id, v.mediaLocation);
     const text = await this.storage.getText(`${prefix}hls/${path}`);
@@ -62,6 +62,27 @@ export class PlaybackController {
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(body);
+  }
+
+  @Get(':id/storyboard.vtt')
+  @ApiOperation({ summary: 'Seek-bar previews as WebVTT: each cue is a time range and the part of the sprite sheet (#xywh) to show' })
+  async storyboard(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null, @Res() res: Response) {
+    const v = await this.viewable(id, auth);
+    const sb = v.storyboard as { key: string; interval: number; count: number; cols: number; width: number; height: number } | null;
+    if (!sb?.key) throw new NotFoundException('This video has no previews.');
+    const sheet = await this.urls.file(v, sb.key);
+    const t = (s: number) => new Date(Math.min(s, 359_999) * 1000).toISOString().slice(11, 23);
+    const cues: string[] = ['WEBVTT', ''];
+    for (let i = 0; i < sb.count; i++) {
+      const start = i * sb.interval;
+      if (start >= (v.durationSeconds || Infinity)) break;
+      const end = Math.min((i + 1) * sb.interval, v.durationSeconds || (i + 1) * sb.interval);
+      cues.push(`${t(start)} --> ${t(end)}`, `${sheet}#xywh=${(i % sb.cols) * sb.width},${Math.floor(i / sb.cols) * sb.height},${sb.width},${sb.height}`, '');
+    }
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    // Private sheets are signed links that expire: never cache those for long.
+    res.setHeader('Cache-Control', v.mediaLocation === 'PUBLIC' ? 'public, max-age=300' : 'private, no-store');
+    res.send(cues.join('\n'));
   }
 
   @Post(':id/views')

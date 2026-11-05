@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
+import { hdrOf, type Hdr } from './filters';
 
-export interface ProbeResult { durationSeconds: number; width: number; height: number; fps: number; hasAudio: boolean; videoCodec: string }
+export interface ProbeResult { durationSeconds: number; width: number; height: number; fps: number; hasAudio: boolean; videoCodec: string; hdr: Hdr }
 
 export class MediaError extends Error {
   /** A problem with the file itself: retrying will not help, and the message is shown to the creator. */
@@ -32,5 +33,5 @@ export async function probe(ffprobe: string, path: string): Promise<ProbeResult>
   const [w, h] = rotation === 90 ? [v.height, v.width] : [v.width, v.height];
   const [num, den] = String(v.avg_frame_rate || v.r_frame_rate || '30/1').split('/').map(Number);
   const fps = den ? num / den : 30;
-  return { durationSeconds: duration, width: w, height: h, fps: Number.isFinite(fps) && fps > 0 && fps < 241 ? fps : 30, hasAudio: !!data.streams?.some((s) => s.codec_type === 'audio'), videoCodec: v.codec_name };
+  return { durationSeconds: duration, width: w, height: h, fps: Number.isFinite(fps) && fps > 0 && fps < 241 ? fps : 30, hasAudio: !!data.streams?.some((s) => s.codec_type === 'audio'), videoCodec: v.codec_name, hdr: hdrOf(v) };
 }

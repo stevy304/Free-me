@@ -240,6 +240,8 @@ model Video {
   height                Int?
   thumbnailKey          String?           // storage key of the chosen thumbnail
   thumbnailCandidates   String[]          // storage keys of generated frames the creator can choose from
+  /// Seek-bar previews: { key, interval, count, cols, rows, width, height } of one sprite sheet under thumbs/.
+  storyboard            Json?
   customThumbnail       Boolean           @default(false)
   isShort               Boolean           @default(false)
   madeForKids           Boolean           @default(false)

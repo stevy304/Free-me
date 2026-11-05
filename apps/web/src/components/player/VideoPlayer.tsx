@@ -20,9 +20,11 @@ const label = (h: number, w: number) => `${Math.min(h, w)}p`;
  * after real watching (30 s, or half of a short video). `startAt` resumes where the viewer stopped; `onProgress` is
  * called every 10 seconds of playback, on pause, at the end and when the page is left, to remember the position.
  */
-export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange }: {
+export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange, storyboard }: {
   src: string; poster?: string | null; videoId?: string; durationHint?: number; autoPlay?: boolean; theater?: boolean; onTheater?: () => void; onEnded?: () => void;
   startAt?: number; onProgress?: (seconds: number, ended: boolean) => void; onPlayingChange?: (playing: boolean) => void;
+  /** WebVTT of seek-bar previews (cues point into a sprite sheet with #xywh). */
+  storyboard?: string | null;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -41,7 +43,9 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const [menu, setMenu] = useState<null | 'main' | 'quality' | 'speed'>(null);
   const [idle, setIdle] = useState(false);
   const [full, setFull] = useState(false);
-  const [hover, setHover] = useState<{ x: number; t: number } | null>(null);
+  const [hover, setHover] = useState<{ x: number; t: number; w: number } | null>(null);
+  const dragging = useRef(false);
+  const cues = useStoryboard(storyboard);
   const [flash, setFlash] = useState<'play' | 'pause' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const watched = useRef(0);
@@ -246,15 +250,30 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
           <span className="w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums sm:w-11 sm:text-[12px]">{fmt(time)}</span>
           {/* Seek track */}
           <div className="group/bar relative mx-1 flex h-8 sm:mx-1.5 min-w-0 flex-1 cursor-pointer items-center" role="slider" aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(time)} aria-valuetext={`${fmt(time)} of ${fmt(duration)}`} tabIndex={0}
-            onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHover({ x: e.clientX - r.left, t: ((e.clientX - r.left) / r.width) * duration }); }}
-            onMouseLeave={() => setHover(null)}
-            onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seek(((e.clientX - r.left) / r.width) * duration); }}>
+            onPointerMove={(e) => {
+              if (e.pointerType !== 'mouse' && !dragging.current) return;
+              const r = e.currentTarget.getBoundingClientRect(); const x = Math.max(0, Math.min(r.width, e.clientX - r.left));
+              setHover({ x, t: (x / r.width) * duration, w: r.width });
+            }}
+            onPointerDown={(e) => {
+              dragging.current = true; e.currentTarget.setPointerCapture(e.pointerId);
+              const r = e.currentTarget.getBoundingClientRect(); const x = Math.max(0, Math.min(r.width, e.clientX - r.left));
+              setHover({ x, t: (x / r.width) * duration, w: r.width }); poke();
+            }}
+            onPointerUp={(e) => {
+              if (!dragging.current) return;
+              dragging.current = false;
+              const r = e.currentTarget.getBoundingClientRect(); seek((Math.max(0, Math.min(r.width, e.clientX - r.left)) / r.width) * duration);
+              if (e.pointerType !== 'mouse') setHover(null);
+            }}
+            onPointerCancel={() => { dragging.current = false; setHover(null); }}
+            onPointerLeave={(e) => { if (e.pointerType === 'mouse' && !dragging.current) setHover(null); }}>
             <div className="relative h-1.5 w-full rounded-full bg-white/20 transition-[height] group-hover/bar:h-2">
               <div className="absolute inset-y-0 left-0 rounded-full bg-white/30" style={{ width: pct(buffered) }} />
               <div className="absolute inset-y-0 left-0 rounded-full bg-[#f5b95c]" style={{ width: pct(time) }} />
               <div className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_4px_rgb(245_185_92/0.35)] transition-transform group-hover/bar:scale-110" style={{ left: pct(time) }} />
             </div>
-            {hover && <span className="absolute -top-9 -translate-x-1/2 rounded-lg bg-[rgb(16_32_31/0.92)] px-2 py-1 text-[12px] font-semibold tabular-nums text-white" style={{ left: Math.max(22, hover.x) }}>{fmt(hover.t)}</span>}
+            {hover && <SeekPreview hover={hover} cue={cueAt(cues, hover.t)} label={fmt(hover.t)} />}
           </div>
           <span className="w-10 shrink-0 text-[11px] font-semibold tabular-nums text-white/60 sm:w-11 sm:text-[12px]">{fmt(duration)}</span>
           <div className="group/vol relative hidden items-center sm:flex">
@@ -272,5 +291,44 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
         </div>
       </div>
     </div>
+  );
+}
+
+interface Cue { start: number; end: number; url: string; x: number; y: number; w: number; h: number }
+
+/** Loads the seek-bar preview track once: each cue is a time range and its tile on the sprite sheet. */
+function useStoryboard(url?: string | null): Cue[] {
+  const [cues, setCues] = useState<Cue[]>([]);
+  useEffect(() => {
+    setCues([]);
+    if (!url) return;
+    const ctrl = new AbortController();
+    fetch(url, { credentials: 'same-origin', signal: ctrl.signal }).then((r) => (r.ok ? r.text() : '')).then((text) => {
+      const sec = (t: string) => { const [h, m, s] = t.split(':'); return Number(h) * 3600 + Number(m) * 60 + Number(s); };
+      const out: Cue[] = [];
+      for (const block of text.split(/\n\n+/)) {
+        const m = /(\d+:\d{2}:\d{2}\.\d{3}) --> (\d+:\d{2}:\d{2}\.\d{3})\n(\S+)#xywh=(\d+),(\d+),(\d+),(\d+)/.exec(block);
+        if (m) out.push({ start: sec(m[1]), end: sec(m[2]), url: m[3], x: +m[4], y: +m[5], w: +m[6], h: +m[7] });
+      }
+      setCues(out);
+      if (out[0]) { const img = new Image(); img.src = out[0].url; } // warm the sheet so the first hover is instant
+    }).catch(() => undefined);
+    return () => ctrl.abort();
+  }, [url]);
+  return cues;
+}
+
+const cueAt = (cues: Cue[], t: number) => cues.find((c) => t >= c.start && t < c.end) ?? (cues.length && t >= cues[cues.length - 1].start ? cues[cues.length - 1] : null);
+
+/** The frame (when there are previews) and the time above the pointer, kept inside the bar. */
+function SeekPreview({ hover, cue, label }: { hover: { x: number; w: number }; cue: Cue | null; label: string }) {
+  const half = cue ? cue.w / 2 + 2 : 22;
+  const left = Math.max(half, Math.min(hover.w - half, hover.x));
+  if (!cue) return <span className="pointer-events-none absolute -top-9 -translate-x-1/2 rounded-lg bg-[rgb(16_32_31/0.92)] px-2 py-1 text-[12px] font-semibold tabular-nums text-white" style={{ left }}>{label}</span>;
+  return (
+    <span className="pointer-events-none absolute bottom-9 -translate-x-1/2 overflow-hidden rounded-xl bg-[rgb(16_32_31/0.92)] shadow-[0_8px_24px_rgb(0_0_0/0.45)] ring-1 ring-[#2bb5ab]/60" style={{ left }}>
+      <span className="block bg-no-repeat" style={{ width: cue.w, height: cue.h, backgroundImage: `url("${cue.url}")`, backgroundPosition: `-${cue.x}px -${cue.y}px` }} />
+      <span className="block py-1 text-center text-[12px] font-semibold tabular-nums text-white">{label}</span>
+    </span>
   );
 }

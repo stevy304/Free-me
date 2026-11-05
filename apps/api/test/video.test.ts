@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import request from 'supertest';
@@ -70,6 +70,10 @@ test('rendition ladder: never upscales, names rungs by the short side, portrait 
   expect(planLadder(3840, 2160, 60).at(-1)!.videoKbps).toBe(24000);
   expect(masterPlaylist([{ name: '720p', width: 1280, height: 720, bandwidth: 3_000_000, codecs: 'avc1.64001f,mp4a.40.2', frameRate: 30, playlist: '720p/index.m3u8' }]))
     .toContain('#EXT-X-STREAM-INF:BANDWIDTH=3000000,AVERAGE-BANDWIDTH=2250000,RESOLUTION=1280x720,CODECS="avc1.64001f,mp4a.40.2",FRAME-RATE=30.000,NAME="720p"\n720p/index.m3u8');
+  // Shared audio: one EXT-X-MEDIA rendition; every rung points to it and its bandwidth includes it.
+  const shared = masterPlaylist([{ name: '720p', width: 1280, height: 720, bandwidth: 3_000_000, codecs: 'avc1.64001f', frameRate: 30, playlist: '720p/index.m3u8' }], true);
+  expect(shared).toContain('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Original",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="2",URI="audio/index.m3u8"');
+  expect(shared).toContain('BANDWIDTH=3128000,AVERAGE-BANDWIDTH=2346000,RESOLUTION=1280x720,CODECS="avc1.64001f,mp4a.40.2",FRAME-RATE=30.000,NAME="720p",AUDIO="aud"');
 });
 
 test('upload in parts, resume, process to adaptive HLS, play privately, publish to the CDN prefix, count views, delete', async () => {
@@ -98,6 +102,31 @@ test('upload in parts, resume, process to adaptive HLS, play privately, publish 
   // Private: only the owner can play; segments are short-lived signed links.
   const master = (await agent.get(v.playbackUrl).expect(200)).text;
   expect(master.match(/#EXT-X-STREAM-INF/g)).toHaveLength(5);
+  // Audio is stored once and shared; the private route signs its segments too.
+  expect(master).toContain('URI="audio/index.m3u8"');
+  expect(existsSync(join(storageDir, 'prv', id, 'hls', '720p', 'seg_00000.m4s'))).toBe(true);
+  const audioList = (await agent.get(`/api/videos/${id}/hls/audio/index.m3u8`).expect(200)).text;
+  expect(audioList).toMatch(/#EXT-X-MAP:URI="http[^"]+"/); // signed links (opaque tokens)
+  expect(audioList.split('\n').filter((l) => l.startsWith('http')).length).toBeGreaterThan(0);
+  await request(ctx.http).get(`/api/videos/${id}/hls/audio/index.m3u8`).expect(404); // private: owner only
+  // The video renditions carry no audio of their own.
+  const vstreams = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', join(storageDir, 'prv', id, 'hls', '720p', 'init.mp4')]).toString().trim();
+  expect(vstreams).toBe('video');
+  // Loudness: the 440 Hz test tone is far louder than -14 LUFS at the source; the output is evened out to about -14.
+  const prv = join(storageDir, 'prv', id, 'hls', 'audio');
+  const joined = join(dir, `audio-${id}.mp4`);
+  writeFileSync(joined, Buffer.concat([readFileSync(join(prv, 'init.mp4')), ...readdirSync(prv).filter((f: string) => f.endsWith('.m4s')).sort().map((f: string) => readFileSync(join(prv, f)))]));
+  const err = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', joined, '-af', 'loudnorm=print_format=json', '-f', 'null', '-']).stderr.toString();
+  const integrated = Number(JSON.parse(err.slice(err.lastIndexOf('{'), err.lastIndexOf('}') + 1)).input_i);
+  expect(Math.abs(integrated - -14)).toBeLessThan(2);
+  // Seek-bar previews: one sheet, described as WebVTT cues with #xywh.
+  expect(v.storyboardUrl ?? (await agent.get(`/api/videos/${id}`)).body.video.storyboardUrl).toBe(`/api/videos/${id}/storyboard.vtt`);
+  const vtt = (await agent.get(`/api/videos/${id}/storyboard.vtt`).expect(200)).text;
+  expect(vtt.startsWith('WEBVTT')).toBe(true);
+  expect(vtt).toMatch(/00:00:00\.000 --> 00:00:02\.000\nhttp[^\n#]+#xywh=0,0,160,90\n/);
+  expect(vtt).toMatch(/00:00:02\.000 --> 00:00:04\.000\nhttp[^\n#]+#xywh=160,0,160,90\n/);
+  expect(existsSync(join(storageDir, 'prv', id, 'thumbs', 'storyboard.jpg'))).toBe(true);
+  await request(ctx.http).get(`/api/videos/${id}/storyboard.vtt`).expect(404);
   expect(master).toContain('RESOLUTION=1280x720');
   const variant = (await agent.get(`/api/videos/${id}/hls/720p/index.m3u8`).expect(200)).text;
   expect(variant).toMatch(/#EXT-X-MAP:URI="http:\/\/localhost:3000\/api\/storage\/local\/file\/[\w.-]+"/);
@@ -182,14 +211,32 @@ test('repair: files left in the other storage place are reported, then brought b
   const { STORAGE } = await import('../src/media/queue');
   const jobs = new MediaJobs(ctx.prisma, ctx.app.get(STORAGE), ctx.config, null);
   const report = await jobs.repair(id, false);
-  expect(report).toMatchObject({ location: 'PRIVATE', leftovers: 3, toCopy: 3, copied: 0 });
+  expect(report).toMatchObject({ location: 'PRIVATE', leftovers: 4, toCopy: 4, copied: 0 }); // 3 frames + the seek-preview sheet
   expect(report!.missing).toEqual(expect.arrayContaining(['thumbs/1.jpg', 'thumbs/2.jpg', 'thumbs/3.jpg']));
   expect(existsSync(join(storageDir, 'prv', id, 'thumbs'))).toBe(false); // report only
   const fixed = await jobs.repair(id, true);
-  expect(fixed).toMatchObject({ copied: 3 });
+  expect(fixed).toMatchObject({ copied: 4 });
   expect(existsSync(join(storageDir, 'prv', id, 'thumbs', '2.jpg'))).toBe(true);
   expect(existsSync(join(storageDir, 'pub', id))).toBe(false);
   expect(await jobs.repair(id, false)).toMatchObject({ missing: [], leftovers: 0 });
+}, 180_000);
+
+test('HDR (HLG, BT.2020, 10-bit) is converted to normal colour: renditions and thumbnails are tagged BT.709', async () => {
+  const hlg = join(dir, 'phone_hdr.mp4');
+  ff('-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30:duration=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p10le', '-color_primaries', 'bt2020', '-color_trc', 'arib-std-b67', '-colorspace', 'bt2020nc', hlg);
+  const agent = await creator();
+  const { videoId: id } = await upload(agent, hlg);
+  await until(agent, id, (x) => x.status === 'READY' && x.processingStage === 'Ready');
+  const r720 = join(storageDir, 'prv', id, 'hls', '720p');
+  const sample = join(dir, `hdr-${id}.mp4`);
+  writeFileSync(sample, Buffer.concat([readFileSync(join(r720, 'init.mp4')), readFileSync(join(r720, 'seg_00000.m4s'))]));
+  const tags = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=pix_fmt,color_transfer,color_primaries', '-of', 'csv=p=0', sample]).toString().trim();
+  expect(tags).toBe('yuv420p,bt709,bt709'); // 8-bit, normal colour (the source was 10-bit HLG)
+  expect(existsSync(join(storageDir, 'prv', id, 'thumbs', '2.jpg'))).toBe(true);
+  expect(existsSync(join(storageDir, 'prv', id, 'thumbs', 'storyboard.jpg'))).toBe(true);
+  // No audio track: no audio rendition, and the master lists none.
+  expect(existsSync(join(storageDir, 'prv', id, 'hls', 'audio'))).toBe(false);
+  expect((await agent.get(`/api/videos/${id}/hls/master.m3u8`).expect(200)).text).not.toContain('EXT-X-MEDIA');
 }, 180_000);
 
 test('a vertical clip becomes a Short; a file that is not a video fails with a clear reason; bad uploads are refused', async () => {
