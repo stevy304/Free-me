@@ -1,49 +1,29 @@
-# Free Me — Disaster Recovery & Backup Plan
+# Backup and recovery
 
-## 1. Objectives & Metrics
+## What is backed up
 
-- **Recovery Point Objective (RPO)**: $< 5$ minutes (continuous Write-Ahead Log archiving).
-- **Recovery Time Objective (RTO)**: $< 30$ minutes for full database restoration to a cold standby instance.
+| Data | Where | How | Frequency |
+| --- | --- | --- | --- |
+| PostgreSQL (all accounts, channels, money records, audit log) | Server 3 | `deploy/ubuntu/backup.sh`: `pg_dump` custom format, checked with `pg_restore --list`, uploaded to S3-compatible storage in another location | Nightly (02:15 UTC), kept 30 days |
+| Redis | Server 3 | Append-only file (`/var/lib/redis`) | Continuous; Redis holds rate-limit counters, the job queue and views not yet written (at most 15 s); videos whose processing was interrupted are queued again automatically after 30 minutes |
+| Video sources, renditions, thumbnails | Object storage | The provider keeps redundant copies; enable bucket versioning or replication to a second region for protection against deletion | Continuous |
 
----
+`deploy/ubuntu/install.sh ROLE=db` installs the script as `/usr/local/bin/freeme-backup` and the cron entry (02:15 UTC). Fill `/etc/freeme/backup.env` (mode 600) with `DATABASE_URL`, `BACKUP_S3_URI`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_ENDPOINT_URL`. Keep backups in a different bucket (and ideally a different location) than the videos.
 
-## 2. PostgreSQL Automated WAL-G Setup
+## Restore
 
-PostgreSQL on Server 3 is configured to continuously ship WAL (Write-Ahead Logs) to encrypted offsite object storage (Hetzner Storage Box + redundant Wasabi S3 bucket).
-
-### Archive Command in `postgresql.conf`:
-```ini
-wal_level = replica
-archive_mode = on
-archive_command = 'wal-g wal-push %p'
-archive_timeout = 300
-```
-
-### Full Base Backup Cron:
-Run nightly at 02:00 CAT (Central Africa Time):
 ```bash
-0 2 * * * /usr/local/bin/wal-g backup-push /var/lib/postgresql/data
+aws s3 cp s3://<bucket>/<path>/freeme-<stamp>.dump /tmp/restore.dump --endpoint-url "$AWS_ENDPOINT_URL"
+createdb -h 10.0.1.20 -U freeme freeme_restore
+pg_restore --no-owner --dbname=postgresql://freeme:…@10.0.1.20:5432/freeme_restore /tmp/restore.dump
+# check row counts and a few known records, then point DATABASE_URL at the restored database and restart the API containers
 ```
 
----
+## Targets
 
-## 3. Disaster Recovery Scenario: Complete Node 3 Failure
+- **Recovery point objective:** 24 hours with nightly dumps. Before money starts flowing (phase 4), continuous WAL archiving (e.g. WAL-G to object storage) brings this to minutes; the installer already sets `wal_level=replica` for it.
+- **Recovery time objective:** under 2 hours for a full restore at launch size.
 
-If Server 3 hardware suffers an irrecoverable crash:
+## Drills
 
-1. **Spin up Standby Node**: Launch replacement Hetzner server in Nuremberg or Helsinki.
-2. **Install PostgreSQL 16 & WAL-G**:
-   ```bash
-   apt-get install -y postgresql-16 wal-g
-   ```
-3. **Fetch Latest Base Backup**:
-   ```bash
-   wal-g backup-fetch /var/lib/postgresql/data LATEST
-   ```
-4. **Configure Recovery Target**:
-   Create `/var/lib/postgresql/data/recovery.signal` and append to `postgresql.conf`:
-   ```ini
-   restore_command = 'wal-g wal-fetch %f %p'
-   ```
-5. **Start PostgreSQL**: PostgreSQL replays WAL segments up to the exact minute of failure.
-6. **Switch Internal DNS / IP**: Point `10.0.1.20` to the restored node. Application nodes reconnect automatically via connection retry logic.
+A restore into a scratch database is performed and recorded before launch and every quarter after: dump date, restore duration, row counts compared with production. A backup that has never been restored is not counted as a backup.

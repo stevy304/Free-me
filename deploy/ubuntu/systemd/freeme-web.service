@@ -1,0 +1,26 @@
+[Unit]
+Description=Free Me web app (Next.js)
+After=network-online.target freeme-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=freeme
+Group=freeme
+WorkingDirectory=/opt/freeme/app/apps/web/.next/standalone
+EnvironmentFile=/etc/freeme/freeme.env
+Environment=NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 NEXT_TELEMETRY_DISABLED=1
+ExecStart=/usr/bin/node apps/web/server.js
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,79 +1,54 @@
-# Free Me — Database Architecture & Schema Specification
+# Database
 
-## 1. Engine & Storage Strategy
+PostgreSQL 16 through Prisma 6. The schema is `prisma/schema.prisma`; every change ships as a migration in `prisma/migrations` and is applied with `npx prisma migrate deploy` (never `db push` against a real database). CI checks that the migrations rebuild exactly the schema (`prisma migrate diff --exit-code`).
 
-- **Database Engine**: PostgreSQL 16
-- **Connection Management**: PgBouncer (Transaction pooling mode, pool size 50)
-- **Primary Schema Tooling**: Prisma ORM with versioned SQL migrations
-- **In-Memory Store**: Redis 7 (used for session caching, rate limiting, and BullMQ queues)
+## Migrations
 
----
+| Migration | What it does |
+| --- | --- |
+| `20261104000000_initial` | All platform tables: users, profiles, channels, videos, renditions, files, categories, tags, subscriptions, likes, comments, playlists, watch history, advertisers, campaigns, ad impressions and events, creator eligibility, balances, revenue ledger, payouts, reports, moderation actions, audit log |
+| `20261106000000_video_pipeline` | Storage keys instead of URLs (`hlsMasterKey`, `thumbnailKey`, rendition `playlistKey`), processing progress, stage and error, media location (public or private prefix), thumbnail choices, size and dimensions, audience flag (`madeForKids`), upload id; feed and channel indexes |
+| `20261105000000_passwordless_auth_worldwide` | Sign-in without passwords (`OAuthAccount`, `EmailOtp`, `Session`), roles as a set, account status; removes market-specific defaults (country, city, currency, payout methods); adds currency to every money table and the split in force to each ledger entry |
 
-## 2. Entity Relationship Overview
+The second migration adds required columns without defaults (currency, advertiser country, payout provider). That is safe because no production data existed yet; from now on, required columns on non-empty tables get a default or a backfill step.
 
-```
-User (1) ────────── (1) Profile
-User (1) ────────── (1) Channel
-Channel (1) ─────── (N) Video
-Video (1) ───────── (N) VideoRendition
-Video (1) ───────── (N) Comment
-User (N) ────────── (N) Channel [Subscription]
-User (N) ────────── (N) Video [Like / WatchHistory]
+Reference data: `npm run db:seed` upserts the video categories. Nothing else is seeded: users, channels and videos only come from real use.
 
-User (1) ────────── (1) Advertiser
-Advertiser (1) ──── (N) Campaign
-Campaign (1) ────── (N) AdImpression
-AdImpression (N) ── (1) Video
+## Identity and sessions
 
-Channel (1) ─────── (1) CreatorEligibility
-Channel (1) ─────── (1) CreatorBalance
-Channel (1) ─────── (N) RevenueLedger
-Channel (1) ─────── (N) Payout
-```
+| Table | Purpose | Notes |
+| --- | --- | --- |
+| `User` | One account per email | `roles` is a set (`VIEWER` always; `CREATOR` with a channel; `ADVERTISER`, `MODERATOR`, `ADMIN` granted). `status`: active, suspended, deleted |
+| `OAuthAccount` | Linked Google identities | Unique on (`provider`, `providerAccountId`); linked by Google's stable id, so a changed Gmail address keeps the same account |
+| `EmailOtp` | One-time sign-in codes | Stores an HMAC of the code, never the code; expiry, attempts and use time |
+| `Session` | Signed-in devices | Stores SHA-256 of the cookie token; `expiresAt` slides with use; `revokedAt` ends it everywhere |
+| `Profile` | Name, picture, bio, country, city, language, time zone | All optional except the display name |
+| `AuditLog` | Security and admin actions | Who, what, which record, IP, user agent, details; written by the API, never edited |
 
----
+## Content
 
-## 3. High-Concurrency Mitigation Strategy
+`Channel` (unique `handle`, one per user), `Video` (status, visibility, publish time, counters, processing state, media location), `VideoRendition` (one per quality: size, bitrate, codecs, playlist key), `VideoFile` (the uploaded source), `Category`, `Tag`/`VideoTag`, `Subscription` (unique per user and channel), `Like`, `Comment` (threaded), `Playlist`/`PlaylistItem`, `WatchHistory`.
 
-### Avoid Direct Unbounded Writes on View Counts
-A naive platform writes `UPDATE videos SET view_count = view_count + 1 WHERE id = ?` on every play request. Under 1,000 concurrent viewers, this creates catastrophic row-lock contention.
+Only videos with `status = READY`, `visibility = PUBLIC` and a `publishedAt` appear in feeds and search. Unlisted videos open by link; private ones only for their owner.
 
-**Free Me Strategy**:
-1. When a client watches $\ge 30\text{s}$ (or completes 50% of a short), a view event is written into Redis via `PFADD video:views:<id> <viewer_ip_user_hash>`.
-2. A lightweight background worker runs every 60 seconds, reads unique counts via `PFCOUNT`, and flushes delta increments in single atomic batch queries:
-   ```sql
-   UPDATE "Video" AS v
-   SET "viewCount" = v."viewCount" + batch.delta
-   FROM (VALUES ('vid_1'::text, 42), ('vid_2'::text, 18)) AS batch(id, delta)
-   WHERE v.id = batch.id;
-   ```
+## Advertising and money (phases 4 and 5)
 
-### Strict Financial Invariants (Double-Entry Ledger)
-Money is NEVER magically credited to `CreatorBalance` without a corresponding `RevenueLedger` row.
-The sum of `creatorShareCents + platformShareCents + reinvestShareCents` MUST equal `grossAmountCents`.
+`Advertiser`, `Campaign` (budget, currency, target countries as a GIN-indexed array, empty meaning worldwide), `CampaignCategory`, `AdImpression`, `AdEvent`, `CreatorEligibility`, `CreatorBalance`, `RevenueLedger`, `Payout`.
 
----
+Rules the code will enforce:
+- Amounts are integers in the currency's minor unit (`BigInt`), never floats.
+- A balance changes only through a ledger entry tied to verified revenue or a recorded, audited adjustment.
+- Each ledger entry stores the split in force (`splitBps`, e.g. `6000/3000/1000`), so changing the split never rewrites history.
+- `packages/shared/src/revenue.ts` holds the split and pool-allocation maths (parts always sum to the whole; tested).
 
-## 4. Key Performance Indexes
+## Indexes and pagination
 
-- `Channel(handle)`: Unique index for fast `@handle` profile routing.
-- `Video(channelId, createdAt DESC)`: High-performance channel video tabs.
-- `Video(status, visibility, createdAt DESC)`: Filter index for homepage feed and search discovery.
-- `AdImpression(campaignId, createdAt DESC)`: Fast advertiser spend aggregation.
-- `RevenueLedger(channelId, createdAt DESC)`: Creator earnings timeline.
-- `WatchHistory(userId, lastWatchedAt DESC)`: Fast user history retrieval.
+- Feeds use keyset pagination on (`publishedAt`, `id`) with the existing `Video` indexes; there is no `OFFSET` on large tables.
+- Lookups by unique keys: `User.email`, `Channel.handle`, `Session.tokenHash`, `OAuthAccount (provider, providerAccountId)`.
+- `EmailOtp (email, createdAt)` finds the latest code; `Session (userId, revokedAt)` lists a user's devices.
+- Views and watch time are counted in Redis and written to PostgreSQL in batches every 15 seconds, so a popular video does not mean one database write per view.
+- Media files are not in the database: rows store storage keys; links (CDN or signed) are made when serving.
 
----
+## Expired rows
 
-## 5. Migration Execution Checklist
-
-```bash
-# Generate SQL migration from schema
-npx prisma migrate dev --name init_free_me_schema
-
-# Apply migrations to production database (Node 3)
-npx prisma migrate deploy
-
-# Verify database connection and schema state
-npx prisma db seed
-```
+Expired sign-in codes and sessions stay until a cleanup job removes them (phase 2 adds scheduled jobs). They are already ignored by every query.

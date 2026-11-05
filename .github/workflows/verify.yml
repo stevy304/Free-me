@@ -10,9 +10,14 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # Pinned: Playwright 1.56 installs its browser on Ubuntu 24.04 (not on 26.04, the current ubuntu-latest).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://freeme:freeme@localhost:5432/freeme
+      SHADOW_DATABASE_URL: postgresql://freeme:freeme@localhost:5432/freeme_shadow
+      REDIS_URL: redis://localhost:6379
+      NEXT_TELEMETRY_DISABLED: 1
     services:
       postgres:
         image: postgres:16
@@ -20,23 +25,52 @@ jobs:
           POSTGRES_USER: freeme
           POSTGRES_PASSWORD: freeme
           POSTGRES_DB: freeme
-        ports:
-          - 5432:5432
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U freeme -d freeme"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
-      - run: npx prisma validate
-      - run: npx prisma migrate deploy
-      - run: npx prisma migrate status
+      - name: FFmpeg and an S3-compatible test server
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq ffmpeg
+          pip install --quiet "moto[server]"
+          (moto_server -p 5055 > /tmp/moto.log 2>&1 &)
+      - name: Install (generates the Prisma client and builds the shared package)
+        run: npm ci
+      - name: Schema is valid and migrations match it
+        run: |
+          npx prisma validate
+          PGPASSWORD=freeme psql -h localhost -U freeme -d freeme -c 'CREATE DATABASE freeme_shadow'
+          npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "$SHADOW_DATABASE_URL" --exit-code
+      - name: Migrate an empty database and seed reference data
+        run: npx prisma migrate deploy && npm run db:seed
+      - name: Typecheck
+        run: npm run lint
+      - name: Unit and API tests (PostgreSQL, Redis, FFmpeg, S3 driver)
+        run: npm test
+        env:
+          S3_TEST_ENDPOINT: http://127.0.0.1:5055
+      - name: Build
+        run: npm run build
+      - name: End-to-end tests in a browser
+        run: |
+          export APP_URL=http://localhost:3000 MAIL_TRANSPORT=console SESSION_SECRET=ci-session-secret-0123456789abcdefghij STORAGE_DRIVER=local LOCAL_STORAGE_DIR=/tmp/fm-storage SCRATCH_DIR=/tmp/fm-scratch
+          (cd apps/api && node dist/main.js > /tmp/api.log 2>&1 &)
+          (cd apps/api && node dist/worker.js > /tmp/worker.log 2>&1 &)
+          (cd apps/web && API_INTERNAL_URL=http://127.0.0.1:4000 PORT=3000 HOSTNAME=127.0.0.1 node .next/standalone/apps/web/server.js > /tmp/web.log 2>&1 &)
+          npx --prefix apps/web playwright install --with-deps chromium
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:4000/api/health > /dev/null && curl -sf http://127.0.0.1:3000/ > /dev/null && break; sleep 1; done
+          cd apps/web && E2E_API_LOG=/tmp/api.log npx playwright test
+      - name: Server logs on failure
+        if: failure()
+        run: tail -n 100 /tmp/api.log /tmp/worker.log /tmp/web.log || true

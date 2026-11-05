@@ -1,0 +1,115 @@
+import { normalizeEmail } from '@free-me/shared';
+
+/**
+ * Configuration from environment variables, checked once at start-up. A missing or unsafe setting stops the API
+ * with a message that names it, instead of failing later on a user's request.
+ */
+export interface AppConfig {
+  nodeEnv: 'development' | 'test' | 'production';
+  port: number;
+  /** Public origin of the web app (https://freeme.example). Cookies, redirects and the CSRF check use it. */
+  appUrl: string;
+  /** Extra origins allowed to send state-changing requests (comma-separated), e.g. a staging web app. */
+  extraOrigins: string[];
+  databaseUrl: string;
+  redisUrl: string | null;
+  /** 32+ random characters; signs the short-lived OAuth state cookie and keys the sign-in code hashes. */
+  sessionSecret: string;
+  sessionTtlDays: number;
+  google: { clientId: string; clientSecret: string } | null;
+  mail: { transport: 'smtp' | 'console' | 'memory'; from: string; smtp: { host: string; port: number; secure: boolean; user?: string; pass?: string } | null };
+  /** Accounts that are administrators (their email addresses). Applied each time they sign in. */
+  adminEmails: string[];
+  /** Number of proxies in front of the API (Caddy = 1), so client IPs come from X-Forwarded-For. */
+  trustProxy: number;
+  docsEnabled: boolean;
+  media: MediaConfig;
+}
+
+/** Where videos live and how they are processed (see ENVIRONMENT.md). */
+export interface MediaConfig {
+  /** s3: any S3-compatible object storage (Hetzner Object Storage, MinIO, ...). local: a folder, for development and tests. */
+  driver: 's3' | 'local';
+  s3: { endpoint: string; region: string; bucket: string; accessKeyId: string; secretAccessKey: string; forcePathStyle: boolean } | null;
+  localDir: string;
+  /** Public base address of the pub/ prefix (the CDN). Local driver: served by the API under /api/storage/local/pub. */
+  publicBaseUrl: string;
+  maxUploadBytes: number;
+  /** Size of each upload part (S3 needs 5 MiB+, at most 10,000 parts). */
+  partBytes: number;
+  scratchDir: string;
+  ffmpegPath: string;
+  ffprobePath: string;
+  /** x264 preset: faster presets transcode quicker at a slightly larger size. */
+  preset: string;
+  workerConcurrency: number;
+  /** BullMQ key prefix (lets tests run beside a real queue). */
+  queuePrefix: string;
+}
+
+export class ConfigError extends Error {}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const problems: string[] = [];
+  const nodeEnv = (env.NODE_ENV === 'production' || env.NODE_ENV === 'test' ? env.NODE_ENV : 'development') as AppConfig['nodeEnv'];
+  const prod = nodeEnv === 'production';
+  const need = (k: string) => { const v = env[k]?.trim(); if (!v) problems.push(`${k} is required.`); return v ?? ''; };
+
+  const appUrl = (env.APP_URL?.trim() || (prod ? '' : 'http://localhost:3000')).replace(/\/+$/, '');
+  if (!appUrl) problems.push('APP_URL is required (the public address of the web app).');
+  else if (!/^https?:\/\/[^/]+$/.test(appUrl)) problems.push('APP_URL must be an origin such as https://freeme.example, without a path.');
+  else if (prod && !appUrl.startsWith('https://')) problems.push('APP_URL must use https in production.');
+
+  const databaseUrl = need('DATABASE_URL');
+  const sessionSecret = env.SESSION_SECRET?.trim() || (prod ? '' : 'development-only-session-secret-change-me-0000');
+  if (sessionSecret.length < 32) problems.push('SESSION_SECRET must have at least 32 characters.');
+  if (prod && /development-only/.test(sessionSecret)) problems.push('SESSION_SECRET must be set in production.');
+
+  const googleId = env.GOOGLE_CLIENT_ID?.trim();
+  const googleSecret = env.GOOGLE_CLIENT_SECRET?.trim();
+  if (!!googleId !== !!googleSecret) problems.push('Set both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or neither.');
+
+  const transport = (env.MAIL_TRANSPORT?.trim() || (env.SMTP_HOST ? 'smtp' : prod ? 'smtp' : 'console')) as AppConfig['mail']['transport'];
+  if (!['smtp', 'console', 'memory'].includes(transport)) problems.push('MAIL_TRANSPORT must be smtp, console or memory.');
+  if (prod && transport !== 'smtp') problems.push('Production sends sign-in codes by SMTP: set SMTP_HOST (MAIL_TRANSPORT=console only prints codes, for development).');
+  const smtp = transport === 'smtp'
+    ? { host: need('SMTP_HOST'), port: Number(env.SMTP_PORT || 587), secure: env.SMTP_SECURE === 'true' || env.SMTP_PORT === '465', user: env.SMTP_USER || undefined, pass: env.SMTP_PASS || undefined }
+    : null;
+  const from = env.MAIL_FROM?.trim() || (prod ? '' : 'Free Me <no-reply@localhost>');
+  if (!from) problems.push('MAIL_FROM is required, e.g. "Free Me <no-reply@freeme.example>".');
+
+  const adminEmails = (env.ADMIN_EMAILS ?? '').split(',').map((e) => normalizeEmail(e)).filter((e): e is string => !!e);
+  const extraOrigins = (env.EXTRA_ORIGINS ?? '').split(',').map((o) => o.trim().replace(/\/+$/, '')).filter(Boolean);
+
+  const driver = (env.STORAGE_DRIVER?.trim() || (prod ? 's3' : 'local')) as MediaConfig['driver'];
+  if (!['s3', 'local'].includes(driver)) problems.push('STORAGE_DRIVER must be s3 or local.');
+  if (prod && driver !== 's3') problems.push('Production stores videos in object storage: set STORAGE_DRIVER=s3 and the S3_* variables.');
+  const s3 = driver === 's3'
+    ? { endpoint: need('S3_ENDPOINT'), region: env.S3_REGION?.trim() || 'us-east-1', bucket: need('S3_BUCKET'), accessKeyId: need('S3_ACCESS_KEY'), secretAccessKey: need('S3_SECRET_KEY'), forcePathStyle: env.S3_FORCE_PATH_STYLE !== 'false' }
+    : null;
+  const mib = (k: string, d: number) => Math.round((Number(env[k]) > 0 ? Number(env[k]) : d) * 1024 * 1024);
+  const partBytes = mib('UPLOAD_PART_MB', 16);
+  if (partBytes < 5 * 1024 * 1024) problems.push('UPLOAD_PART_MB must be at least 5.');
+  const maxUploadBytes = mib('MAX_UPLOAD_MB', 20 * 1024);
+  if (Math.ceil(maxUploadBytes / partBytes) > 10_000) problems.push('MAX_UPLOAD_MB / UPLOAD_PART_MB must not exceed 10,000 parts.');
+  const publicBaseUrl = (env.MEDIA_PUBLIC_BASE_URL?.trim() || (driver === 'local' ? `${appUrl}/api/storage/local/pub` : '')).replace(/\/+$/, '');
+  if (driver === 's3' && !publicBaseUrl) problems.push('MEDIA_PUBLIC_BASE_URL is required (the CDN address of the pub/ prefix).');
+  const media: MediaConfig = {
+    driver, s3, localDir: env.LOCAL_STORAGE_DIR?.trim() || './.data/storage', publicBaseUrl, maxUploadBytes, partBytes,
+    scratchDir: env.SCRATCH_DIR?.trim() || '/tmp/freeme-scratch', ffmpegPath: env.FFMPEG_PATH?.trim() || 'ffmpeg', ffprobePath: env.FFPROBE_PATH?.trim() || 'ffprobe',
+    preset: env.TRANSCODE_PRESET?.trim() || 'veryfast', workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
+  };
+  if (prod && !env.REDIS_URL) problems.push('REDIS_URL is required in production (rate limits, video jobs and view counts).');
+
+  if (problems.length) throw new ConfigError(`Free Me API configuration:\n- ${problems.join('\n- ')}`);
+  return {
+    nodeEnv, port: Number(env.PORT || 4000), appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
+    sessionTtlDays: Math.min(90, Math.max(1, Number(env.SESSION_TTL_DAYS || 30))),
+    google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,
+    mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)),
+    docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
+    media,
+  };
+}
+
+export const APP_CONFIG = Symbol('APP_CONFIG');
