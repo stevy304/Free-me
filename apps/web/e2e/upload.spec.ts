@@ -79,6 +79,10 @@ test('upload, details, publish, processing to every quality, then on the home pa
   await expect(page.locator('video track[srclang="en"]')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Subtitles (c)' }).first()).toBeAttached();
   await expect(page.locator('video')).toBeAttached();
+  // Captions are on by default: the English track is live with its lines (the test browser cannot decode H.264, so
+  // the lines themselves are not drawn here).
+  await expect(page.getByRole('button', { name: 'Subtitles (c)' }).first()).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => { const t = document.querySelector('video')!.textTracks[0]; return `${t.mode}:${t.cues?.length ?? 0}`; })).toBe('hidden:2');
   const master = await page.evaluate(async () => (await (await fetch(`/api/videos/${new URLSearchParams(location.search).get('v')}`)).json()).video.playbackUrl as string);
   const text = await (await page.request.get(master)).text();
   expect(text.match(/#EXT-X-STREAM-INF/g)).toHaveLength(5);

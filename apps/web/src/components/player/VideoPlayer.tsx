@@ -360,16 +360,19 @@ function SeekPreview({ hover, cue, label }: { hover: { x: number; w: number }; c
 const captionLabel = (c: CaptionTrack) => `${languageName(c.language)}${c.auto ? ' (automatic)' : ''}`;
 
 /**
- * Which subtitle language is on (remembered: once turned on, captions stay on for the next video when its language
- * is there) and the text of the cue showing now. Tracks run "hidden" so the player draws the text itself.
+ * Which subtitle language is on (on by default when a video has captions; the viewer's choice, including off, is
+ * remembered) and the text of the cue showing now. Tracks run "hidden" so the player draws the text itself.
  */
 function useCaptions(video: React.RefObject<HTMLVideoElement | null>, captions: CaptionTrack[]) {
   const [cc, setCc] = useState<string | null>(null);
   const [cueText, setCueText] = useState('');
   const langs = captions.map((c) => c.language).join(',');
   useEffect(() => {
+    // Captions show by default when a video has them; a viewer who turned them off keeps them off.
     const saved = store.get('fm_cc');
-    setCc(saved && saved !== 'off' && captions.some((c) => c.language === saved) ? saved : null);
+    if (saved === 'off' || !captions.length) { setCc(null); return; }
+    const nav = typeof navigator !== 'undefined' ? navigator.language.slice(0, 2) : '';
+    setCc(captions.find((c) => c.language === saved)?.language ?? captions.find((c) => c.language === nav)?.language ?? captions.find((c) => !c.auto)?.language ?? captions[0].language);
   }, [langs]); // eslint-disable-line react-hooks/exhaustive-deps
   const chooseCc = useCallback((lang: string | null | 'last') => {
     if (lang === 'last') {
