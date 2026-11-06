@@ -83,7 +83,13 @@ export function ControlRoom({ streamId, basic, host, capture, active }: {
       const add = ({ id }: { id: string }) => {
         const destination = context.current?.createMediaStreamDestination();
         if (destination) returns.current.set(id, destination);
-        room.set(id, guestPeer(socket, id, ice.current, (stream) => setGuests((all) => all.map((g) => g.id === id ? { ...g, stream } : g)), () => destination?.stream.getAudioTracks()[0]));
+        let received: MediaStream | null = null;
+        const update = () => setGuests((all) => all.map((guest) => guest.id === id
+          ? { ...guest, stream: peer.pc.connectionState === 'connected' ? received : null }
+          : guest));
+        const peer = guestPeer(socket, id, ice.current, (stream) => { received = stream; update(); }, () => destination?.stream.getAudioTracks()[0]);
+        peer.pc.onconnectionstatechange = update;
+        room.set(id, peer);
         setGuests((all) => [...all, { id, stream: null, onAir: false }]);
       };
       const drop = ({ id }: { id: string }) => {

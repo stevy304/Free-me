@@ -42,9 +42,16 @@ export function JoinBroadcast({ invite }: { invite: string }) {
         if (from === result.host) chain = chain.then(() => peer.receive(payload)).catch(() => setMessage('Could not connect to the host.'));
       };
       const closed = () => { cleanup.current?.(); setState('idle'); setMessage('The green room closed or disconnected.'); };
+      const failed = () => {
+        cleanup.current?.();
+        setState('idle');
+        setMessage('A media connection could not be established. Check your network or ask the host to verify relay availability.');
+      };
+      const timeout = setTimeout(failed, 25_000);
       socket.on('live:guest-signal', signal);
       socket.on('live:guest-closed', closed); socket.on('disconnect', closed);
       cleanup.current = () => {
+        clearTimeout(timeout);
         socket.off('live:guest-signal', signal); socket.off('live:guest-closed', closed); socket.off('disconnect', closed);
         socket.emit('live:guest-leave'); peer.pc.close(); media.getTracks().forEach((t) => t.stop());
         if (preview.current) preview.current.srcObject = null;
@@ -53,8 +60,11 @@ export function JoinBroadcast({ invite }: { invite: string }) {
       };
       for (const track of media.getTracks()) peer.pc.addTrack(track, media);
       peer.pc.onconnectionstatechange = () => {
-        if (peer.pc.connectionState === 'connected') setMessage('Connected. The host decides when to put you on air.');
-        if (peer.pc.connectionState === 'failed') { cleanup.current?.(); setState('idle'); setMessage('The media connection failed. Try joining again.'); }
+        if (peer.pc.connectionState === 'connected') {
+          clearTimeout(timeout);
+          setMessage('Connected. The host decides when to put you on air.');
+        }
+        if (peer.pc.connectionState === 'failed') failed();
       };
       await peer.offer();
       if (mounted.current) { setState('joined'); setMessage('Connecting your camera and microphone to the host…'); }
