@@ -9,6 +9,7 @@ import { RateLimitService } from '../common/rate-limit.service';
 import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import type { AuthContext } from '../common/request';
 import { dateCursor, parseDateCursor, watchable } from './access';
+import { publish, room } from '../realtime/publish';
 
 class NewCommentDto {
   @ApiProperty() @IsString() @MaxLength(COMMENT_MAX) content!: string;
@@ -118,6 +119,7 @@ export class CommentsController {
       return c;
     });
     await notifyComment(this.prisma, created, replyingTo);
+    publish(room.video(id), 'comments', { videoId: id, parentId });
     return { comment: this.view(created, v, auth) };
   }
 
@@ -149,6 +151,7 @@ export class CommentsController {
         if (p.deletedAt && p.replyCount <= 0) await tx.comment.delete({ where: { id: p.id } });
       }
     });
+    publish(room.video(c.videoId), 'comments', { videoId: c.videoId });
     return { removed: true };
   }
 

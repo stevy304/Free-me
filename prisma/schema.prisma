@@ -223,6 +223,9 @@ model Channel {
   subscriptions         Subscription[]
   eligibility           CreatorEligibility?
   balance               CreatorBalance?
+  liveStreams           LiveStream[]
+  /// Secret for encoders (OBS, TV): whoever has it can broadcast on this Space. Stays the same between streams.
+  liveStreamKey         String?           @unique
   payouts               Payout[]
   revenueRecords        RevenueLedger[]
 
@@ -775,6 +778,7 @@ enum NotificationType {
   COMMENT
   REPLY
   SPARK
+  LIVE
 }
 
 /// What appears under the bell. Sparks on one video are grouped into one unread entry (count, latest actor).
@@ -787,6 +791,8 @@ model Notification {
   actor                 User?             @relation("NotificationsCaused", fields: [actorId], references: [id], onDelete: SetNull)
   videoId               String?
   video                 Video?            @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  /// A live stream (type LIVE).
+  liveStreamId          String?
   commentId             String?           // the comment or reply, to open it
   count                 Int               @default(1)
   readAt                DateTime?
@@ -864,4 +870,34 @@ model AdDaySettlement {
   impressions           Int
   channels              Int
   createdAt             DateTime          @default(now())
+}
+
+// -------------------------------------------------------------
+// LIVE (Premium): from the browser, or from OBS / a TV encoder over RTMP
+// -------------------------------------------------------------
+
+enum LiveStatus {
+  IDLE
+  LIVE
+  ENDED
+}
+
+model LiveStream {
+  id                    String            @id @default(uuid())
+  channelId             String
+  channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  title                 String
+  status                LiveStatus        @default(IDLE)
+  /// "browser" or "rtmp", while live.
+  source                String?
+  startedAt             DateTime?
+  endedAt               DateTime?
+  peakViewers           Int               @default(0)
+  /// The recording, processed into an ordinary (private) video once the stream ends.
+  replayVideoId         String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([status, startedAt])
+  @@index([channelId, createdAt])
 }

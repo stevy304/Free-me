@@ -9,6 +9,7 @@ import { useUploads } from './UploadsContext';
 import { VideoDetailsForm, prepareThumbnail } from './VideoDetailsForm';
 import type { UploadKind } from './UploadsContext';
 import type { HubVideo } from './types';
+import { useRealtime } from '@/lib/realtime';
 
 const ACCEPT = '.mp4,.m4v,.mov,.mkv,.webm,.avi,.wmv,.flv,.mpeg,.mpg,.3gp,.ts,.mts,video/*';
 const AUDIO_ACCEPT = '.mp3,.m4a,.aac,.wav,.ogg,.opus,.flac,audio/*';
@@ -62,6 +63,14 @@ export function UploadDialog() {
       } catch (e) { setCoverError((e as Error).message); }
     })();
   }, [snap?.videoId, coverFor, cover, item?.id]);
+
+  // Processing progress arrives as it happens; the page asks for the full state then.
+  const [bump, setBump] = useState(0);
+  useRealtime('processing', () => setBump((b) => b + 1), snap?.videoId ? `video:${snap.videoId}` : null, !!snap?.videoId);
+  useEffect(() => {
+    if (!bump || !snap?.videoId) return;
+    api<{ video: HubVideo }>(`/hub/videos/${snap.videoId}`).then((r) => setVideo((cur) => (cur && cur.processingProgress === r.video.processingProgress && cur.status === r.video.status && cur.processingStage === r.video.processingStage && cur.thumbnailCandidates.length === r.video.thumbnailCandidates.length ? cur : r.video))).catch(() => undefined);
+  }, [bump]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!dialog.open) return;

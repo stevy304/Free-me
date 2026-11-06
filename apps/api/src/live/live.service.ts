@@ -1,0 +1,170 @@
+import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import type { LiveStream, User } from '@prisma/client';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { APP_CONFIG, type AppConfig } from '../config/config';
+import { PrismaService } from '../database/prisma.service';
+import { RedisService } from '../database/redis.service';
+import { MediaQueue, STORAGE } from '../media/queue';
+import type { Storage } from '../media/storage';
+import { publish, room } from '../realtime/publish';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { endLive, finishLive, LIVE_PLAYLIST, LiveSync } from './sync';
+
+export class LiveError extends Error {}
+const isPremium = (u: Pick<User, 'premiumUntil'>) => !!u.premiumUntil && u.premiumUntil > new Date();
+export const newStreamKey = () => `fm_${randomBytes(18).toString('base64url')}`;
+
+interface BrowserSession { ff: ChildProcess; sync: LiveSync; timer: NodeJS.Timeout; socketId: string; bytes: number; ended: Promise<void> }
+
+/**
+ * Live streams. Browser streams arrive over the socket (MediaRecorder chunks) and are encoded here by ffmpeg into
+ * HLS; OBS and TV encoders publish to nginx-rtmp, which writes HLS that the worker copies. Either way viewers get
+ * HLS from the CDN, chat and a viewer count over the socket, and the recording becomes a video afterwards.
+ */
+@Injectable()
+export class LiveService implements OnModuleInit, OnModuleDestroy {
+  private readonly log = new Logger('Live');
+  private readonly browser = new Map<string, BrowserSession>();
+  private viewersTimer: NodeJS.Timeout | null = null;
+  private readonly chat = new Map<string, unknown[]>();
+  constructor(
+    private readonly prisma: PrismaService, @Inject(APP_CONFIG) private readonly config: AppConfig, @Inject(STORAGE) private readonly storage: Storage,
+    private readonly queue: MediaQueue, private readonly realtime: RealtimeGateway, private readonly redis: RedisService,
+  ) {}
+
+  onModuleInit() {
+    // Every 5 seconds: how many people watch each live stream (all servers), for the badge and the peak.
+    this.viewersTimer = setInterval(() => { void this.countViewers(); }, 5000);
+    this.viewersTimer.unref();
+  }
+
+  private async countViewers() {
+    const live = await this.prisma.liveStream.findMany({ where: { status: 'LIVE' }, select: { id: true, peakViewers: true } }).catch(() => []);
+    for (const s of live) {
+      const n = await this.realtime.count(room.live(s.id)).catch(() => 0);
+      publish(room.live(s.id), 'viewers', { count: n });
+      if (n > s.peakViewers) await this.prisma.liveStream.update({ where: { id: s.id }, data: { peakViewers: n } }).catch(() => undefined);
+    }
+  }
+
+  async viewers(id: string) { return this.realtime.count(room.live(id)).catch(() => 0); }
+
+  /** The creator's stream: the current one, or a new idle one ready to go live. */
+  async mine(userId: string): Promise<LiveStream> {
+    const ch = await this.prisma.channel.findUnique({ where: { userId } });
+    if (!ch) throw new LiveError('Create your Space first.');
+    const cur = await this.prisma.liveStream.findFirst({ where: { channelId: ch.id, status: { in: ['IDLE', 'LIVE'] } }, orderBy: { createdAt: 'desc' } });
+    return cur ?? this.prisma.liveStream.create({ data: { channelId: ch.id, title: `${ch.name} live` } });
+  }
+
+  /** The Space's encoder key (made the first time it is asked for; it stays the same between streams). */
+  async streamKey(userId: string, reset = false) {
+    const ch = await this.prisma.channel.findUniqueOrThrow({ where: { userId } });
+    if (ch.liveStreamKey && !reset) return ch.liveStreamKey;
+    const key = newStreamKey();
+    await this.prisma.channel.update({ where: { id: ch.id }, data: { liveStreamKey: key } });
+    return key;
+  }
+
+  /** Followers hear that the Space is live (once per stream). */
+  private async announce(s: LiveStream) {
+    const ch = await this.prisma.channel.findUniqueOrThrow({ where: { id: s.channelId } });
+    const followers = await this.prisma.subscription.findMany({ where: { channelId: ch.id }, select: { userId: true } });
+    const to = followers.filter((f) => f.userId !== ch.userId);
+    if (to.length) await this.prisma.notification.createMany({ data: to.map((f) => ({ userId: f.userId, type: 'LIVE' as const, actorId: ch.userId, liveStreamId: s.id })) });
+    for (const f of to) publish(room.user(f.userId), 'notifications');
+  }
+
+  /** Goes live (Premium members only). */
+  async goLive(user: User, streamId: string, source: 'browser' | 'rtmp') {
+    if (!isPremium(user)) throw new LiveError('Live Studio is part of Premium.');
+    const s = await this.prisma.liveStream.findUnique({ where: { id: streamId }, include: { channel: true } });
+    if (!s || s.channel.userId !== user.id) throw new LiveError('Stream not found.');
+    if (s.status === 'ENDED') throw new LiveError('This stream has ended. Start a new one.');
+    const updated = await this.prisma.liveStream.update({ where: { id: s.id }, data: { status: 'LIVE', source, startedAt: s.startedAt ?? new Date() } });
+    if (s.status === 'IDLE') await this.announce(updated);
+    publish(room.live(s.id), 'started', { id: s.id });
+    return updated;
+  }
+
+  // ----- Browser streams -----
+
+  async startBrowser(user: User, streamId: string, socketId: string) {
+    if (this.browser.has(streamId)) throw new LiveError('This stream is already running in another window.');
+    const s = await this.goLive(user, streamId, 'browser');
+    const dir = join(this.config.media.scratchDir, 'live', s.id);
+    await mkdir(dir, { recursive: true });
+    const ff = spawn(this.config.media.ffmpegPath, [
+      // Start after about a second of input (by default ffmpeg first analyses 5 MB, seconds of delay for viewers).
+      '-hide_banner', '-loglevel', 'error', '-probesize', '256k', '-analyzeduration', '1000000', '-fflags', '+genpts', '-i', 'pipe:0',
+      '-map', '0:v:0?', '-map', '0:a:0?',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-profile:v', 'main', '-pix_fmt', 'yuv420p',
+      '-vf', "scale='min(1280,iw)':-2", '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0', '-b:v', '2500k', '-maxrate', '3000k', '-bufsize', '5000k',
+      '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
+      '-f', 'hls', '-hls_time', '2', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments', '-hls_segment_filename', join(dir, 'seg%05d.ts'), join(dir, LIVE_PLAYLIST),
+    ], { stdio: ['pipe', 'ignore', 'pipe'] });
+    let err = '';
+    ff.stderr?.on('data', (d: Buffer) => { err = (err + d.toString()).slice(-2000); });
+    ff.stdin?.on('error', () => undefined);
+    const sync = new LiveSync(this.storage, s.id, dir);
+    const timer = setInterval(() => { void sync.tick().catch((e) => this.log.warn(`live ${s.id}: ${(e as Error).message}`)); }, 1000);
+    const ended = new Promise<void>((resolve) => ff.on('close', async (code) => {
+      clearInterval(timer);
+      this.browser.delete(s.id);
+      if (code) this.log.warn(`live ${s.id}: encoder stopped (${code}): ${err.trim().slice(-500)}`);
+      await endLive(this.prisma, s.id);
+      await finishLive(this.prisma, this.storage, sync, (videoId) => this.queue.add({ name: 'transcode', videoId }), this.log, this.config.media.ffmpegPath);
+      resolve();
+    }));
+    this.browser.set(s.id, { ff, sync, timer, socketId, bytes: 0, ended });
+    return s;
+  }
+
+  /** One piece of the browser's recording. Returns false if the stream is not running here. */
+  chunk(streamId: string, socketId: string, data: Buffer) {
+    const b = this.browser.get(streamId);
+    if (!b || b.socketId !== socketId) return false;
+    b.bytes += data.length;
+    b.ff.stdin?.write(data);
+    return true;
+  }
+
+  /** Ends a browser stream (the creator pressed End, or their window closed). */
+  async stopBrowser(streamId: string, socketId?: string) {
+    const b = this.browser.get(streamId);
+    if (!b || (socketId && b.socketId !== socketId)) return false;
+    b.ff.stdin?.end();
+    const kill = setTimeout(() => b.ff.kill('SIGKILL'), 20_000);
+    await b.ended; clearTimeout(kill);
+    return true;
+  }
+
+  /** A window closed: its streams end. */
+  async dropSocket(socketId: string) {
+    for (const [id, b] of this.browser) if (b.socketId === socketId) await this.stopBrowser(id);
+  }
+
+  // ----- Chat -----
+
+  /** Recent chat for people who just arrived (kept 2 hours, last 50 lines). */
+  async recentChat(id: string): Promise<unknown[]> {
+    const r = this.redis.client;
+    if (r) return (await r.lrange(`fm:live:chat:${id}`, 0, 49)).map((x) => JSON.parse(x)).reverse();
+    return [...(this.chat.get(id) ?? [])];
+  }
+
+  async say(id: string, line: object) {
+    const r = this.redis.client;
+    if (r) await r.multi().lpush(`fm:live:chat:${id}`, JSON.stringify(line)).ltrim(`fm:live:chat:${id}`, 0, 49).expire(`fm:live:chat:${id}`, 7200).exec();
+    else { const l = this.chat.get(id) ?? []; l.push(line); this.chat.set(id, l.slice(-50)); }
+    publish(room.live(id), 'chat', line);
+  }
+
+  async onModuleDestroy() {
+    if (this.viewersTimer) clearInterval(this.viewersTimer);
+    await Promise.allSettled([...this.browser.keys()].map((id) => this.stopBrowser(id)));
+  }
+}

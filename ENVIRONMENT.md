@@ -85,4 +85,14 @@ Premium, ad campaigns and creator earnings are priced in US dollars. Turn on one
 | `FLW_WEBHOOK_HASH` | recommended with Flutterwave | | The "secret hash" set in the Flutterwave dashboard; the webhook is `https://<domain>/api/billing/webhooks/flutterwave` |
 | `FLW_BASE_URL` | | `https://api.flutterwave.com` | |
 
+## Live (API and worker)
+
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `LIVE_RTMP_URL` | for OBS / TV encoders | off (browser streaming only) | The address encoders publish to, shown in Live Studio, e.g. `rtmp://live.freeme.example/live` |
+| `LIVE_RTMP_SECRET` | with `LIVE_RTMP_URL` | | 24+ random characters; the same secret is in nginx-rtmp's `on_publish` and `on_publish_done` addresses |
+| `LIVE_RTMP_HLS_DIR` | on the media server, with RTMP | | nginx-rtmp's `hls_path` (with `hls_nested on`), e.g. `/var/lib/freeme/live`; the worker copies it to storage |
+
+Browser streams need no setting. See DEPLOYMENT.md → Live streaming.
+
 The worker checks pending payments every minute (MoMo approvals happen on the payer's phone), ends memberships and shares each finished day's ad revenue every 15 minutes.

@@ -194,11 +194,39 @@ Premium gives the verified badge (`channel.isVerified`), which goes when the mem
 
 See MONETISATION.md for how the money is shared.
 
+## Live
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/live` | Spaces live now: `{ id, title, status, startedAt, playbackUrl (HLS), viewers, channel }` |
+| GET | `/live/:id` | One stream (`status` IDLE, LIVE or ENDED; `replayVideoId` once its recording is published) and the recent chat |
+| GET | `/hub/live` 🔒 | My Live Studio: `premium`, the current `stream`, `encoder: { server, streamKey }` (Premium, when RTMP is set up), past streams |
+| PATCH | `/hub/live` 🔒 | `{ title }` |
+| POST | `/hub/live/key` 🔒 | A new encoder key (the old one stops working) |
+| POST | `/hub/live/end` 🔒 | End my stream |
+| POST | `/live/rtmp/publish?secret=` | nginx-rtmp `on_publish` (form `name` = the encoder's key): 302 to the stream id, or 403 |
+| POST | `/live/rtmp/done?secret=` | nginx-rtmp `on_publish_done` |
+
+## Instant updates (socket.io)
+
+Connect to path `/api/socket` (WebSocket transport, no trailing slash). Signed-in sockets join their own room.
+
+| Direction | Event | Data |
+| --- | --- | --- |
+| send | `join` / `leave` | `"video:<id>"` or `"live:<id>"` → `{ ok }` |
+| receive (own room) | `notifications` | something new for the bell |
+| receive (own room) | `payment` | `{ id }`: a payment settled |
+| receive (`video:<id>`) | `comments`, `reactions`, `processing` | `{ videoId, parentId }`, `{ likeCount }`, `{ progress, stage }` |
+| receive (`live:<id>`) | `started`, `ended`, `viewers`, `chat`, `title` | `{ count }`; chat lines `{ id, text, at, author }` |
+| send | `live:start` / `live:stop` | stream id (Premium owner) → `{ ok, error? }` |
+| send | `live:chunk` | `[streamId, ArrayBuffer]`: one piece of the browser's MediaRecorder recording |
+| send | `live:chat` | `{ streamId, text }` (signed in, up to 200 characters, 10 lines in 20 s) |
+
 ## Notifications 🔒
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/me/notifications?cursor=` | Newest first, 50 a page: `{ id, type (NEW_VIDEO, COMMENT, REPLY, SPARK), count, read, at, text, href, actor, video }` and `unread`. Sparks on one video are one unread entry with a count. Removed videos drop out |
+| GET | `/me/notifications?cursor=` | Newest first, 50 a page: `{ id, type (NEW_VIDEO, COMMENT, REPLY, SPARK, LIVE), count, read, at, text, href, actor, video }` and `unread`. Sparks on one video are one unread entry with a count. Removed videos drop out |
 | GET | `/me/notifications/unread` | `{ unread }`, for the bell |
 | POST | `/me/notifications/read` | `{ ids? }`: mark these, or all, as read |
 

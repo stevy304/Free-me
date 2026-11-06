@@ -4,6 +4,7 @@ import type { Payment, Prisma, PrismaClient, User } from '@prisma/client';
 import { PROPOSED_SPLIT, allocatePool, splitRevenue } from '@free-me/shared';
 import type { AppConfig } from '../config/config';
 import { createProviders, ProviderError, type PaymentProvider, type ProviderName } from './providers';
+import { publish, room } from '../realtime/publish';
 
 export const PREMIUM_MONTHS = [1, 3, 6, 12] as const;
 const DAY = 86_400_000;
@@ -76,6 +77,7 @@ export class Billing {
     }
     if (r.status === 'FAILED') {
       await this.prisma.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'FAILED', failureReason: r.reason } });
+      publish(room.user(p.userId), 'payment', { id });
       return this.prisma.payment.findUniqueOrThrow({ where: { id } });
     }
     await this.prisma.$transaction(async (tx) => {
@@ -83,6 +85,7 @@ export class Billing {
       const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', paidAt: new Date() } });
       if (flipped.count) await this.fulfil(tx, p);
     });
+    publish(room.user(p.userId), 'payment', { id });
     return this.prisma.payment.findUniqueOrThrow({ where: { id } });
   }
 

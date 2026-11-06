@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expectCode } from './codes';
 
 /**
  * A creator uploads a video through the upload dialog, fills in the details while it uploads, publishes it, and the
@@ -12,11 +13,6 @@ import { join } from 'node:path';
 const LOG = process.env.E2E_API_LOG ?? '';
 const run = Date.now().toString(36);
 
-async function codeFor(email: string) {
-  const re = new RegExp(`to ${email.replace(/[.+]/g, '\\$&')}: (\\d{6})`, 'g');
-  for (let i = 0; i < 60; i++) { const m = [...readFileSync(LOG, 'utf8').matchAll(re)].pop(); if (m) return m[1]; await new Promise((r) => setTimeout(r, 250)); }
-  throw new Error('no code');
-}
 
 test('upload, details, publish, processing to every quality, then on the home page and in Creator Hub', async ({ page }) => {
   test.skip(!LOG, 'Set E2E_API_LOG.');
@@ -31,8 +27,9 @@ test('upload, details, publish, processing to every quality, then on the home pa
   const email = `uploader.${run}@example.com`;
   await page.goto('/login?returnTo=/channel/create');
   await page.getByLabel('Email address').fill(email);
+  const code = expectCode(email);
   await page.getByRole('button', { name: 'Email me a sign-in code' }).click();
-  await page.getByLabel('Sign-in code').fill(await codeFor(email));
+  await page.getByLabel('Sign-in code').fill(await code());
   await page.waitForURL(/channel\/create/);
   await page.getByLabel('Name').fill('Kigali Mornings');
   await page.getByLabel('Handle').fill(`kigali.${run}`);

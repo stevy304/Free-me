@@ -16,6 +16,7 @@ import { api } from '@/lib/client-api';
 import { compactNumber, duration, followersLabel, fullDate, timeAgo, viewsLabel } from '@/lib/format';
 import type { VideoCardData } from '@/lib/types';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
+import { useRealtime } from '@/lib/realtime';
 
 export interface WatchVideo extends VideoCardData {
   description: string | null; status: string; visibility: string; likeCount: number; commentCount: number; commentsOpen: boolean; playbackUrl: string | null; processingStage: string | null;
@@ -31,6 +32,8 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState(initialViewer.reaction);
   const [likes, setLikes] = useState(v.likeCount);
+  // Sparks from other viewers show up at once.
+  useRealtime<{ likeCount: number }>('reactions', (d) => setLikes(d.likeCount), `video:${v.id}`);
   const [saved, setSaved] = useState(initialViewer.saved);
   const [dialog, setDialog] = useState<null | 'save' | 'report'>(null);
   const [menu, setMenu] = useState(false);

@@ -12,6 +12,7 @@ import { extractSpeech } from './autocaptions';
 import { hold, screen } from './screening';
 import { announceVideo } from '../notifications/notify';
 import type { Storage } from './storage';
+import { publish, room } from '../realtime/publish';
 
 const TYPES: Record<string, string> = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg' };
 const IMMUTABLE = 'public, max-age=31536000, immutable';
@@ -41,7 +42,9 @@ export class VideoProcessor {
   constructor(private readonly prisma: PrismaClient, private readonly storage: Storage, private readonly config: AppConfig) {}
 
   private async setProgress(id: string, progress: number, stage: string, extra: Partial<Video> = {}) {
-    await this.prisma.video.update({ where: { id }, data: { processingProgress: Math.max(0, Math.min(100, Math.round(progress))), processingStage: stage, ...extra } as never });
+    const p = Math.max(0, Math.min(100, Math.round(progress)));
+    await this.prisma.video.update({ where: { id }, data: { processingProgress: p, processingStage: stage, ...extra } as never });
+    publish(room.video(id), 'processing', { progress: p, stage });
   }
 
   /** Returns the extracted speech track (outside the work folder) when automatic captions should be made from it. */

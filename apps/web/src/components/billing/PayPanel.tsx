@@ -6,11 +6,15 @@ import { api } from '@/lib/client-api';
 import { charge, money, usd } from '@/lib/money';
 import type { Payment, Plans } from '@/lib/types';
 import { useShell } from '@/components/shell/ShellContext';
+import { useRealtime } from '@/lib/realtime';
 
 /** Follows a payment until it succeeds or fails (MoMo: the payer approves on their phone; card: back from checkout). */
 export function usePaymentWatch(onSettled: (p: Payment) => void) {
   const [watching, setWatching] = useState<Payment | null>(null);
   const cb = useRef(onSettled); cb.current = onSettled;
+  // The moment the payment settles (the socket), and every few seconds in case the socket is down.
+  const [nudge, setNudge] = useState(0);
+  useRealtime<{ id: string }>('payment', (d) => { if (d.id === watching?.id) setNudge((n) => n + 1); }, null, watching?.status === 'PENDING');
   useEffect(() => {
     if (!watching || watching.status !== 'PENDING') return;
     let stop = false; const started = Date.now();
@@ -22,9 +26,9 @@ export function usePaymentWatch(onSettled: (p: Payment) => void) {
       } catch { /* try again */ }
       if (Date.now() - started < 5 * 60_000) setTimeout(tick, 3000);
     };
-    const t = setTimeout(tick, 2500);
+    const t = setTimeout(tick, nudge ? 0 : 2500);
     return () => { stop = true; clearTimeout(t); };
-  }, [watching]);
+  }, [watching, nudge]);
   return { watching, watch: setWatching };
 }
 

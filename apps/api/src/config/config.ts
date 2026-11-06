@@ -27,6 +27,16 @@ export interface BillingConfig {
   flutterwave: { baseUrl: string; secretKey: string; webhookHash: string | null } | null;
 }
 
+/** Live streaming (see DEPLOYMENT.md → Live). */
+export interface LiveConfig {
+  /** Encoder address shown to creators for OBS and TV encoders, e.g. rtmp://live.freeme.example/live (null: browser only). */
+  rtmpUrl: string | null;
+  /** Shared secret in nginx-rtmp's on_publish / on_publish_done callback addresses. */
+  rtmpSecret: string | null;
+  /** Where nginx-rtmp writes HLS (hls_path, with hls_nested on), on the server running the worker. */
+  rtmpHlsDir: string | null;
+}
+
 export interface AppConfig {
   nodeEnv: 'development' | 'test' | 'production';
   port: number;
@@ -53,6 +63,7 @@ export interface AppConfig {
   /** Who runs the service, shown on the legal pages and in notices (see ENVIRONMENT.md). */
   legal: LegalConfig;
   billing: BillingConfig;
+  live: LiveConfig;
 }
 
 export interface LegalConfig {
@@ -168,6 +179,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     flutterwave: env.FLW_SECRET_KEY?.trim() ? { baseUrl: (env.FLW_BASE_URL?.trim() || 'https://api.flutterwave.com').replace(/\/+$/, ''), secretKey: env.FLW_SECRET_KEY.trim(), webhookHash: env.FLW_WEBHOOK_HASH?.trim() || null } : null,
   };
 
+  const rtmpUrl = env.LIVE_RTMP_URL?.trim() || null;
+  if (rtmpUrl && !/^rtmps?:\/\/[^/]+\/.+/.test(rtmpUrl)) problems.push('LIVE_RTMP_URL must look like rtmp://live.freeme.example/live.');
+  const rtmpSecret = env.LIVE_RTMP_SECRET?.trim() || null;
+  if (rtmpUrl && (!rtmpSecret || rtmpSecret.length < 24)) problems.push('LIVE_RTMP_SECRET (24+ random characters) is required with LIVE_RTMP_URL.');
+  const live: LiveConfig = { rtmpUrl, rtmpSecret, rtmpHlsDir: env.LIVE_RTMP_HLS_DIR?.trim() || null };
+
   if (problems.length) throw new ConfigError(`Free Me API configuration:\n- ${problems.join('\n- ')}`);
   return {
     nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
@@ -175,7 +192,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,
     mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)),
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
-    media, legal, billing,
+    media, legal, billing, live,
     safety: {
       scanUrl: env.SAFETY_SCAN_URL?.trim() || null, scanToken: env.SAFETY_SCAN_TOKEN?.trim() || null,
       timeoutMs: Math.max(1000, Number(env.SAFETY_SCAN_TIMEOUT_MS) || 60_000), failClosed: env.SAFETY_SCAN_FAIL_CLOSED === 'true',

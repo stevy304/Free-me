@@ -125,6 +125,9 @@ app() {
   systemctl enable --now freeme-api freeme-web
   systemctl restart freeme-api freeme-web
   for ip in $APP_NODES; do ufw allow from "$ip" to any port 3000 proto tcp; ufw allow from "$ip" to any port 4000 proto tcp; done
+  # The media server's nginx-rtmp asks the API whether an encoder's key is valid (Live, DEPLOYMENT.md).
+  [ -n "${MEDIA_NODE:-}" ] && ufw allow from "$MEDIA_NODE" to any port 4000 proto tcp
+  true
 }
 
 edge() {
