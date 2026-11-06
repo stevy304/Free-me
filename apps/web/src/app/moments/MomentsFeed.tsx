@@ -68,9 +68,9 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
     <section className="relative flex h-full snap-start snap-always items-center justify-center gap-4 py-3" aria-label={v.title}>
       <div className="relative aspect-[9/16] h-full max-h-[calc(100dvh-8rem)] overflow-hidden rounded-[26px] bg-black shadow-[var(--shadow)]">
         <video ref={el} loop playsInline poster={v.thumbnailUrl ?? undefined} className="h-full w-full object-cover"
-          onClick={() => { const x = el.current!; if (x.paused) void x.play(); else x.pause(); }} onPlay={() => setPaused(false)} onPause={() => setPaused(true)} onTimeUpdate={onTime} />
+          onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} onPlay={() => setPaused(false)} onPause={() => setPaused(true)} onTimeUpdate={onTime} />
         <div className="absolute inset-x-0 top-0 flex justify-between p-3">
-          <button type="button" onClick={() => { const x = el.current!; if (x.paused) void x.play(); else x.pause(); }} aria-label={paused ? 'Play' : 'Pause'} className="grid h-10 w-10 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{paused ? <Icon.Play size={20} /> : <Icon.Pause size={20} />}</button>
+          <button type="button" onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} aria-label={paused ? 'Play' : 'Pause'} className="grid h-10 w-10 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{paused ? <Icon.Play size={20} /> : <Icon.Pause size={20} />}</button>
           <button type="button" onClick={() => setMuted(!muted)} aria-label={muted ? 'Unmute' : 'Mute'} className="grid h-10 w-10 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{muted ? <Icon.VolumeOff size={20} /> : <Icon.VolumeHigh size={20} />}</button>
         </div>
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-4 pt-16 text-white">

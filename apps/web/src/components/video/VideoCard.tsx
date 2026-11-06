@@ -4,6 +4,7 @@ import * as Icon from '@/components/icons';
 import { Avatar } from '../Avatar';
 import { duration, timeAgo, viewsLabel } from '@/lib/format';
 import type { VideoCardData } from '@/lib/types';
+import { VerifiedBadge } from '@/components/VerifiedBadge';
 
 /** How much of a video was watched, as a small saffron ring (Free Me's progress mark). */
 function ProgressRing({ progress }: { progress: number }) {
@@ -45,7 +46,7 @@ export function VideoCard({ v, locale, progress }: { v: VideoCardData; locale: s
         <Link href={`/@${v.channel.handle}`} className="flex min-w-0 items-center gap-2 hover:text-ink">
           <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={22} />
           <span className="truncate font-medium">{v.channel.name}</span>
-          {v.channel.isVerified && <Icon.Verified size={13} aria-label="Verified" className="shrink-0 text-brand" />}
+          {v.channel.isVerified && <VerifiedBadge size={14} />}
         </Link>
         <span className="shrink-0" suppressHydrationWarning>· {viewsLabel(v.viewCount, locale)} · {timeAgo(v.publishedAt, locale)}</span>
       </div>

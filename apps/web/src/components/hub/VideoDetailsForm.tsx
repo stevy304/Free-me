@@ -20,7 +20,7 @@ const MAX_BYTES = 2 * 1024 * 1024;
  * Makes any picture the browser can open into an upload the server accepts: small JPEG, PNG and WebP files go
  * as they are; anything larger than 1280x720 or 2 MB, or in another format (HEIC, GIF, BMP...), is redrawn as a JPEG.
  */
-async function prepareThumbnail(f: File): Promise<Blob> {
+export async function prepareThumbnail(f: File): Promise<Blob> {
   const fine = ['image/jpeg', 'image/png', 'image/webp'].includes(f.type) && f.size <= MAX_BYTES;
   let img: ImageBitmap;
   try { img = await createImageBitmap(f); } catch {

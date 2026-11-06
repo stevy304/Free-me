@@ -8,14 +8,15 @@ import { Avatar } from '../Avatar';
 import { api } from '@/lib/client-api';
 import { timeAgo } from '@/lib/format';
 import { useShell } from './ShellContext';
+import { useRealtime, useReconnect } from '@/lib/realtime';
 
 interface Item {
-  id: string; type: 'NEW_VIDEO' | 'COMMENT' | 'REPLY' | 'SPARK'; count: number; read: boolean; at: string; text: string; href: string;
+  id: string; type: 'NEW_VIDEO' | 'COMMENT' | 'REPLY' | 'SPARK' | 'LIVE'; count: number; read: boolean; at: string; text: string; href: string;
   actor: { name: string; handle: string | null; avatarUrl: string | null };
   video: { id: string; title: string; thumbnailUrl: string | null } | null;
 }
 
-/** The bell: unread count (checked every minute and when the tab comes back), and a panel of what happened. */
+/** The bell: unread count (updated the moment something happens, and when the tab comes back), and a panel of what happened. */
 export function NotificationBell() {
   const { locale } = useShell();
   const router = useRouter();
@@ -25,9 +26,12 @@ export function NotificationBell() {
   const box = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(() => { api<{ unread: number }>('/me/notifications/unread').then((r) => setUnread(r.unread)).catch(() => undefined); }, []);
+  // Instantly when something happens (the socket), and every few minutes in case the connection dropped.
+  useRealtime('notifications', () => { refresh(); if (open) api<{ notifications: Item[]; unread: number }>('/me/notifications').then((r) => { setItems(r.notifications); setUnread(r.unread); }).catch(() => undefined); });
+  useReconnect(refresh);
   useEffect(() => {
     refresh();
-    const t = setInterval(refresh, 60_000);
+    const t = setInterval(refresh, 300_000);
     const onFocus = () => { if (document.visibilityState === 'visible') refresh(); };
     document.addEventListener('visibilitychange', onFocus);
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', onFocus); };

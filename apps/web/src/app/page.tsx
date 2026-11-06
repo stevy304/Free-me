@@ -7,22 +7,28 @@ import type { HomeFeed } from '@/components/home/types';
 import { MomentCard, VideoCard } from '@/components/video/VideoCard';
 import { apiGet, getLocale, getViewer } from '@/lib/server-api';
 import { duration, followersLabel } from '@/lib/format';
+import type { LiveInfo } from './live/types';
 
 /** For you: a spotlight, the interests panel, one shelf per topic, a Moments ribbon and the newest uploads. */
 export default async function ForYou() {
-  const [feed, viewer, locale] = await Promise.all([apiGet<HomeFeed>('/feed/home'), getViewer(), getLocale()]);
+  const [feed, viewer, locale, live] = await Promise.all([apiGet<HomeFeed>('/feed/home'), getViewer(), getLocale(), apiGet<{ streams: LiveInfo[] }>('/live').catch(() => null)]);
+  const liveNow = live?.streams ?? [];
   if (!feed || (!feed.spotlight && !feed.moments.length)) {
     return (
+      <>
+      {liveNow.length > 0 && <div className="mx-auto max-w-[1600px] px-4 pt-3 sm:px-6"><LiveStrip streams={liveNow} /></div>}
       <EmptyState icon={<Icon.Moments size={36} strokeWidth={1.4} />} title="No videos yet"
         action={viewer?.channel ? <Link href="/hub?upload=1" className="inline-flex h-10 items-center rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand">Upload a video</Link>
           : <Link href={viewer ? '/channel/create' : '/login?returnTo=/channel/create'} className="inline-flex h-10 items-center rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand">Create your Space</Link>}>
         Videos appear here as creators publish them. Start your Space now to be among the first.
       </EmptyState>
+      </>
     );
   }
   const s = feed.spotlight;
   return (
     <div className="mx-auto max-w-[1600px] px-4 pt-3 sm:px-6">
+      <LiveStrip streams={liveNow} />
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
         {s ? (
           <Link href={`/watch?v=${s.id}`} className="group relative block min-h-[300px] overflow-hidden rounded-[24px] bg-surface sm:min-h-[380px]">
@@ -73,5 +79,21 @@ export default async function ForYou() {
         </section>
       )}
     </div>
+  );
+}
+
+/** Spaces live right now, as a row of avatars above everything else. */
+function LiveStrip({ streams }: { streams: LiveInfo[] }) {
+  if (!streams.length) return null;
+  return (
+        <section aria-label="Live now" className="mb-4 flex items-center gap-3 overflow-x-auto [scrollbar-width:none]">
+          <Link href="/live" className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#e5484d] px-3 py-1.5 text-[13px] font-extrabold uppercase tracking-wide text-white"><span className="h-2 w-2 animate-pulse rounded-full bg-white" />Live now</Link>
+          {streams.slice(0, 12).map((l) => (
+            <Link key={l.id} href={`/live/${l.id}`} className="flex shrink-0 items-center gap-2 rounded-full border border-line bg-elevated py-1 pl-1 pr-3 hover:border-[#e5484d]">
+              <span className="rounded-full ring-2 ring-[#e5484d] ring-offset-1 ring-offset-bg"><Avatar name={l.channel.name} src={l.channel.avatarUrl} size={28} /></span>
+              <span className="max-w-[180px] truncate text-[13px] font-semibold">{l.channel.name}<span className="font-normal text-muted"> · {l.title}</span></span>
+            </Link>
+          ))}
+        </section>
   );
 }

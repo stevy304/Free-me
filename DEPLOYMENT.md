@@ -85,12 +85,78 @@ Services run as the unprivileged `freeme` user with systemd hardening (read-only
 4. Server 4: `sudo FREEME_REF=v0.2.0 ./release.sh`. Interrupted transcodes are retried automatically.
 5. Roll back by releasing the previous tag (and a written down-migration if the schema changed).
 
+## Live streaming
+
+Premium members go live from **Live Studio** (`/studio/live`) in two ways.
+
+**From the browser** (camera or screen): nothing to install. The browser sends its recording over the socket to an
+API server, which encodes it with ffmpeg into HLS (2-second segments, 720p, about 2.6 Mbit/s) and copies it to
+storage as it grows; viewers play it from the CDN. Each browser stream uses about one CPU core on the API server
+that receives it: count on 3 to 4 simultaneous browser streams per 4-core application server.
+
+**From OBS, a TV encoder or a camera (RTMP):** install nginx with the RTMP module on the media server and let it
+write HLS that the worker copies to storage. The encoder's key is checked by the API, and the stream is published
+under the stream id, so the key never appears in any public address.
+
+```bash
+sudo apt install -y nginx libnginx-mod-rtmp
+sudo mkdir -p /var/lib/freeme/live && sudo chown www-data:freeme /var/lib/freeme/live && sudo chmod 2775 /var/lib/freeme/live
+```
+
+Add to `/etc/nginx/nginx.conf` (outside the `http { }` block), with the API's private address and your secret:
+
+```nginx
+rtmp {
+  server {
+    listen 1935;
+    chunk_size 4096;
+    application live {
+      live on;
+      record off;
+      allow play 127.0.0.1;
+      deny play all;
+      on_publish http://10.0.0.2:4000/api/live/rtmp/publish?secret=LIVE_RTMP_SECRET;
+      on_publish_done http://10.0.0.2:4000/api/live/rtmp/done?secret=LIVE_RTMP_SECRET;
+      hls on;
+      hls_path /var/lib/freeme/live;
+      hls_nested on;
+      hls_fragment 2s;
+      hls_playlist_length 6h;
+      hls_cleanup off;
+    }
+  }
+}
+```
+
+Then `sudo systemctl reload nginx`, open TCP 1935 in the firewall for encoders (and point a name such as
+`live.freeme.example` at the media server), and set:
+
+- on the application servers: `LIVE_RTMP_URL=rtmp://live.freeme.example/live` and `LIVE_RTMP_SECRET` (24+ random characters, the same as in nginx.conf);
+- on the media server (worker): `LIVE_RTMP_HLS_DIR=/var/lib/freeme/live`.
+
+Encoders send H.264 video and AAC audio as they are (no re-encoding), so one media server carries many RTMP
+streams. Creators see the address and their key in Live Studio. When a stream ends, its recording becomes a
+private video, processed like an upload; the creator publishes it as a replay from Creator Hub.
+
+## Instant updates
+
+The web app keeps one WebSocket per tab to `/api/socket` (socket.io). New comments, Sparks, notifications,
+processing progress, payments, live chat and viewer counts arrive without refreshing. With several application
+servers, Redis carries every update to every server, so no sticky sessions are needed (Caddy proxies WebSockets
+as it is). The worker sends its updates (processing, payments) through Redis too.
+
 ## Scaling
 
-- **More uploads at once:** add media servers (`ROLE=media`), all pulling from the same queue.
+- **More uploads at once:** add media servers (`ROLE=media`), all pulling from the same queue. Each runs `WORKER_CONCURRENCY` videos at a time (default 2; one per 2–4 cores). Uploads go straight from the browser to object storage in parts, so the application servers carry no upload traffic.
 - **Faster processing per video:** `TRANSCODE_PRESET=veryfast` (default) favours speed; `faster` or `medium` give smaller files at more CPU. A 20-second 1080p clip took 8 s to become playable (SD) and 20 s for every quality on 4 cores in testing.
-- **More viewers:** almost all traffic is segments from the CDN; add application nodes behind Caddy for API and page load.
-- Capacity numbers for 50,000 users are only claimed after the load tests of phase 6.
+- **More viewers:** almost all traffic is video segments from the CDN, which scales by itself. Add application servers behind Caddy for pages, the API and WebSockets; they share Redis and the database. Put PgBouncer in front of PostgreSQL when you pass a few hundred API connections, and a read replica when the database CPU stays above 60%.
+- **Measure before you promise:** `deploy/loadtest/watch.js` (k6) ramps to a number of simultaneous viewers who open pages and play videos as a player would. Run it at 500, then 2,000, then your launch target, and add servers where it shows a limit.
+
+**What "10 million users at the same time" needs.** That is the scale of the largest video platforms. It is reached
+by adding servers and CDN capacity, not by changing this code: video comes from the CDN (pay per terabyte; at
+3 Mbit/s, 10 million viewers move about 30 Tbit/s, which only the largest CDNs serve), and pages and the API need on
+the order of hundreds of application servers and a sharded database. A sensible path: launch on the four servers
+above (thousands of simultaneous viewers), load test, then grow server by server as real traffic arrives.
 
 ## Not yet covered (phase 6)
 

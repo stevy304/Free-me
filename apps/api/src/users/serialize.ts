@@ -12,6 +12,7 @@ export const ownProfile = (p: Profile | null) => p && ({
 
 export const ownAccount = (u: User & { profile: Profile | null; channel: Channel | null }) => ({
   user: { id: u.id, email: u.email, roles: u.roles, status: u.status, createdAt: u.createdAt, lastLoginAt: u.lastLoginAt },
+  premium: { active: !!u.premiumUntil && u.premiumUntil > new Date(), until: u.premiumUntil },
   profile: ownProfile(u.profile),
   channel: u.channel ? publicChannel(u.channel) : null,
 });

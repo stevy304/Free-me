@@ -13,6 +13,7 @@ function sentence(type: string, actor: string, count: number, title: string) {
   const who = count > 1 ? `${actor} and ${count - 1} ${count === 2 ? 'other' : 'others'}` : actor;
   switch (type) {
     case 'NEW_VIDEO': return `${actor} posted a new video: ${title}`;
+    case 'LIVE': return `${actor} is live: ${title}`;
     case 'COMMENT': return `${actor} joined the conversation on ${title}`;
     case 'REPLY': return `${actor} replied to you on ${title}`;
     default: return `${who} sparked ${title}`;
@@ -33,10 +34,12 @@ export class NotificationsController {
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: 51, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       include: { actor: { include: { profile: true, channel: true } }, video: true },
     });
+    const liveIds = rows.map((n) => n.liveStreamId).filter((x): x is string => !!x);
+    const lives = new Map((await this.prisma.liveStream.findMany({ where: { id: { in: liveIds } }, select: { id: true, title: true } })).map((l) => [l.id, l.title]));
     const items = await Promise.all(rows.slice(0, 50).map(async (n) => {
       const actor = n.actor ? { name: n.actor.channel?.name ?? n.actor.profile?.displayName ?? 'Someone', handle: n.actor.channel?.handle ?? null, avatarUrl: n.actor.channel?.avatarUrl ?? n.actor.profile?.avatarUrl ?? null } : { name: 'Someone', handle: null, avatarUrl: null };
-      const title = n.video ? `"${n.video.title}"` : 'your video';
-      const href = n.video ? `/watch?v=${n.video.id}${n.commentId ? `&c=${n.commentId}` : ''}` : '/';
+      const title = n.liveStreamId ? `"${lives.get(n.liveStreamId) ?? 'live stream'}"` : n.video ? `"${n.video.title}"` : 'your video';
+      const href = n.liveStreamId ? `/live/${n.liveStreamId}` : n.video ? `/watch?v=${n.video.id}${n.commentId ? `&c=${n.commentId}` : ''}` : '/';
       return {
         id: n.id, type: n.type, count: n.count, read: !!n.readAt, at: n.updatedAt, text: sentence(n.type, actor.name, n.count, title), href, actor,
         video: n.video ? { id: n.video.id, title: n.video.title, thumbnailUrl: await this.urls.thumb(n.video) } : null,

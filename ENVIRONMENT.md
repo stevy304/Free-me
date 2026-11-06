@@ -67,6 +67,32 @@ Values for local development are in [.env.example](.env.example). In production 
 
 `FREEME_DOMAIN`, `ACME_EMAIL`, `APP_NODES` (private addresses of servers 1 and 2), passed to Caddy through a systemd drop-in.
 
-## Coming with later phases
+## Payments (API and worker)
 
-Payment provider credentials per country (phase 5). They will be added here when code uses them.
+Premium, ad campaigns and creator earnings are priced in US dollars. Turn on one or both payment methods; with neither, the Premium and Ads pages say payments are not set up. Prices are set by the operator (MONETISATION.md explains the numbers).
+
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `PREMIUM_PRICE_USD_CENTS` | | `1000` ($10) | Premium, per month |
+| `AD_PRICE_PER_DAY_USD_CENTS` | | `300` ($3) | One day of an ad campaign |
+| `PAYOUT_MINIMUM_USD_CENTS` | | `1000` ($10) | Smallest withdrawal a creator can ask for |
+| `MOMO_SUBSCRIPTION_KEY`, `MOMO_API_USER`, `MOMO_API_KEY` | for MTN MoMo | off | MTN MoMo **Collections** product: the primary subscription key and the API user and key from momodeveloper.mtn.com (sandbox) or the MTN partner portal (live). Set all three or none |
+| `MOMO_BASE_URL` | | `https://sandbox.momodeveloper.mtn.com` | Live: the address MTN gives you (e.g. `https://proxy.momoapi.mtn.com`) |
+| `MOMO_TARGET_ENVIRONMENT` | | `sandbox` | Live: your market, e.g. `mtnrwanda` |
+| `MOMO_CURRENCY` | | `RWF` | What MoMo charges in (the sandbox only accepts `EUR`) |
+| `MOMO_RATE_PER_USD` | with MoMo, unless the currency is USD | | How many units of `MOMO_CURRENCY` make one US dollar, e.g. `1450`. Update it when the rate moves; charges are rounded up to a whole franc |
+| `FLW_SECRET_KEY` | for cards | off | Flutterwave secret key (cards worldwide, and mobile money where Flutterwave offers it) |
+| `FLW_WEBHOOK_HASH` | recommended with Flutterwave | | The "secret hash" set in the Flutterwave dashboard; the webhook is `https://<domain>/api/billing/webhooks/flutterwave` |
+| `FLW_BASE_URL` | | `https://api.flutterwave.com` | |
+
+## Live (API and worker)
+
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `LIVE_RTMP_URL` | for OBS / TV encoders | off (browser streaming only) | The address encoders publish to, shown in Live Studio, e.g. `rtmp://live.freeme.example/live` |
+| `LIVE_RTMP_SECRET` | with `LIVE_RTMP_URL` | | 24+ random characters; the same secret is in nginx-rtmp's `on_publish` and `on_publish_done` addresses |
+| `LIVE_RTMP_HLS_DIR` | on the media server, with RTMP | | nginx-rtmp's `hls_path` (with `hls_nested on`), e.g. `/var/lib/freeme/live`; the worker copies it to storage |
+
+Browser streams need no setting. See DEPLOYMENT.md → Live streaming.
+
+The worker checks pending payments every minute (MoMo approvals happen on the payer's phone), ends memberships and shares each finished day's ad revenue every 15 minutes.

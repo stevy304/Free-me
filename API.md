@@ -148,13 +148,85 @@ Public and unlisted videos play from the CDN: `playbackUrl` in `/videos/:id` and
 | PATCH | `/admin/users/:id/status` | `{ status: ACTIVE or SUSPENDED }`; suspension signs the account out everywhere |
 | GET | `/admin/audit?cursor=` | Latest audit entries |
 | POST | `/admin/system/reprocess` | `{ limit?: 1–500 (50), dryRun? }`: queue older videos (processed before seek previews existed) for the current pipeline, oldest first; they stay watchable. Answers `{ queued, wouldQueue, remaining }` |
+| POST | `/admin/system/repair-media` | `{ apply? }`: find (and with `apply`, bring back) files videos left in the wrong storage place (broken thumbnails or playback); lists up to 100 affected videos |
 | GET | `/admin/system` | `ok`, `warnings` (database or Redis down, email not really sent, Google sign-in missing, videos waiting, stuck over 2 hours or failed in 24 hours), `services`, `processing` (queue counts), `videos` by status, `storage` bytes, `accounts`, `moderation.openReports` |
+
+| GET | `/admin/billing` | Premium members, income in the last 30 days, ads waiting for review, withdrawals to send, ad revenue by day |
+| GET | `/admin/billing/campaigns?status=` | Ad campaigns (default `PENDING_REVIEW`; `all`) |
+| POST | `/admin/billing/campaigns/:id/review` | `{ approve, note? }` (a note is required to reject): approved campaigns start now and run for the days bought |
+| GET | `/admin/billing/payouts?status=` | Creator withdrawals (default: open) |
+| POST | `/admin/billing/payouts/:id` | `{ action: paid, reference }` or `{ action: reject, reason }` (the money returns to the creator's balance) |
+| POST | `/admin/billing/premium` | `{ email, months }`: give Premium without payment |
+| GET | `/admin/billing/payments` | Latest 100 payments |
+
+## Premium and payments
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/billing/plans` | Prices (`premium.usdCents`, `ads.usdCentsPerDay`, `payoutMinimumUsdCents`) and the payment methods this server accepts (`mtn_momo` with its currency and rate, `flutterwave`) |
+| GET | `/billing/me` 🔒 | `premium: { active, until }` and my payments |
+| POST | `/billing/premium` 🔒 | `{ method, months (1, 3, 6, 12), phone? }`: MoMo sends a prompt to the phone; a card payment answers with `checkoutUrl` |
+| GET | `/billing/payments/:id` 🔒 | One of my payments, checked with the provider while pending; with `premium` |
+| POST | `/billing/webhooks/flutterwave` | Flutterwave's callback (needs the `verif-hash` header; the payment is verified with Flutterwave itself) |
+
+Premium gives the verified badge (`channel.isVerified`), which goes when the membership ends unless an administrator verified the Space. `/me` includes `premium`.
+
+## Ads
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/ads/campaigns` 🔒 | My campaigns with `impressions` and `clicks` |
+| POST | `/ads/campaigns` 🔒 | `{ businessName, country, headline, destinationUrl (https), videoId (my own video, Public or Unlisted, 5–90 s), days (1–90), targetCountries? }`: a draft |
+| POST | `/ads/campaigns/:id/pay` 🔒 | `{ method, phone? }`: pay a draft (days × the daily price); then it waits for review |
+| POST | `/ads/campaigns/:id/pause` 🔒 | Pause or resume a running campaign |
+| DELETE | `/ads/campaigns/:id` 🔒 | Delete an unpaid draft |
+| GET | `/videos/:id/ads` | `{ slots: [{ at, ad }] }`: none, one before the video, and for videos of 8 minutes or more one halfway; only on monetised Premium creators' videos, never on Moments |
+| POST | `/ads/impressions` | `{ campaignId, videoId }`: an ad started (once per viewer, campaign and video every 30 minutes) → `{ impressionId }` |
+| POST | `/ads/impressions/:id/events` | `{ type: COMPLETE, SKIP or CLICK, ms }` |
+
+## Monetisation 🔒
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/hub/monetisation` | Membership, `joined`, `earning`, `balance`, ads shown in 28 days, earnings ledger, withdrawals, programme terms |
+| POST | `/hub/monetisation/join` | Join (Premium members with no removed videos in 90 days) |
+| POST | `/hub/monetisation/payouts` | `{ phone, accountHolderName }`: withdraw the whole available balance to MTN MoMo (from the minimum) |
+
+See MONETISATION.md for how the money is shared.
+
+## Live
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/live` | Spaces live now: `{ id, title, status, startedAt, playbackUrl (HLS), viewers, channel }` |
+| GET | `/live/:id` | One stream (`status` IDLE, LIVE or ENDED; `replayVideoId` once its recording is published) and the recent chat |
+| GET | `/hub/live` 🔒 | My Live Studio: `premium`, the current `stream`, `encoder: { server, streamKey }` (Premium, when RTMP is set up), past streams |
+| PATCH | `/hub/live` 🔒 | `{ title }` |
+| POST | `/hub/live/key` 🔒 | A new encoder key (the old one stops working) |
+| POST | `/hub/live/end` 🔒 | End my stream |
+| POST | `/live/rtmp/publish?secret=` | nginx-rtmp `on_publish` (form `name` = the encoder's key): 302 to the stream id, or 403 |
+| POST | `/live/rtmp/done?secret=` | nginx-rtmp `on_publish_done` |
+
+## Instant updates (socket.io)
+
+Connect to path `/api/socket` (WebSocket transport, no trailing slash). Signed-in sockets join their own room.
+
+| Direction | Event | Data |
+| --- | --- | --- |
+| send | `join` / `leave` | `"video:<id>"` or `"live:<id>"` → `{ ok }` |
+| receive (own room) | `notifications` | something new for the bell |
+| receive (own room) | `payment` | `{ id }`: a payment settled |
+| receive (`video:<id>`) | `comments`, `reactions`, `processing` | `{ videoId, parentId }`, `{ likeCount }`, `{ progress, stage }` |
+| receive (`live:<id>`) | `started`, `ended`, `viewers`, `chat`, `title` | `{ count }`; chat lines `{ id, text, at, author }` |
+| send | `live:start` / `live:stop` | stream id (Premium owner) → `{ ok, error? }` |
+| send | `live:chunk` | `[streamId, ArrayBuffer]`: one piece of the browser's MediaRecorder recording |
+| send | `live:chat` | `{ streamId, text }` (signed in, up to 200 characters, 10 lines in 20 s) |
 
 ## Notifications 🔒
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/me/notifications?cursor=` | Newest first, 50 a page: `{ id, type (NEW_VIDEO, COMMENT, REPLY, SPARK), count, read, at, text, href, actor, video }` and `unread`. Sparks on one video are one unread entry with a count. Removed videos drop out |
+| GET | `/me/notifications?cursor=` | Newest first, 50 a page: `{ id, type (NEW_VIDEO, COMMENT, REPLY, SPARK, LIVE), count, read, at, text, href, actor, video }` and `unread`. Sparks on one video are one unread entry with a count. Removed videos drop out |
 | GET | `/me/notifications/unread` | `{ unread }`, for the bell |
 | POST | `/me/notifications/read` | `{ ids? }`: mark these, or all, as read |
 

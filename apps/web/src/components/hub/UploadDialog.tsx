@@ -6,15 +6,30 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/client-api';
 import { formatBytes, formatEta } from '@/lib/uploader';
 import { useUploads } from './UploadsContext';
-import { VideoDetailsForm } from './VideoDetailsForm';
+import { VideoDetailsForm, prepareThumbnail } from './VideoDetailsForm';
+import type { UploadKind } from './UploadsContext';
 import type { HubVideo } from './types';
+import { useRealtime } from '@/lib/realtime';
 
 const ACCEPT = '.mp4,.m4v,.mov,.mkv,.webm,.avi,.wmv,.flv,.mpeg,.mpg,.3gp,.ts,.mts,video/*';
+const AUDIO_ACCEPT = '.mp3,.m4a,.aac,.wav,.ogg,.opus,.flac,audio/*';
+const KINDS: Array<{ k: UploadKind; label: string; hint: string; icon: typeof Icon.Upload }> = [
+  { k: 'video', label: 'Video', hint: 'Any length, landscape or portrait', icon: Icon.Videos },
+  { k: 'moment', label: 'Moment', hint: 'Vertical, up to 3 minutes', icon: Icon.Moments },
+  { k: 'podcast', label: 'Podcast', hint: 'A sound file and a cover picture', icon: Icon.Mic },
+];
 
 /** "Upload videos": drop a file, it starts uploading at once; fill in the details while it uploads and processes. */
 export function UploadDialog() {
   const { dialog, closeDialog, items, start, openDialog } = useUploads();
   const [drag, setDrag] = useState(false);
+  const [kind, setKind] = useState<UploadKind>(dialog.kind);
+  useEffect(() => { if (dialog.open) setKind(dialog.kind); }, [dialog.open, dialog.kind]);
+  // Podcasts: the cover picture, sent as soon as the upload exists (the podcast video is made from it).
+  const [cover, setCover] = useState<{ file: File; url: string } | null>(null);
+  const [coverFor, setCoverFor] = useState<number | null>(null);
+  const [coverError, setCoverError] = useState<string | null>(null);
+  const coverInput = useRef<HTMLInputElement>(null);
   const [video, setVideo] = useState<HubVideo | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const item = items.find((i) => i.id === dialog.uploadId) ?? null;
@@ -38,6 +53,26 @@ export function UploadDialog() {
   }, [snap?.videoId, snap?.state === 'done']); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (!cover || coverFor === null || !snap?.videoId || item?.id !== coverFor) return;
+    const c = cover; setCoverFor(null);
+    (async () => {
+      try {
+        const body = await prepareThumbnail(c.file);
+        const res = await fetch(`/api/hub/videos/${snap.videoId}/thumbnail`, { method: 'PUT', body, headers: { 'content-type': body.type || 'application/octet-stream' }, credentials: 'same-origin' });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? 'The cover could not be uploaded.');
+      } catch (e) { setCoverError((e as Error).message); }
+    })();
+  }, [snap?.videoId, coverFor, cover, item?.id]);
+
+  // Processing progress arrives as it happens; the page asks for the full state then.
+  const [bump, setBump] = useState(0);
+  useRealtime('processing', () => setBump((b) => b + 1), snap?.videoId ? `video:${snap.videoId}` : null, !!snap?.videoId);
+  useEffect(() => {
+    if (!bump || !snap?.videoId) return;
+    api<{ video: HubVideo }>(`/hub/videos/${snap.videoId}`).then((r) => setVideo((cur) => (cur && cur.processingProgress === r.video.processingProgress && cur.status === r.video.status && cur.processingStage === r.video.processingStage && cur.thumbnailCandidates.length === r.video.thumbnailCandidates.length ? cur : r.video))).catch(() => undefined);
+  }, [bump]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (!dialog.open) return;
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') closeDialog(); };
     window.addEventListener('keydown', esc);
@@ -45,7 +80,12 @@ export function UploadDialog() {
   }, [dialog.open, closeDialog]);
 
   if (!dialog.open) return null;
-  const pick = (files: FileList | null) => { const f = files?.[0]; if (f) openDialog(start(f)); };
+  const pick = (files: FileList | null) => {
+    const f = files?.[0]; if (!f) return;
+    const id = start(f);
+    if (kind === 'podcast' && cover) setCoverFor(id);
+    openDialog(id, kind);
+  };
 
   let status: React.ReactNode = null;
   if (snap) {
@@ -63,23 +103,47 @@ export function UploadDialog() {
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-0 sm:p-6" role="dialog" aria-modal="true" aria-label="Upload video">
       <div className="flex h-full w-full max-w-[960px] flex-col overflow-hidden bg-elevated sm:h-auto sm:max-h-[92dvh] sm:rounded-2xl">
         <header className="flex items-center justify-between border-b border-line px-6 py-4">
-          <h2 className="truncate text-[20px] font-semibold">{snap ? snap.title : 'Upload videos'}</h2>
+          <h2 className="truncate text-[20px] font-semibold">{snap ? snap.title : kind === 'podcast' ? 'Upload a podcast' : kind === 'moment' ? 'Post a Moment' : 'Upload videos'}</h2>
           <button type="button" onClick={closeDialog} aria-label="Close" className="rounded-full p-2 hover:bg-surface"><Icon.Close size={22} /></button>
         </header>
 
         {!item ? (
           <div className={`m-6 flex flex-1 flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-16 text-center ${drag ? 'border-brand bg-brand-soft' : 'border-transparent'}`}
             onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files); }}>
-            <div className="grid h-36 w-36 place-items-center rounded-full bg-surface text-muted"><Icon.Upload size={56} strokeWidth={1.4} /></div>
-            <p className="mt-6 text-[15px]">Drag and drop a video file to upload</p>
-            <p className="mt-1 text-[13px] text-muted">Your video stays private until you publish it.</p>
-            <button type="button" onClick={() => input.current?.click()} className="mt-6 h-10 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand hover:opacity-90">Select file</button>
-            <input ref={input} type="file" accept={ACCEPT} hidden onChange={(e) => { pick(e.target.files); e.target.value = ''; }} />
-            <p className="mt-8 max-w-md text-[12px] leading-5 text-faint">MP4, MOV, MKV, WebM, AVI and other common formats. Large files upload in parts and resume if your connection drops: choose the same file again to continue.</p>
+            <div role="radiogroup" aria-label="What are you posting?" className="mb-8 grid w-full max-w-xl grid-cols-3 gap-2">
+              {KINDS.map((x) => (
+                <button key={x.k} type="button" role="radio" aria-checked={kind === x.k} onClick={() => setKind(x.k)}
+                  className={`rounded-2xl border-2 px-3 py-3 text-center ${kind === x.k ? 'border-brand bg-brand-soft' : 'border-line hover:border-faint'}`}>
+                  <x.icon size={24} className="mx-auto" filled={kind === x.k} /><span className="mt-1 block text-[14px] font-bold">{x.label}</span><span className="block text-[11px] leading-4 text-muted">{x.hint}</span>
+                </button>
+              ))}
+            </div>
+            {kind === 'podcast' ? (
+              <>
+                <button type="button" onClick={() => coverInput.current?.click()} className="relative grid h-40 w-40 place-items-center overflow-hidden rounded-3xl bg-surface text-muted hover:bg-surface-hover" aria-label="Choose a cover picture">
+                  {cover ? <img src={cover.url} alt="Cover" className="h-full w-full object-cover" /> : <span className="flex flex-col items-center gap-1 text-[13px]"><Icon.ImageAdd size={36} strokeWidth={1.4} />Cover picture</span>}
+                </button>
+                <input ref={coverInput} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setCover({ file: f, url: URL.createObjectURL(f) }); e.target.value = ''; }} />
+                <p className="mt-4 text-[15px]">Choose a cover, then your sound file (MP3, M4A, WAV, OGG, FLAC)</p>
+                <p className="mt-1 text-[13px] text-muted">We make a video of your cover with a moving waveform. Square or 16:9 pictures work best.</p>
+                <button type="button" disabled={!cover} onClick={() => input.current?.click()} className="mt-6 h-10 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand hover:opacity-90 disabled:opacity-50">Select sound file</button>
+                <input ref={input} type="file" accept={AUDIO_ACCEPT} hidden onChange={(e) => { pick(e.target.files); e.target.value = ''; }} />
+              </>
+            ) : (
+              <>
+                <div className="grid h-32 w-32 place-items-center rounded-full bg-surface text-muted">{kind === 'moment' ? <Icon.Moments size={52} strokeWidth={1.4} /> : <Icon.Upload size={52} strokeWidth={1.4} />}</div>
+                <p className="mt-6 text-[15px]">{kind === 'moment' ? 'Drag and drop a vertical video, up to 3 minutes' : 'Drag and drop a video file to upload'}</p>
+                <p className="mt-1 text-[13px] text-muted">{kind === 'moment' ? 'Vertical videos of 3 minutes or less appear in Moments.' : 'Your video stays private until you publish it.'}</p>
+                <button type="button" onClick={() => input.current?.click()} className="mt-6 h-10 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand hover:opacity-90">Select file</button>
+                <input ref={input} type="file" accept={ACCEPT} hidden onChange={(e) => { pick(e.target.files); e.target.value = ''; }} />
+              </>
+            )}
+            <p className="mt-8 max-w-md text-[12px] leading-5 text-faint">{kind === 'podcast' ? 'Long recordings are fine: large files upload in parts and resume if your connection drops.' : <>MP4, MOV, MKV, WebM, AVI and other common formats. Large files upload in parts and resume if your connection drops: choose the same file again to continue.</>}</p>
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col-reverse gap-6 overflow-y-auto px-6 py-6 lg:flex-row">
             <div className="min-w-0 flex-1">
+              {coverError && <p role="alert" className="mb-3 rounded-xl bg-danger/10 px-3 py-2 text-[14px] text-danger">{coverError}</p>}
               {video ? <VideoDetailsForm key={video.id} video={video} onSaved={setVideo} saveLabel="Save" /> : <div className="flex items-center gap-2 text-[14px] text-muted"><Icon.Spinner size={16} className="animate-spin" />Preparing your upload…</div>}
             </div>
             <aside className="lg:w-[320px] lg:shrink-0">

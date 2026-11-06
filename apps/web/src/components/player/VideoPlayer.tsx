@@ -4,6 +4,7 @@ import * as Icon from '@/components/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type Hls from 'hls.js';
 import { languageName } from '@free-me/shared';
+import { AdBreak, type AdSlot } from './AdBreak';
 
 export interface CaptionTrack { language: string; auto: boolean; url: string }
 
@@ -23,13 +24,15 @@ const label = (h: number, w: number) => `${Math.min(h, w)}p`;
  * after real watching (30 s, or half of a short video). `startAt` resumes where the viewer stopped; `onProgress` is
  * called every 10 seconds of playback, on pause, at the end and when the page is left, to remember the position.
  */
-export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange, storyboard, captions = [] }: {
+export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange, storyboard, captions = [], withAds = false }: {
   src: string; poster?: string | null; videoId?: string; durationHint?: number; autoPlay?: boolean; theater?: boolean; onTheater?: () => void; onEnded?: () => void;
   startAt?: number; onProgress?: (seconds: number, ended: boolean) => void; onPlayingChange?: (playing: boolean) => void;
   /** WebVTT of seek-bar previews (cues point into a sprite sheet with #xywh). */
   storyboard?: string | null;
   /** Subtitle tracks (WebVTT), drawn by the player above its controls. */
   captions?: CaptionTrack[];
+  /** Play ads from monetised creators' campaigns (the watch page; at most two per video). */
+  withAds?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -59,6 +62,24 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const lastT = useRef(0);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef(0);
+  // Ads: the slots for this video, which have played, and the one playing now (the video waits under it).
+  const [adSlots, setAdSlots] = useState<AdSlot[]>([]);
+  const [ad, setAd] = useState<AdSlot | null>(null);
+  const adsPlayed = useRef(new Set<number>());
+  useEffect(() => {
+    setAdSlots([]); setAd(null); adsPlayed.current = new Set();
+    if (!withAds || !videoId) return;
+    let off = false;
+    fetch(`/api/videos/${videoId}/ads`, { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : { slots: [] })).then((j: { slots: AdSlot[] }) => {
+      if (off || !j.slots?.length) return;
+      setAdSlots(j.slots);
+      const pre = j.slots.find((x) => x.at === 0);
+      if (pre && (video.current?.currentTime ?? 0) < 3 && !(startAt > 0)) { video.current?.pause(); adsPlayed.current.add(0); setAd(pre); }
+      else if (pre) adsPlayed.current.add(0); // resuming part-way: no ad before
+    }).catch(() => undefined);
+    return () => { off = true; };
+  }, [videoId, withAds]); // eslint-disable-line react-hooks/exhaustive-deps
+  const adDone = () => { setAd(null); video.current?.play().catch(() => undefined); };
   useEffect(() => { onPlayingChange?.(playing); }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
   const progressRef = useRef(onProgress);
   progressRef.current = onProgress;
@@ -122,7 +143,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
 
   const toggle = useCallback(() => {
     const el = video.current!;
-    if (el.paused || el.ended) { void el.play(); setFlash('play'); } else { el.pause(); setFlash('pause'); }
+    if (el.paused || el.ended) { el.play().catch(() => undefined); setFlash('play'); } else { el.pause(); setFlash('pause'); }
     setTimeout(() => setFlash(null), 500);
   }, []);
   const seek = useCallback((t: number) => { const el = video.current!; el.currentTime = Math.max(0, Math.min((el.duration || duration) - 0.05, t)); }, [duration]);
@@ -156,12 +177,13 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     idleTimer.current = setTimeout(() => { if (!video.current?.paused) { setIdle(true); setMenu(null); } }, 2500);
   }, []);
 
+  const adRef = useRef<AdSlot | null>(null); adRef.current = ad;
   // Keyboard shortcuts while the page (not a text field) has focus.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t.closest('input, textarea, select, [contenteditable="true"]') || e.ctrlKey || e.metaKey || e.altKey) return;
-      const el = video.current; if (!el) return;
+      const el = video.current; if (!el || adRef.current) return;
       const k = (e.key ?? '').toLowerCase();
       const handled = () => { e.preventDefault(); poke(); };
       if (k === ' ' || k === 'k') { handled(); toggle(); }
@@ -188,6 +210,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const onTime = () => {
     const el = video.current!;
     setTime(el.currentTime);
+    const mid = adSlots.find((x) => x.at > 0 && !adsPlayed.current.has(x.at) && el.currentTime >= x.at && el.currentTime < x.at + 5);
+    if (mid && !ad && !el.paused) { adsPlayed.current.add(mid.at); el.pause(); setAd(mid); return; }
     if (el.buffered.length) setBuffered(el.buffered.end(el.buffered.length - 1));
     const delta = el.currentTime - lastT.current;
     if (!el.paused && delta > 0 && delta < 2) watched.current += delta;
@@ -221,7 +245,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
           <span className="max-w-[88%] whitespace-pre-line rounded-lg bg-[rgb(5_10_10/0.8)] px-2.5 py-1 text-center text-[13px] font-semibold leading-snug text-white sm:max-w-[72%] sm:px-3.5 sm:py-1.5 sm:text-[19px]">{cueText}</span>
         </div>
       )}
-      {waiting && !error && <Icon.Spinner className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/90" />}
+      {ad && videoId && <AdBreak slot={ad} videoId={videoId} muted={muted} onDone={adDone} />}
+      {waiting && !error && !ad && <Icon.Spinner className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/90" />}
       {flash && <div className="pointer-events-none absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 animate-ping place-items-center rounded-full bg-[rgb(43_181_171/0.6)] text-white [animation-iteration-count:1]">{flash === 'play' ? <Icon.Play size={30} /> : <Icon.Pause size={30} />}</div>}
       {!playing && !waiting && !error && showUi && (
         <button type="button" onClick={toggle} aria-label="Play" className="absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[rgb(16_32_31/0.6)] text-white backdrop-blur sm:hidden"><Icon.Play size={30} /></button>
@@ -360,16 +385,19 @@ function SeekPreview({ hover, cue, label }: { hover: { x: number; w: number }; c
 const captionLabel = (c: CaptionTrack) => `${languageName(c.language)}${c.auto ? ' (automatic)' : ''}`;
 
 /**
- * Which subtitle language is on (remembered: once turned on, captions stay on for the next video when its language
- * is there) and the text of the cue showing now. Tracks run "hidden" so the player draws the text itself.
+ * Which subtitle language is on (on by default when a video has captions; the viewer's choice, including off, is
+ * remembered) and the text of the cue showing now. Tracks run "hidden" so the player draws the text itself.
  */
 function useCaptions(video: React.RefObject<HTMLVideoElement | null>, captions: CaptionTrack[]) {
   const [cc, setCc] = useState<string | null>(null);
   const [cueText, setCueText] = useState('');
   const langs = captions.map((c) => c.language).join(',');
   useEffect(() => {
+    // Captions show by default when a video has them; a viewer who turned them off keeps them off.
     const saved = store.get('fm_cc');
-    setCc(saved && saved !== 'off' && captions.some((c) => c.language === saved) ? saved : null);
+    if (saved === 'off' || !captions.length) { setCc(null); return; }
+    const nav = typeof navigator !== 'undefined' ? navigator.language.slice(0, 2) : '';
+    setCc(captions.find((c) => c.language === saved)?.language ?? captions.find((c) => c.language === nav)?.language ?? captions.find((c) => !c.auto)?.language ?? captions[0].language);
   }, [langs]); // eslint-disable-line react-hooks/exhaustive-deps
   const chooseCc = useCallback((lang: string | null | 'last') => {
     if (lang === 'last') {

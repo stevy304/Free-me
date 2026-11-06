@@ -1,6 +1,6 @@
 export interface HubVideo {
   id: string; title: string; description: string | null; visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE'; status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED' | 'FLAGGED' | 'SUSPENDED';
-  madeForKids: boolean; isShort: boolean; language: string | null; category: { slug: string; name: string } | null; tags: string[];
+  madeForKids: boolean; isShort: boolean; isPodcast?: boolean; language: string | null; category: { slug: string; name: string } | null; tags: string[];
   durationSeconds: number; width: number | null; height: number | null; processingProgress: number; processingStage: string | null; processingError: string | null;
   viewCount: string; likeCount: number; dislikeCount: number; commentCount: number; commentsEnabled: boolean; createdAt: string; publishedAt: string | null;
   takenDownAt: string | null; takedownReason: string | null;

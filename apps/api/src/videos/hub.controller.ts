@@ -46,7 +46,7 @@ export class HubController {
 
   private async view(v: Video & { category?: { slug: string; name: string } | null; tags?: Array<{ tag: { name: string } }>; renditions?: Array<{ resolution: string; height: number; width: number }> }) {
     return {
-      id: v.id, title: v.title, description: v.description, visibility: v.visibility, status: v.status, madeForKids: v.madeForKids, isShort: v.isShort,
+      id: v.id, title: v.title, description: v.description, visibility: v.visibility, status: v.status, madeForKids: v.madeForKids, isShort: v.isShort, isPodcast: v.isPodcast,
       language: v.language, category: v.category ? { slug: v.category.slug, name: v.category.name } : null, tags: v.tags?.map((t) => t.tag.name) ?? [],
       durationSeconds: v.durationSeconds, width: v.width, height: v.height, processingProgress: v.processingProgress, processingStage: v.processingStage,
       processingError: v.processingError, viewCount: v.viewCount.toString(), likeCount: v.likeCount, dislikeCount: v.dislikeCount, commentCount: v.commentCount, commentsEnabled: v.commentsEnabled,
@@ -120,7 +120,8 @@ export class HubController {
   @ApiOperation({ summary: 'Upload a custom thumbnail (JPEG, PNG or WebP, up to 2 MB; 1280x720 recommended)' })
   async thumbnail(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Req() req: AppRequest) {
     const v = await this.mine(auth, id);
-    if (!v.hlsMasterKey) throw new BadRequestException('Wait until the video has been processed.');
+    // Podcasts send their cover while the sound file uploads, so it is in place when the podcast video is made.
+    if (!v.hlsMasterKey && v.status !== 'UPLOADING' && v.status !== 'PROCESSING') throw new BadRequestException('Wait until the video has been processed.');
     const chunks: Buffer[] = []; let size = 0;
     for await (const c of req as AsyncIterable<Buffer>) { size += c.length; if (size > 2 * 1024 * 1024) throw new BadRequestException('The image must be 2 MB or smaller.'); chunks.push(c); }
     const buf = Buffer.concat(chunks);

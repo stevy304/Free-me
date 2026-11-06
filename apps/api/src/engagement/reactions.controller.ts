@@ -9,6 +9,7 @@ import type { AuthContext } from '../common/request';
 import { videoCard } from '../catalog/serialize';
 import { MediaUrls } from '../videos/media-urls';
 import { dateCursor, parseDateCursor, watchable } from './access';
+import { publish, room } from '../realtime/publish';
 
 class ReactionDto { @ApiProperty({ enum: ['like', 'dislike', 'none'] }) @IsIn(['like', 'dislike', 'none']) value!: 'like' | 'dislike' | 'none' }
 class ProgressDto {
@@ -41,6 +42,7 @@ export class ReactionsController {
       return { ...(await tx.video.update({ where: { id }, data: { likeCount: { increment: likes }, dislikeCount: { increment: dislikes } }, select: { likeCount: true } })), sparked: likes > 0 };
     });
     if (counts.sparked) await notifySpark(this.prisma, id, userId);
+    publish(room.video(id), 'reactions', { likeCount: counts.likeCount });
     return { reaction: body.value, likeCount: counts.likeCount };
   }
 

@@ -5,13 +5,14 @@ import { extname, join, relative, sep } from 'node:path';
 import type { AppConfig } from '../config/config';
 import { AUDIO, FAST_RUNGS, codecsFor, masterPlaylist, planLadder, type MasterEntry, type PlannedRung } from './ladder';
 import { BT709_TAGS, ffmpegFilters, loudnessFilter, measureLoudness, toneMap, type Hdr, type Loudness } from './filters';
-import { MediaError, probe, run, type ProbeResult } from './probe';
+import { AudioOnly, MediaError, probe, run, type ProbeResult } from './probe';
 import { mediaPrefix, wantedLocation } from './keys';
 import { LATE_FOLDERS } from './captions';
 import { extractSpeech } from './autocaptions';
 import { hold, screen } from './screening';
 import { announceVideo } from '../notifications/notify';
 import type { Storage } from './storage';
+import { publish, room } from '../realtime/publish';
 
 const TYPES: Record<string, string> = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg' };
 const IMMUTABLE = 'public, max-age=31536000, immutable';
@@ -41,7 +42,9 @@ export class VideoProcessor {
   constructor(private readonly prisma: PrismaClient, private readonly storage: Storage, private readonly config: AppConfig) {}
 
   private async setProgress(id: string, progress: number, stage: string, extra: Partial<Video> = {}) {
-    await this.prisma.video.update({ where: { id }, data: { processingProgress: Math.max(0, Math.min(100, Math.round(progress))), processingStage: stage, ...extra } as never });
+    const p = Math.max(0, Math.min(100, Math.round(progress)));
+    await this.prisma.video.update({ where: { id }, data: { processingProgress: p, processingStage: stage, ...extra } as never });
+    publish(room.video(id), 'processing', { progress: p, stage });
   }
 
   /** Returns the extracted speech track (outside the work folder) when automatic captions should be made from it. */
@@ -55,41 +58,70 @@ export class VideoProcessor {
       const source = join(work, `source${extname(video.sourceFileS3Key) || '.bin'}`);
       await this.setProgress(videoId, 1, 'Preparing');
       await this.storage.download(video.sourceFileS3Key, source);
-      const info = await probe(this.config.media.ffprobePath, source);
+      let source2 = source;
+      let podcast = false;
+      let info: ProbeResult;
+      try { info = await probe(this.config.media.ffprobePath, source); }
+      catch (e) {
+        if (!(e instanceof AudioOnly)) throw e;
+        // A podcast: the cover (if the creator gave one) with a moving waveform, 1280x720.
+        await this.setProgress(videoId, 2, 'Making the podcast video');
+        source2 = await this.podcastVideo(video, source, work, e.durationSeconds, signal);
+        podcast = true;
+        info = await probe(this.config.media.ffprobePath, source2);
+      }
       const isShort = info.durationSeconds <= 180 && info.height >= info.width;
       const ladder = planLadder(info.width, info.height, info.fps);
       const fast = ladder.filter((r) => FAST_RUNGS.has(r.name));
       const full = ladder.filter((r) => !FAST_RUNGS.has(r.name));
-      await this.setProgress(videoId, 4, 'Processing SD', { durationSeconds: Math.round(info.durationSeconds), width: info.width, height: info.height, isShort } as Partial<Video>);
+      await this.setProgress(videoId, 4, 'Processing SD', { durationSeconds: Math.round(info.durationSeconds), width: info.width, height: info.height, isShort: isShort && !podcast, isPodcast: podcast } as Partial<Video>);
 
       // HDR phone videos are converted to normal colour; without the filters they would play washed out and grey.
       const filters = await ffmpegFilters(this.config.media.ffmpegPath);
       const hdr: Hdr = info.hdr && filters.has('zscale') && filters.has('tonemap') ? info.hdr : null;
-      if (info.hdr && !hdr) this.log.warn(`${videoId}: HDR source but this ffmpeg lacks zscale/tonemap; colours will look flat`);
+      if (info.hdr && !hdr) this.log.warn(`${videoId}: HDR source2 but this ffmpeg lacks zscale/tonemap; colours will look flat`);
       // Nothing is published before the safety check: a match holds the video for a moderator.
+      // The uploaded file itself is fingerprinted (for a podcast, the sound file).
       const held = await screen(this.prisma, this.config, video, source, info, work);
       if (held) { await hold(this.prisma, videoId, held); this.log.warn(`${videoId}: held for review: ${held}`); return { speech: null }; }
-      const thumbs = await this.thumbnails(source, work, info, hdr);
-      const board = await this.storyboard(source, work, info, hdr).catch((e) => { this.log.warn(`${videoId}: no seek previews: ${(e as Error).message.slice(0, 200)}`); return null; });
+      const thumbs = await this.thumbnails(source2, work, info, hdr);
+      const board = await this.storyboard(source2, work, info, hdr).catch((e) => { this.log.warn(`${videoId}: no seek previews: ${(e as Error).message.slice(0, 200)}`); return null; });
       // Audio once, at the same loudness as every other video (measured first, then one linear gain).
-      const loud = info.hasAudio ? await measureLoudness(this.config.media.ffmpegPath, source, signal) : null;
+      const loud = info.hasAudio ? await measureLoudness(this.config.media.ffmpegPath, source2, signal) : null;
       const done: MasterEntry[] = [];
       const fastWeight = full.length ? 40 : 90;
-      await this.encode(source, work, fast, info, hdr, info.hasAudio ? { loudness: loud } : null, (f) => this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined), signal);
+      await this.encode(source2, work, fast, info, hdr, info.hasAudio ? { loudness: loud } : null, (f) => this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined), signal);
       await this.publish(videoId, work, fast, info, done, { thumbs, board }, full.length ? 'SD ready · processing HD' : 'Ready', 5 + fastWeight);
       if (full.length) {
-        await this.encode(source, work, full, info, hdr, null, (f) => this.setProgress(videoId, 50 + f * 45, 'SD ready · processing HD').catch(() => undefined), signal);
+        await this.encode(source2, work, full, info, hdr, null, (f) => this.setProgress(videoId, 50 + f * 45, 'SD ready · processing HD').catch(() => undefined), signal);
         await this.publish(videoId, work, full, info, done, null, 'Ready', 100);
       }
       this.log.log(`${videoId}: ${ladder.map((r) => r.name).join(', ')} from ${info.width}x${info.height} ${info.durationSeconds.toFixed(1)}s`);
       if (!this.config.media.whisper || !info.hasAudio) return { speech: null };
       // The speech track for automatic captions, kept after the work folder goes; captioning runs after the lock.
       const speech = join(this.config.media.scratchDir, `${videoId}.speech.wav`);
-      try { await extractSpeech(this.config.media.ffmpegPath, source, speech, signal); return { speech }; }
+      try { await extractSpeech(this.config.media.ffmpegPath, source2, speech, signal); return { speech }; }
       catch (e) { this.log.warn(`${videoId}: could not extract speech: ${(e as Error).message.slice(0, 200)}`); return { speech: null }; }
     } finally {
       await rm(work, { recursive: true, force: true }).catch(() => undefined);
     }
+  }
+
+  /** Turns a sound file into a video: the creator's cover (or a plain dark picture) with a waveform along the bottom. */
+  private async podcastVideo(video: Video, audio: string, work: string, seconds: number, signal?: AbortSignal): Promise<string> {
+    const out = join(work, 'podcast.mp4');
+    let cover: string | null = null;
+    if (video.customThumbnail && video.thumbnailKey) {
+      cover = join(work, `cover${extname(video.thumbnailKey) || '.jpg'}`);
+      try { await this.storage.download(mediaPrefix(video.id, video.mediaLocation) + video.thumbnailKey, cover); } catch { cover = null; }
+    }
+    const fps = 15;
+    const bg = cover ? ['-loop', '1', '-framerate', String(fps), '-i', cover] : ['-f', 'lavfi', '-i', `color=c=0x071312:s=1280x720:r=${fps}`];
+    const graph = `[0:v]scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,setsar=1,format=yuv420p[bg];`
+      + `[1:a]showwaves=s=1280x120:mode=cline:colors=0x2bc4b8|0xffffff:rate=${fps},format=yuva420p[w];`
+      + `[bg][w]overlay=0:H-h-36:shortest=1,format=yuv420p[v]`;
+    await run(this.config.media.ffmpegPath, ['-hide_banner', '-y', ...bg, '-i', audio, '-filter_complex', graph, '-map', '[v]', '-map', '1:a', '-c:v', 'libx264', '-preset', this.config.media.preset, '-tune', 'stillimage', '-crf', '22', '-r', String(fps), '-c:a', 'aac', '-b:a', '192k', '-shortest', ...(seconds > 0 ? ['-t', seconds.toFixed(2)] : []), out], undefined, signal);
+    return out;
   }
 
   /** Three frames (25%, 50%, 75%) the creator can choose from; the middle one is the default. */

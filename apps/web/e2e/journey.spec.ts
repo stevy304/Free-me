@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { expectCode } from './codes';
 
 /**
  * The main journeys, in a real browser, against the real API and database:
@@ -9,22 +9,14 @@ import { readFileSync } from 'node:fs';
 const LOG = process.env.E2E_API_LOG ?? '';
 const run = Date.now().toString(36);
 
-async function codeFor(email: string): Promise<string> {
-  const pattern = new RegExp(`to ${email.replace(/[.+]/g, '\\$&')}: (\\d{6}) is your Free Me sign-in code`, 'g');
-  for (let i = 0; i < 60; i++) {
-    const m = [...readFileSync(LOG, 'utf8').matchAll(pattern)].pop();
-    if (m) return m[1];
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error(`No sign-in code for ${email} in ${LOG}`);
-}
 
 async function signIn(page: Page, email: string, returnTo = '/') {
   await page.goto(`/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByLabel('Email address').fill(email);
+  const code = expectCode(email);
   await page.getByRole('button', { name: 'Email me a sign-in code' }).click();
   await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
-  await page.getByLabel('Sign-in code').fill(await codeFor(email));
+  await page.getByLabel('Sign-in code').fill(await code());
   await page.waitForURL((u) => u.pathname === returnTo.split('?')[0]);
 }
 

@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import type { PrismaClient } from '@prisma/client';
+import { publish, room } from '../realtime/publish';
 
 /** Plain functions (no Nest), so the API and the media worker raise the same notifications. Never throw. */
 const log = new Logger('Notify');
@@ -21,7 +22,9 @@ export function announceVideo(prisma: PrismaClient, videoId: string) {
     for (;;) {
       const subs = await prisma.subscription.findMany({ where: { channelId: v.channelId }, select: { id: true, userId: true }, orderBy: { id: 'asc' }, take: 1000, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
       if (!subs.length) break;
-      await prisma.notification.createMany({ data: subs.filter((s) => s.userId !== v.channel.userId).map((s) => ({ userId: s.userId, type: 'NEW_VIDEO' as const, actorId: v.channel.userId, videoId })) });
+      const to = subs.filter((s) => s.userId !== v.channel.userId);
+      await prisma.notification.createMany({ data: to.map((s) => ({ userId: s.userId, type: 'NEW_VIDEO' as const, actorId: v.channel.userId, videoId })) });
+      for (const s of to) publish(room.user(s.userId), 'notifications');
       cursor = subs.at(-1)!.id;
     }
   });
@@ -32,10 +35,12 @@ export function notifyComment(prisma: PrismaClient, c: { id: string; videoId: st
   return safe(`comment ${c.id}`, async () => {
     if (c.parentId && replyingTo && replyingTo !== c.userId) {
       await prisma.notification.create({ data: { userId: replyingTo, type: 'REPLY', actorId: c.userId, videoId: c.videoId, commentId: c.id } });
+      publish(room.user(replyingTo), 'notifications');
     }
     const owner = (await prisma.video.findUnique({ where: { id: c.videoId }, select: { channel: { select: { userId: true } } } }))?.channel.userId;
     if (!c.parentId && owner && owner !== c.userId) {
       await prisma.notification.create({ data: { userId: owner, type: 'COMMENT', actorId: c.userId, videoId: c.videoId, commentId: c.id } });
+      publish(room.user(owner), 'notifications');
     }
   });
 }
@@ -49,5 +54,6 @@ export function notifySpark(prisma: PrismaClient, videoId: string, actorId: stri
     if (open) {
       if (open.actorId !== actorId) await prisma.notification.update({ where: { id: open.id }, data: { count: { increment: 1 }, actorId } });
     } else await prisma.notification.create({ data: { userId: owner, type: 'SPARK', actorId, videoId } });
+    publish(room.user(owner), 'notifications');
   });
 }

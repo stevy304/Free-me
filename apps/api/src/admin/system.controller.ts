@@ -7,12 +7,18 @@ import { APP_CONFIG, type AppConfig } from '../config/config';
 import { PrismaService } from '../database/prisma.service';
 import { RedisService } from '../database/redis.service';
 import { RequireAuth } from '../common/auth.guard';
-import { MediaQueue } from '../media/queue';
+import { MediaQueue, STORAGE } from '../media/queue';
+import { MediaJobs, VideoBusy } from '../media/jobs';
+import type { Storage } from '../media/storage';
 
 const startedAt = new Date();
 
 /** Ready videos processed before the current pipeline (no seek previews yet): they lack HDR colour, even loudness, shared audio and previews. */
 const NEEDS_UPGRADE: Prisma.VideoWhereInput = { status: 'READY', storyboard: { equals: Prisma.DbNull }, sourceFileS3Key: { not: null }, takenDownAt: null };
+
+class RepairDto {
+  @ApiPropertyOptional({ description: 'Fix what is found (default: only report)' }) @IsOptional() @IsBoolean() apply?: boolean;
+}
 
 class ReprocessDto {
   @ApiPropertyOptional({ description: 'How many to queue now (1-500, default 50)' }) @IsOptional() @IsInt() @Min(1) @Max(500) limit?: number;
@@ -25,7 +31,7 @@ const HOUR = 3_600_000;
 @Controller('admin/system')
 @RequireAuth('ADMIN')
 export class SystemController {
-  constructor(private readonly prisma: PrismaService, private readonly redis: RedisService, private readonly media: MediaQueue, @Inject(APP_CONFIG) private readonly config: AppConfig) {}
+  constructor(private readonly prisma: PrismaService, private readonly redis: RedisService, private readonly media: MediaQueue, @Inject(APP_CONFIG) private readonly config: AppConfig, @Inject(STORAGE) private readonly storage: Storage) {}
 
   @Get()
   @ApiOperation({ summary: 'Health, processing queue, stuck and failed videos, storage used and accounts (administrators only)' })
@@ -76,5 +82,22 @@ export class SystemController {
     if (!body.dryRun) for (const r of rows) await this.media.add({ name: 'transcode', videoId: r.id });
     const remaining = await this.prisma.video.count({ where: NEEDS_UPGRADE });
     return { queued: body.dryRun ? 0 : rows.length, wouldQueue: rows.length, remaining: body.dryRun ? remaining : Math.max(0, remaining - rows.length) };
+  }
+
+  @Post('repair-media')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Find (and with apply, bring back) files videos left in the wrong storage place: broken thumbnails or playback. Same as tools/repair-media' })
+  async repair(@Body() body: RepairDto) {
+    const jobs = new MediaJobs(this.prisma, this.storage, this.config, this.redis.client);
+    const videos = await this.prisma.video.findMany({ where: { hlsMasterKey: { not: null } }, select: { id: true, title: true }, orderBy: { createdAt: 'desc' }, take: 2000 });
+    const found: Array<{ id: string; title: string; missing: string[]; leftovers: number; repaired: boolean }> = [];
+    let busy = 0;
+    for (const v of videos) {
+      try {
+        const r = await jobs.repair(v.id, !!body.apply);
+        if (r && (r.leftovers || r.missing.length)) found.push({ id: v.id, title: v.title, missing: r.missing, leftovers: r.leftovers, repaired: !!body.apply && r.leftovers > 0 });
+      } catch (e) { if (e instanceof VideoBusy) busy++; else throw e; }
+    }
+    return { checked: videos.length, needingRepair: found.length, applied: !!body.apply, busy, videos: found.slice(0, 100) };
   }
 }

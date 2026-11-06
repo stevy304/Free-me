@@ -60,7 +60,8 @@ export class LocalStorageController {
   @Get('pub/*key')
   pub(@Param('key') key: string | string[], @Res() res: Response) {
     const rel = Array.isArray(key) ? key.join('/') : key;
-    if (!/^[0-9a-f-]{36}\/[\w./-]+$/.test(rel) || rel.includes('..')) throw new NotFoundException();
-    this.send(res, `pub/${rel}`, rel.endsWith('.m3u8') ? 'public, max-age=30' : 'public, max-age=31536000, immutable');
+    if (!/^(live\/)?[0-9a-f-]{36}\/[\w./-]+$/.test(rel) || rel.includes('..')) throw new NotFoundException();
+    // A live playlist changes every two seconds.
+    this.send(res, `pub/${rel}`, rel.endsWith('.m3u8') ? (rel.startsWith('live/') ? 'no-cache, max-age=1' : 'public, max-age=30') : 'public, max-age=31536000, immutable');
   }
 }
