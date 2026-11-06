@@ -175,7 +175,14 @@ export class LocalStorage implements Storage {
   }
   /** Stores one part sent to a partUrl; returns its ETag (MD5, as S3 does). */
   async writePart(uploadId: string, partNumber: number, body: Buffer) {
-    await writeFile(join(this.partsDir(uploadId), String(partNumber)), body);
+    const dir = this.partsDir(uploadId);
+    const temporary = join(dir, `writing-${randomUUID()}`);
+    try {
+      await writeFile(temporary, body);
+      await rename(temporary, join(dir, String(partNumber)));
+    } finally {
+      await rm(temporary, { force: true });
+    }
     return `"${createHash('md5').update(body).digest('hex')}"`;
   }
   async listParts(_key: string, uploadId: string) {

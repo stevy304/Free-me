@@ -17,8 +17,8 @@ const URL_BATCH = 20;
 const STORE = 'fm_uploads';
 const fileKey = (f: File) => `${f.name}|${f.size}|${f.lastModified}`;
 function remembered(): Record<string, string> { try { return JSON.parse(localStorage.getItem(STORE) ?? '{}'); } catch { return {}; } }
-function remember(f: File, id: string | null) {
-  try { const m = remembered(); if (id) m[fileKey(f)] = id; else delete m[fileKey(f)]; localStorage.setItem(STORE, JSON.stringify(m)); } catch { /* storage blocked */ }
+function remember(key: string, id: string | null) {
+  try { const m = remembered(); if (id) m[key] = id; else delete m[key]; localStorage.setItem(STORE, JSON.stringify(m)); } catch { /* storage blocked */ }
 }
 
 /**
@@ -55,6 +55,8 @@ export class VideoUpload {
     this.snap = { state: 'starting', videoId: null, title: original.name.replace(/\.[^.]+$/, ''), sent: 0, total: original.size, bytesPerSecond: 0, secondsLeft: null, error: null, compress: null };
   }
 
+  private get resumeKey() { return this.options.ad ? `ad|${fileKey(this.file)}` : fileKey(this.file); }
+
   private cancelled() { return this.snap.state === 'cancelled'; }
   /** Upload the original instead of finishing the smaller copy. */
   skipCompression() { this.compressing?.abort(new DOMException('skipped', 'AbortError')); }
@@ -64,7 +66,7 @@ export class VideoUpload {
    * is already partly uploaded from an earlier visit: that upload resumes as it was.
    */
   private async prepare() {
-    if (this.options.compress === false || this.compressed || this.snap.videoId || remembered()[fileKey(this.original)]) return;
+    if (this.options.compress === false || this.compressed || this.snap.videoId || remembered()[this.resumeKey]) return;
     const ctl = new AbortController(); this.compressing = ctl;
     this.set({ state: 'compressing', compress: { progress: 0, originalBytes: this.original.size, savedBytes: null } });
     try {
@@ -86,35 +88,28 @@ export class VideoUpload {
       await this.prepare();
       if (this.cancelled()) return;
       // A smaller copy is made anew each time, so it is not resumed after the tab closes (the original is).
-      const previous = this.compressed ? undefined : remembered()[fileKey(this.file)];
+      const previous = this.compressed ? undefined : remembered()[this.resumeKey];
       if (previous) {
-        const s = await api<{ status: string; partSize: number; assembled?: boolean; parts: Array<{ partNumber: number; etag: string }> }>(`/uploads/${previous}`).catch((e: unknown) => {
-          if (e instanceof ApiError && e.status === 404) return null;
-          throw e;
-        });
-        if (this.snap.state === 'cancelled') return;
-        if (s?.status === 'UPLOADING') {
-          this.assembled = s.assembled === true;
-          this.partSize = s.partSize; this.partCount = Math.ceil(this.file.size / s.partSize);
-          for (const p of s.parts) {
-            this.done.add(p.partNumber);
-            this.completedBytes += this.size(p.partNumber);
-          }
-          this.set({ videoId: previous });
-        } else if (s?.status === 'PROCESSING' || s?.status === 'READY') {
-          remember(this.file, null);
-          this.set({ videoId: previous, state: 'done', sent: this.file.size });
-          return;
-        }
+        const status = await this.restore(previous);
+        if (this.cancelled()) return;
+        if (status === 'done') return;
       }
       if (!this.snap.videoId) {
+        this.assembled = false;
+        this.done.clear();
+        this.urls.clear();
+        this.completedBytes = 0;
+        this.transferBytes = 0;
+        this.transferMs = 0;
+        this.retries = 0;
+        this.peakParallel = 0;
         const r = await api<{ videoId: string; title: string; partSize: number; partCount: number }>('/uploads', { body: { fileName: this.file.name, sizeBytes: this.file.size, ...(this.options.ad ? { ad: true } : {}) } });
         if (this.snap.state === 'cancelled') {
           await api(`/uploads/${r.videoId}`, { method: 'DELETE', body: {} });
           return;
         }
         this.partSize = r.partSize; this.partCount = r.partCount;
-        if (!this.compressed) remember(this.file, r.videoId);
+        if (!this.compressed) remember(this.resumeKey, r.videoId);
         this.set({ videoId: r.videoId, title: r.title });
       }
       await this.run();
@@ -126,6 +121,37 @@ export class VideoUpload {
     for (const v of this.progress.values()) n += v;
     return n;
   }
+  private async restore(id: string) {
+    const state = await api<{ status: string; partSize?: number; sizeBytes?: number; isAd: boolean; assembled?: boolean; parts: Array<{ partNumber: number; size: number }> }>(`/uploads/${id}`).catch((error: unknown) => {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    });
+    if (this.cancelled()) return;
+    if (!state || state.isAd !== !!this.options.ad) return 'missing';
+    if (state.status === 'PROCESSING' || state.status === 'READY') {
+      // Completing a PROCESSING upload also retries enqueueing if the original response was lost.
+      if (state.status === 'PROCESSING') await api(`/uploads/${id}/complete`, { body: {} });
+      if (this.cancelled()) return;
+      remember(this.resumeKey, null);
+      this.set({ videoId: id, state: 'done', sent: this.file.size });
+      return 'done';
+    }
+    if (state.status !== 'UPLOADING' || state.sizeBytes !== this.file.size || !state.partSize) return 'missing';
+    this.partSize = state.partSize;
+    this.partCount = Math.ceil(this.file.size / this.partSize);
+    this.assembled = state.assembled === true;
+    this.done.clear();
+    this.urls.clear();
+    this.completedBytes = 0;
+    for (const part of state.parts) {
+      if (part.partNumber < 1 || part.partNumber > this.partCount || this.done.has(part.partNumber) || part.size !== this.size(part.partNumber)) continue;
+      this.done.add(part.partNumber);
+      this.completedBytes += part.size;
+    }
+    this.set({ videoId: id });
+    return 'uploading';
+  }
+
   private size(p: number) { return p < this.partCount ? this.partSize : this.file.size - this.partSize * (this.partCount - 1); }
 
   private tick(force = false) {
@@ -163,7 +189,7 @@ export class VideoUpload {
         peakParallel: this.peakParallel,
       },
     } });
-    remember(this.file, null);
+    remember(this.resumeKey, null);
     this.set({ state: 'done' });
   }
 
@@ -290,18 +316,25 @@ export class VideoUpload {
     if (this.snap.state !== 'paused' && this.snap.state !== 'error') return;
     await this.running;
     if (this.snap.state !== 'paused' && this.snap.state !== 'error') return;
-    if (this.snap.videoId) await this.run();
-    else {
-      this.set({ state: 'starting', error: null });
-      await this.start();
-    }
+    const id = this.snap.videoId;
+    this.set({ state: 'starting', error: null });
+    try {
+      const status = id ? await this.restore(id) : 'missing';
+      if (this.cancelled() || status === 'done') return;
+      if (status === 'uploading') await this.run();
+      else {
+        if (id) remember(this.resumeKey, null);
+        this.set({ videoId: null });
+        await this.start();
+      }
+    } catch (error) { this.fail(error); }
   }
   async cancel() {
     if (this.snap.state === 'finishing' || this.snap.state === 'done') return;
     this.set({ state: 'cancelled' });
     this.compressing?.abort();
     this.stopTransfers();
-    remember(this.file, null);
+    remember(this.resumeKey, null);
     if (this.snap.videoId) await api(`/uploads/${this.snap.videoId}`, { method: 'DELETE', body: {} }).catch(() => undefined);
   }
   private fail(e: unknown) {

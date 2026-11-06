@@ -72,14 +72,19 @@ export class LocalChunks implements ChunkRunner {
   async runAll(tasks: ChunkTask[], onDone: (finished: number) => void, signal?: AbortSignal) {
     const results: ChunkResult[] = [];
     let next = 0; let finished = 0;
+    const abort = new AbortController();
+    const runSignal = signal ? AbortSignal.any([signal, abort.signal]) : abort.signal;
     await Promise.all(Array.from({ length: Math.min(this.concurrency, tasks.length) }, async () => {
-      while (next < tasks.length) {
-        signal?.throwIfAborted();
-        const t = tasks[next++];
-        results[t.index] = await runChunk(t, this.deps, signal);
-        onDone(++finished);
-      }
+      try {
+        while (next < tasks.length) {
+          runSignal.throwIfAborted();
+          const t = tasks[next++];
+          results[t.index] = await runChunk(t, this.deps, runSignal);
+          onDone(++finished);
+        }
+      } catch (error) { abort.abort(error); }
     }));
+    runSignal.throwIfAborted();
     return results;
   }
 }
