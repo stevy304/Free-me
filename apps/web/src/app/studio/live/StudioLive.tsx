@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Icon from '@/components/icons';
 import { inputClass } from '@/components/Pickers';
-import { VerifiedBadge } from '@/components/VerifiedBadge';
+import styles from '@/components/live/ControlRoom.module.css';
 import { ControlRoom } from '@/components/live/ControlRoom';
 import { LiveChat } from '@/components/live/LiveChat';
 import { api } from '@/lib/client-api';
@@ -137,17 +137,81 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   const live = st.stream.status === 'LIVE';
   const watchUrl = typeof window !== 'undefined' ? `${window.location.origin}/live/${st.stream.id}` : `/live/${st.stream.id}`;
 
+  if (!basic) return (
+    <main className={`dark ${styles.studio}`}>
+      <header className={styles.top}>
+        <Link href="/" className={styles.brand}><Icon.Live size={21} /> Free Me <span>Live Studio</span></Link>
+        <input aria-label="Title" className={styles.title} value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} disabled={state !== 'idle' || live} />
+        <div className={styles.status}>
+          {live ? <span className={styles.onAir}>● ON AIR {clock(st.stream.startedAt, now)}</span> : <span className={styles.standby}>Standby</span>}
+          {state === 'live' && encoderRtt !== null && <span title="Latest encoder response">▂▄▆ {encoderRtt} ms</span>}
+          {live || state === 'live' || state === 'ending' ?
+            <button type="button" onClick={end} disabled={state === 'ending'}>{state === 'ending' ? 'Ending…' : 'End broadcast'}</button> :
+            <button type="button" onClick={() => void goLive()} disabled={!media || state !== 'idle'}>{state === 'starting' ? 'Starting…' : 'Go live'}</button>}
+        </div>
+      </header>
+      {error && <p role="alert" className="rounded-md bg-red-950 px-3 py-2 text-sm text-red-200">{error}</p>}
+      <ControlRoom streamId={st.stream.id} basic={false} host={media} capture={capture} active={state === 'live'}
+        chat={<LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-96" />}
+        sources={<div className="space-y-3">
+          <h2 className="font-bold">Input sources</h2>
+          <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={state === 'starting' || state === 'ending'} onClick={() => void pick('camera')} aria-pressed={source === 'camera' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'camera' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.Camera size={18} />Camera</button>
+                <button type="button" disabled={state === 'starting' || state === 'ending'} onClick={() => void pick('screen')} aria-pressed={source === 'screen' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'screen' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.ScreenShare size={18} />Screen</button>
+
+          </div>
+          <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
+            <h2 className="flex items-center gap-2 font-display text-[18px] font-bold"><Icon.Monitor size={20} />OBS, TV encoder or camera</h2>
+            {st.encoder ? (
+              <>
+                <p className="mt-1 text-[14px] text-muted">In OBS: Settings → Stream → Service “Custom”, then paste these. Use H.264 video, AAC audio and a keyframe every 2 seconds. You go live as soon as the encoder starts streaming.</p>
+                <dl className="mt-3 space-y-2 text-[14px]">
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface px-3 py-2"><dt className="w-24 font-semibold">Server</dt><dd className="min-w-0 flex-1 break-all font-mono text-[13px]">{st.encoder.server}</dd><button type="button" onClick={() => void copy('server', st.encoder!.server)} className="flex items-center gap-1 rounded-lg px-2 py-1 font-semibold hover:bg-surface-hover"><Icon.Copy size={16} />{copied === 'server' ? 'Copied' : 'Copy'}</button></div>
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface px-3 py-2"><dt className="w-24 font-semibold">Stream key</dt><dd className="min-w-0 flex-1 break-all font-mono text-[13px]">{showKey ? st.encoder.streamKey : '•'.repeat(24)}</dd>
+                    <button type="button" onClick={() => setShowKey((s) => !s)} className="rounded-lg px-2 py-1 font-semibold hover:bg-surface-hover">{showKey ? 'Hide' : 'Show'}</button>
+                    <button type="button" onClick={() => void copy('key', st.encoder!.streamKey)} className="flex items-center gap-1 rounded-lg px-2 py-1 font-semibold hover:bg-surface-hover"><Icon.Copy size={16} />{copied === 'key' ? 'Copied' : 'Copy'}</button></div>
+                </dl>
+                <p className="mt-2 text-[12px] text-muted">Keep the key secret: anyone with it can broadcast on your Space. <button type="button" className="font-semibold text-danger hover:underline" onClick={() => void api<{ streamKey: string }>('/hub/live/key', { body: {} }).then((r) => setSt({ ...st, encoder: { ...st.encoder!, streamKey: r.streamKey } })).catch((e) => setError((e as Error).message))}>Make a new key</button></p>
+              </>
+            ) : <p className="mt-1 text-[14px] text-muted">Streaming from an encoder is not switched on for this server yet (the operator sets LIVE_RTMP_URL; see DEPLOYMENT.md → Live). You can go live from this browser.</p>}
+          </section>
+
+          {st.past.length > 0 && (
+            <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
+              <h2 className="font-display text-[18px] font-bold">Past streams</h2>
+              <ul className="mt-2 divide-y divide-line text-[14px]">
+                {st.past.map((p) => (
+                  <li key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+                    <span className="flex-1 font-semibold">{p.title}</span>
+                    <span className="text-muted">{p.startedAt ? new Date(p.startedAt).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }) : ''} · peak {p.peakViewers}</span>
+                    {p.replayVideoId ? <Link href="/hub" className="font-semibold text-brand">Recording in Creator Hub</Link> : <span className="text-faint">No recording</span>}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[12px] text-muted">Each recording is saved as a private video. Publish it from Creator Hub to keep it as a replay.</p>
+            </section>
+          )}
+
+        </div>} />
+      <footer className={styles.footer}>
+        <span><Icon.Live size={16} /> Primary feed <strong>{state === 'live' ? 'Broadcasting' : live ? 'External broadcast' : media ? 'Source ready' : 'No source'}</strong></span>
+        <span><Icon.Eye size={16} /> {viewers.toLocaleString(locale)} watching</span>
+        <span>Recording <strong>{state === 'live' ? clock(st.stream.startedAt, now) : 'Standby'}</strong></span>
+        <a href={watchUrl} target="_blank" rel="noreferrer">Open watch page ↗</a>
+      </footer>
+    </main>
+  );
+
   return (
     <div className="mx-auto max-w-[1400px] px-4 pb-16 pt-6 sm:px-6">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="flex flex-1 items-center gap-2 font-display text-[28px] font-extrabold"><Icon.Live size={28} className={live ? 'text-[#e5484d]' : ''} />{basic ? 'Go live' : 'Live Studio'} {!basic && <VerifiedBadge size={22} />}</h1>
+        <h1 className="flex flex-1 items-center gap-2 font-display text-[28px] font-extrabold"><Icon.Live size={28} className={live ? 'text-[#e5484d]' : ''} />Go live</h1>
         {live && <span className="flex items-center gap-2 rounded-full bg-[#e5484d] px-3 py-1.5 text-[13px] font-extrabold uppercase tracking-wide text-white"><span className="h-2 w-2 animate-pulse rounded-full bg-white" />Live · {clock(st.stream.startedAt, now)}</span>}
-        {!basic && state === 'live' && encoderRtt !== null && <span className="rounded-full bg-surface px-3 py-1.5 text-[13px]" title="Round-trip time for the latest recording chunk">Encoder response · {encoderRtt} ms</span>}
         {live && <span className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-[13px] font-semibold"><Icon.Eye size={16} />{viewers.toLocaleString(locale)} watching</span>}
       </div>
       {error && <p role="alert" className="mt-4 rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
 
-      <div className={`mt-5 grid gap-5 ${basic ? '' : 'lg:grid-cols-[1fr_360px]'}`}>
+      <div className="mt-5 grid gap-5">
         <div className="space-y-5">
           <section className="overflow-hidden rounded-3xl border border-line bg-elevated">
             <div className="space-y-3 p-4 sm:p-5">
@@ -167,41 +231,9 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
             </div>
           </section>
 
-          <ControlRoom streamId={st.stream.id} basic={basic} host={media} capture={capture} active={state === 'live'} />
+          <ControlRoom streamId={st.stream.id} basic host={media} capture={capture} active={state === 'live'} />
 
-          {!basic && <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
-            <h2 className="flex items-center gap-2 font-display text-[18px] font-bold"><Icon.Monitor size={20} />OBS, TV encoder or camera</h2>
-            {st.encoder ? (
-              <>
-                <p className="mt-1 text-[14px] text-muted">In OBS: Settings → Stream → Service “Custom”, then paste these. Use H.264 video, AAC audio and a keyframe every 2 seconds. You go live as soon as the encoder starts streaming.</p>
-                <dl className="mt-3 space-y-2 text-[14px]">
-                  <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface px-3 py-2"><dt className="w-24 font-semibold">Server</dt><dd className="min-w-0 flex-1 break-all font-mono text-[13px]">{st.encoder.server}</dd><button type="button" onClick={() => void copy('server', st.encoder!.server)} className="flex items-center gap-1 rounded-lg px-2 py-1 font-semibold hover:bg-surface-hover"><Icon.Copy size={16} />{copied === 'server' ? 'Copied' : 'Copy'}</button></div>
-                  <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface px-3 py-2"><dt className="w-24 font-semibold">Stream key</dt><dd className="min-w-0 flex-1 break-all font-mono text-[13px]">{showKey ? st.encoder.streamKey : '•'.repeat(24)}</dd>
-                    <button type="button" onClick={() => setShowKey((s) => !s)} className="rounded-lg px-2 py-1 font-semibold hover:bg-surface-hover">{showKey ? 'Hide' : 'Show'}</button>
-                    <button type="button" onClick={() => void copy('key', st.encoder!.streamKey)} className="flex items-center gap-1 rounded-lg px-2 py-1 font-semibold hover:bg-surface-hover"><Icon.Copy size={16} />{copied === 'key' ? 'Copied' : 'Copy'}</button></div>
-                </dl>
-                <p className="mt-2 text-[12px] text-muted">Keep the key secret: anyone with it can broadcast on your Space. <button type="button" className="font-semibold text-danger hover:underline" onClick={() => void api<{ streamKey: string }>('/hub/live/key', { body: {} }).then((r) => setSt({ ...st, encoder: { ...st.encoder!, streamKey: r.streamKey } })).catch((e) => setError((e as Error).message))}>Make a new key</button></p>
-              </>
-            ) : <p className="mt-1 text-[14px] text-muted">Streaming from an encoder is not switched on for this server yet (the operator sets LIVE_RTMP_URL; see DEPLOYMENT.md → Live). You can go live from this browser.</p>}
-          </section>}
-
-          {!basic && st.past.length > 0 && (
-            <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
-              <h2 className="font-display text-[18px] font-bold">Past streams</h2>
-              <ul className="mt-2 divide-y divide-line text-[14px]">
-                {st.past.map((p) => (
-                  <li key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
-                    <span className="flex-1 font-semibold">{p.title}</span>
-                    <span className="text-muted">{p.startedAt ? new Date(p.startedAt).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }) : ''} · peak {p.peakViewers}</span>
-                    {p.replayVideoId ? <Link href="/hub" className="font-semibold text-brand">Recording in Creator Hub</Link> : <span className="text-faint">No recording</span>}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-2 text-[12px] text-muted">Each recording is saved as a private video. Publish it from Creator Hub to keep it as a replay.</p>
-            </section>
-          )}
         </div>
-        {!basic && <LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-[520px] lg:sticky lg:top-20 lg:h-[calc(100dvh-7rem)]" />}
       </div>
     </div>
   );

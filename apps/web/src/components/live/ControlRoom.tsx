@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import * as Icon from '@/components/icons';
+import styles from './ControlRoom.module.css';
 import { api } from '@/lib/client-api';
 import { getSocket } from '@/lib/realtime';
 import { guestPeer, type GuestSignal } from './guest-peer';
@@ -43,9 +45,9 @@ function draw(ctx: CanvasRenderingContext2D, scene: Scene, overlay: Overlay, hos
   }
 }
 
-export function ControlRoom({ streamId, basic, host, capture, active }: {
+export function ControlRoom({ streamId, basic, host, capture, active, sources, chat }: {
   streamId: string; basic: boolean; host: MediaStream | null;
-  capture: RefObject<(() => Promise<{ stream: MediaStream; stop: () => void }>) | null>; active: boolean;
+  capture: RefObject<(() => Promise<{ stream: MediaStream; stop: () => void }>) | null>; active: boolean; sources?: ReactNode; chat?: ReactNode;
 }) {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [invite, setInvite] = useState('');
@@ -53,14 +55,17 @@ export function ControlRoom({ streamId, basic, host, capture, active }: {
   const [scene, setScene] = useState<Scene>('Host');
   const [program, setProgram] = useState<Scene>('Host');
   const [programGuests, setProgramGuests] = useState<string[]>([]);
+  const [panel, setPanel] = useState('Crew');
+  const [fadeMs, setFadeMs] = useState(1000);
   const [rundown, setRundown] = useState<Array<{ id: number; name: string; scene: Scene; overlay: Overlay }>>([]);
   const [cueName, setCueName] = useState('');
   const nextCue = useRef(0);
   const [transition, setTransition] = useState<'cut' | 'fade'>('cut');
-  const fade = useRef<{ frame: HTMLCanvasElement; started: number } | null>(null);
+  const fade = useRef<{ frame: HTMLCanvasElement; started: number; duration: number } | null>(null);
   const [draft, setDraft] = useState<Overlay>(empty);
   const [overlay, setOverlay] = useState<Overlay>(empty);
   const [levels, setLevels] = useState<Record<string, number>>({});
+  const previousGain = useRef<Record<string, number>>({});
   const [monitor, setMonitor] = useState(false);
   const enableAudio = useRef<(() => Promise<void>) | null>(null);
   const returns = useRef(new Map<string, MediaStreamAudioDestinationNode>());
@@ -221,7 +226,7 @@ export function ControlRoom({ streamId, basic, host, capture, active }: {
       draw(ctx, showing, s.overlay, hostVideo, guestVideos(onAir));
       const previous = fade.current;
       if (previous) {
-        const opacity = 1 - (performance.now() - previous.started) / 500;
+        const opacity = 1 - (performance.now() - previous.started) / previous.duration;
         if (opacity > 0) {
           ctx.globalAlpha = opacity;
           ctx.drawImage(previous.frame, 0, 0);
@@ -253,25 +258,14 @@ export function ControlRoom({ streamId, basic, host, capture, active }: {
       const frame = document.createElement('canvas');
       frame.width = canvas.width; frame.height = canvas.height;
       frame.getContext('2d')?.drawImage(canvas, 0, 0);
-      fade.current = { frame, started: performance.now() };
+      fade.current = { frame, started: performance.now(), duration: fadeMs };
     } else fade.current = null;
     setProgram(scene);
     setProgramGuests(guests.filter((g) => g.onAir).map((g) => g.id));
     setOverlay(draft);
   };
 
-  return (
-    <section className="space-y-4 rounded-3xl border border-line bg-elevated p-4">
-      <div className={basic ? '' : 'grid gap-3 lg:grid-cols-2'}>
-        {!basic && <div><h2 className="mb-2 text-xs font-bold uppercase text-brand">Preview</h2><canvas ref={preview} width={1280} height={720} className="aspect-video w-full rounded-xl bg-black" /></div>}
-        <div><h2 className="mb-2 text-xs font-bold uppercase text-danger">{active ? 'Program · On air' : 'Program'}</h2><canvas ref={output} width={1280} height={720} className="aspect-video w-full rounded-xl bg-black" /></div>
-      </div>
-      {!basic && <>
-        <div className="flex flex-wrap gap-2" aria-label="Scenes">
-          {scenes.map((item) => <button key={item} type="button" aria-pressed={scene === item} className={`${button} ${scene === item ? 'bg-brand-soft text-brand' : ''}`} onClick={() => setScene(item)}>{item}</button>)}
-          <button type="button" className="rounded-xl bg-brand px-4 py-2 text-sm font-bold text-on-brand" onClick={take}>Take to air</button>
-          <select aria-label="Scene transition" value={transition} onChange={(e) => setTransition(e.target.value === 'fade' ? 'fade' : 'cut')} className={button}><option value="cut">Cut</option><option value="fade">Fade · 0.5 s</option></select>
-        </div>
+  const graphics = (
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="text-sm">Lower third<input className="mt-1 w-full rounded-lg border border-line bg-surface p-2" maxLength={100} value={draft.lower} onChange={(e) => setDraft({ ...draft, lower: e.target.value })} /></label>
           <label className="text-sm">Moving bottom ticker<input className="mt-1 w-full rounded-lg border border-line bg-surface p-2" maxLength={240} value={draft.ticker} onChange={(e) => setDraft({ ...draft, ticker: e.target.value })} /></label>
@@ -286,6 +280,8 @@ export function ControlRoom({ streamId, basic, host, capture, active }: {
           <label className="text-sm">Logo position<select className="mt-1 block w-full rounded-lg border border-line bg-surface p-2" value={draft.position} onChange={(e) => setDraft({ ...draft, position: e.target.value === 'right' ? 'right' : 'left' })}><option value="left">Top left</option><option value="right">Top right</option></select></label>
           {draft.logo && <button className={button} type="button" onClick={() => setDraft({ ...draft, logo: null })}>Remove logo from preview</button>}
         </div>
+  );
+  const cues = (
         <section className="space-y-2 rounded-xl bg-surface p-3">
           <h2 className="font-bold">Show rundown</h2>
           <form className="flex flex-wrap gap-2" onSubmit={(event) => {
@@ -307,14 +303,22 @@ export function ControlRoom({ streamId, basic, host, capture, active }: {
             </li>)}
           </ol>}
         </section>
-        <div className="grid gap-2 sm:grid-cols-3" aria-label="Audio mixer">
-          {['host', ...guests.map((g) => g.id)].map((id, index) => <label key={id} className="rounded-xl bg-surface p-3 text-sm">
+  );
+  const mixer = (
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" aria-label="Audio mixer">
+          {['host', ...guests.map((g) => g.id)].map((id, index) => <div key={id} className="rounded-md border border-[#1a363d] bg-[#10282e] p-3 text-sm">
             {index ? `Guest ${index}` : 'Host audio'}
-            <meter aria-label="Audio level" className="block w-full" min={0} max={100} value={levels[id] ?? 0} />
-            <input aria-label={index ? `Guest ${index} volume` : 'Host volume'} type="range" className="w-full" min={0} max={1} step={0.05} value={gain[id] ?? 1} onChange={(e) => setGain({ ...gain, [id]: Number(e.target.value) })} />
-          </label>)}
+            <meter aria-label="Audio level" className={styles.meter} min={0} max={100} value={levels[id] ?? 0} />
+            <input aria-label={index ? `Guest ${index} volume` : 'Host volume'} type="range" className="w-full accent-[#21d9cb]" min={0} max={1} step={0.05} value={gain[id] ?? 1} onChange={(e) => setGain({ ...gain, [id]: Number(e.target.value) })} />
+            <button type="button" className={styles.mute} aria-pressed={gain[id] === 0} onClick={() => {
+              const current = gain[id] ?? 1;
+              if (current > 0) previousGain.current[id] = current;
+              setGain({ ...gain, [id]: current === 0 ? previousGain.current[id] ?? 1 : 0 });
+            }}>{gain[id] === 0 ? 'Unmute' : 'Mute'}</button>
+          </div>)}
         </div>
-      </>}
+  );
+  const greenRoom = (
       <div className="space-y-2 rounded-xl bg-surface p-3">
         <h2 className="font-bold">{basic ? 'Co-stream guests · up to 2' : 'Guest green room'}</h2>
         {!invite ? <button type="button" className={button} onClick={() => void open()}>Create guest invite</button> :
@@ -328,6 +332,61 @@ export function ControlRoom({ streamId, basic, host, capture, active }: {
           <button type="button" className={button} onClick={() => void getSocket().then((s) => s.emit('live:guest-remove', g.id))}>Remove</button>
         </div>)}
       </div>
-    </section>
+  );
+  const panels = ['Crew', 'Guests', 'Rundown', 'Chat', 'Graphics', 'Sources'] as const;
+
+  if (basic) return <section className="space-y-4 rounded-3xl border border-line bg-elevated p-4">
+    <h2 className="text-xs font-bold uppercase text-danger">{active ? 'Program · On air' : 'Program'}</h2>
+    <canvas ref={output} width={1280} height={720} className="aspect-video w-full rounded-xl bg-black" />
+    {greenRoom}
+  </section>;
+
+  return (
+    <div className={styles.desk}>
+      <nav className={styles.tools} aria-label="Studio tools">
+        {([{ label: 'Sources', icon: Icon.Camera }, { label: 'Graphics', icon: Icon.Monitor }, { label: 'Guests', icon: Icon.Live }, { label: 'Rundown', icon: Icon.Hub }, { label: 'Chat', icon: Icon.Settings }] as const).map(({ label, icon: Tool }) =>
+          <button key={label} type="button" title={label} aria-label={label} aria-pressed={panel === label} onClick={() => setPanel(label)}><Tool size={19} /></button>
+        )}
+      </nav>
+      <aside className={styles.scenes} aria-label="Scenes">
+        <h2>Scenes</h2>
+        {scenes.map((item) => <button key={item} type="button" aria-pressed={scene === item} onClick={() => setScene(item)}>
+          {item === 'Host' ? 'Opening' : item === 'Panel' ? 'Host + Guests' : item}
+          {scene === item && <span aria-hidden>▸</span>}
+        </button>)}
+      </aside>
+      <section className={styles.production} aria-label="Production monitors">
+        <div className={styles.monitors}>
+          <div className={styles.monitor}><h2>Preview</h2><canvas ref={preview} width={1280} height={720} /></div>
+          <div className={styles.monitor}><h2>Program {active && <span>● LIVE</span>}</h2><canvas ref={output} width={1280} height={720} /></div>
+        </div>
+        <div className={styles.switcher}>
+          <button type="button" className={styles.take} onClick={take}><Icon.Live size={21} />Take to air</button>
+          <div className={styles.transitions}>
+            <button type="button" aria-pressed={transition === 'cut'} onClick={() => setTransition('cut')}>Cut</button>
+            <button type="button" aria-pressed={transition === 'fade'} onClick={() => setTransition('fade')}>Fade</button>
+            <label>Fade time<select value={fadeMs} onChange={(e) => setFadeMs(Number(e.target.value))}><option value={500}>0.5 s</option><option value={1000}>1.0 s</option><option value={2000}>2.0 s</option></select></label>
+          </div>
+        </div>
+        <section className={styles.mixer} aria-label="Audio mixer">
+          <header><h2>Audio Mixer</h2><label><input type="checkbox" checked={monitor} onChange={(e) => setMonitor(e.target.checked)} /> Monitor guests (headphones)</label></header>
+          <div className={styles.channels}>{mixer}</div>
+        </section>
+      </section>
+      <aside className={styles.sidebar} aria-label="Production panels">
+        <nav aria-label="Production panels">
+          {panels.map((item) => <button type="button" key={item} aria-pressed={panel === item} onClick={() => setPanel(item)}>{item}</button>)}
+        </nav>
+        <div className={styles.panel} hidden={panel !== 'Crew'}>
+          <div className={styles.operator}><span>FM</span><div><strong>Host · You</strong><small>{active ? 'On air' : 'In control room'}</small></div></div>
+          <button type="button" className={button} onClick={() => setPanel('Guests')}>Open green room</button>
+        </div>
+        <div className={styles.panel} hidden={panel !== 'Guests'}>{greenRoom}</div>
+        <div className={styles.panel} hidden={panel !== 'Rundown'}>{cues}</div>
+        <div className={styles.panel} hidden={panel !== 'Chat'}>{chat}</div>
+        <div className={styles.panel} hidden={panel !== 'Graphics'}>{graphics}</div>
+        <div className={styles.panel} hidden={panel !== 'Sources'}>{sources}</div>
+      </aside>
+    </div>
   );
 }
