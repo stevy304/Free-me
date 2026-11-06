@@ -11,9 +11,10 @@ export const MEDIA_QUEUE = 'media';
 export const STORAGE = Symbol('STORAGE');
 
 /** Job options: transcodes retry twice; moves wait while a video is busy; deletes retry until done. */
-export function jobOptions(name: MediaJob['name']) {
+export function jobOptions(job: MediaJob) {
+  const { name, videoId } = job;
   return {
-    jobId: undefined as string | undefined,
+    deduplication: name === 'transcode' ? { id: videoId } : undefined,
     attempts: name === 'transcode' ? 3 : 20,
     backoff: { type: 'exponential' as const, delay: name === 'transcode' ? 30_000 : 5_000 },
     removeOnComplete: { age: 24 * 3600, count: 1000 },
@@ -41,7 +42,7 @@ export class MediaQueue implements OnModuleDestroy {
   }
 
   async add(job: MediaJob) {
-    if (this.queue) { await this.queue.add(job.name, job, jobOptions(job.name)); return; }
+    if (this.queue) { await this.queue.add(job.name, job, jobOptions(job)); return; }
     if (job.name === 'transcode') this.log.log({ event: 'transcode_started', videoId: job.videoId, attempt: 1, queueWaitMs: 0 });
     void this.inline!.run(job, true).catch((e) => this.log.error(`${job.name} ${job.videoId}: ${(e as Error).message}`));
   }

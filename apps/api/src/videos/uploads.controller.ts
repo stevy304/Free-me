@@ -69,7 +69,10 @@ export class UploadsController {
     const open = await this.prisma.video.count({ where: { channelId: channel.id, status: 'UPLOADING' } });
     if (open >= 20) throw new ConflictException('Finish or cancel your unfinished uploads first.');
     const title = body.fileName.slice(0, body.fileName.length - ext.length).replace(/[_]+/g, ' ').trim().slice(0, 100) || 'Untitled video';
-    const video = await this.prisma.video.create({ data: { channelId: channel.id, title, status: 'UPLOADING', visibility: 'PRIVATE', sourceSizeBytes: BigInt(body.sizeBytes), processingStage: 'Uploading' } });
+    const partSize = this.config.media.driver === 's3' && body.sizeBytes >= 4 * 1024 ** 3
+      ? Math.max(this.config.media.partBytes, 64 * 1024 ** 2)
+      : this.config.media.partBytes;
+    const video = await this.prisma.video.create({ data: { channelId: channel.id, title, status: 'UPLOADING', visibility: 'PRIVATE', sourceSizeBytes: BigInt(body.sizeBytes), uploadPartBytes: BigInt(partSize), processingStage: 'Uploading' } });
     const key = sourceKey(video.id, ext);
     let uploadId: string | undefined;
     try {
@@ -81,7 +84,7 @@ export class UploadsController {
       throw error;
     }
     await this.audit.record({ userId: auth.user.id, action: 'UPLOAD_STARTED', entityType: 'Video', entityId: video.id, req, details: { sizeBytes: body.sizeBytes, ext } });
-    return { videoId: video.id, title, partSize: this.config.media.partBytes, partCount: Math.ceil(body.sizeBytes / this.config.media.partBytes) };
+    return { videoId: video.id, title, partSize, partCount: Math.ceil(body.sizeBytes / partSize) };
   }
 
   @Get(':id')
@@ -95,7 +98,7 @@ export class UploadsController {
       throw error;
     });
     const assembled = parts.length === 0 && (await this.storage.head(key))?.size === Number(v.sourceSizeBytes);
-    return { videoId: v.id, status: v.status, assembled, sizeBytes: Number(v.sourceSizeBytes), partSize: this.config.media.partBytes, parts };
+    return { videoId: v.id, status: v.status, assembled, sizeBytes: Number(v.sourceSizeBytes), partSize: Number(v.uploadPartBytes ?? this.config.media.partBytes), parts };
   }
 
   @Post(':id/parts')
@@ -104,7 +107,7 @@ export class UploadsController {
   async parts(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: PartNumbersDto) {
     const v = await this.mine(auth, id);
     if (v.status !== 'UPLOADING' || !v.uploadId) throw new ConflictException('This upload is already finished.');
-    const max = Math.ceil(Number(v.sourceSizeBytes) / this.config.media.partBytes);
+    const max = Math.ceil(Number(v.sourceSizeBytes) / Number(v.uploadPartBytes ?? this.config.media.partBytes));
     if (body.partNumbers.some((n) => n > max)) throw new BadRequestException('Part number out of range.');
     const entries = await Promise.all([...new Set(body.partNumbers)].map(async (n) =>
       [n, await this.storage.partUrl(v.sourceFileS3Key!, v.uploadId!, n, 3600)] as const,
@@ -120,7 +123,7 @@ export class UploadsController {
     const v = await this.mine(auth, id);
     if (v.status === 'PROCESSING' || v.status === 'READY') return { videoId: v.id, status: v.status };
     if (v.status !== 'UPLOADING' || !v.uploadId) throw new ConflictException('This upload is already finished.');
-    const expected = Math.ceil(Number(v.sourceSizeBytes) / this.config.media.partBytes);
+    const expected = Math.ceil(Number(v.sourceSizeBytes) / Number(v.uploadPartBytes ?? this.config.media.partBytes));
     const key = v.sourceFileS3Key!;
     let stored = await this.storage.head(key);
     if (!stored) {

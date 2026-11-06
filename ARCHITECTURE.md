@@ -64,16 +64,16 @@ Video files go to S3-compatible object storage and are delivered through a CDN; 
 
 ```
 Browser ──1. POST /api/uploads──────────────> API: creates a private draft video and an S3 multipart upload
-        ──2. PUT parts (4 at a time) ───────> Object storage (presigned links; resumes after a lost connection)
+        ──2. PUT parts (adaptive parallelism) ───────> Object storage (presigned links; resumes after a lost connection)
         ──3. POST /api/uploads/:id/complete─> API: checks size, queues "transcode" (BullMQ on Redis)
 Media worker: download source → ffprobe (rejects non-video) → 3 thumbnail frames
-            → fast pass 144p/240p/360p → upload → video READY, playable ("SD ready")
-            → full pass 480p…2160p (up to the source) → upload → master playlist rewritten ("Ready")
+            → first rendition (up to 360p) → upload → video READY, playable
+            → remaining qualities → upload → master playlist rewritten → seek previews
 Viewer: CDN serves pub/<id>/hls/master.m3u8 and its fMP4 segments; private videos go through the API, which
         returns playlists whose segment links are signed for 4 hours.
 ```
 
-- **One upload path for any size.** Parts of 16 MB go straight from the browser to storage, never through the API, so a 20 GB file costs the API a few small requests. Parts retry with backoff; choosing the same file after a closed tab continues where it stopped.
+- **One upload path for any size.** Parts go directly to object storage. The default is 16 MiB and new uploads of at least 4 GiB use at least 64 MiB per part. Parts retry with backoff; choosing the same file after a closed tab continues where it stopped.
 - **Fast first, then complete.** One FFmpeg decode feeds all rungs of a pass (split filter). The low pass finishes quickly, so viewers can watch while HD is still encoding; players pick up new renditions on their next playlist load.
 - **Rendition ladder.** H.264 High (video only), 4-second fMP4 segments, keyframes every 2 seconds, capped CRF 21 (quality first, with a bitrate ceiling per rung), named by the short side so vertical video gets proper ladders. Never upscaled; 60 fps sources keep 60 fps with 1.5× bitrate.
 - **One shared audio rendition.** AAC stereo 128 kb/s, encoded once with the first pass and referenced by every rung (`EXT-X-MEDIA`), so audio is stored once and more languages can be added later.
@@ -85,7 +85,7 @@ Viewer: CDN serves pub/<id>/hls/master.m3u8 and its fMP4 segments; private video
 - **Moments.** Vertical or square videos up to 3 minutes are marked as Moments automatically and appear in the Moments feed.
 - **Removals.** A removed video gets `takenDownAt` and status `SUSPENDED`; feeds, search, playback and every interaction refuse it, the watch page answers 410 with the reason, and its media moves to the private prefix (also when it was still processing).
 - **Visibility follows media.** Public and unlisted media live under `pub/` (CDN, cacheable for a year); private media under `prv/`. Changing visibility queues a `relocate` job that copies, switches, then deletes the old copy, so playback never breaks. Jobs on one video never overlap (Redis lock).
-- **Deleting** removes the database row at once and queues a `purge` of every file. Uploads left unfinished for 3 days are cancelled hourly, and videos whose processing was interrupted (a restarted server) are queued again after 30 minutes.
+- **Deleting** removes the database row at once and queues a `purge` of every file. Uploads left unfinished for 3 days are cancelled hourly, and the worker checks for missing jobs every five minutes. Uploads still waiting for processing become eligible after five minutes. Interrupted processing stages become eligible after 30 minutes. Redis keeps one queued or active transcode per video, and an active worker renews a one-minute processing lease.
 - **Views.** The player reports a view after real watching (30 s, or half of a short video). The API de-duplicates per viewer for 6 hours in Redis and adds up views and watch time; the worker writes the totals to PostgreSQL every 15 seconds.
 - **Processes.** The worker (`apps/api/src/worker.ts`) shares code with the API but runs on the media node. Several instances can run on several servers; failed jobs retry (transcode 3 times, others with backoff), and a file that is not a video fails at once with a clear reason shown in Studio.
 

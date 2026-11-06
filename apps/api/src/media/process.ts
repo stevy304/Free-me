@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient, Video } from '@prisma/client';
 import { mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { extname, join, relative, sep } from 'node:path';
 import type { AppConfig } from '../config/config';
-import { AUDIO, FAST_RUNGS, codecsFor, masterPlaylist, planLadder, type MasterEntry, type PlannedRung } from './ladder';
+import { AUDIO, codecsFor, masterPlaylist, planLadder, type MasterEntry, type PlannedRung } from './ladder';
 import { BT709_TAGS, ffmpegFilters, loudnessFilter, measureLoudness, toneMap, type Hdr, type Loudness } from './filters';
 import { AudioOnly, MediaError, probe, run, type ProbeResult } from './probe';
 import { mediaPrefix, wantedLocation } from './keys';
@@ -33,8 +33,8 @@ async function walk(dir: string): Promise<string[]> {
 }
 
 /**
- * Turns an uploaded source into adaptive HLS: probe → thumbnails → fast pass (144p–360p, the video becomes watchable)
- * → full pass (480p up to the source's resolution). One decode feeds every rung of a pass. Re-running is safe: every
+ * Turns an uploaded source into adaptive HLS: probe → thumbnails → fast pass (up to 360p, the video becomes watchable)
+ * → full pass (all remaining qualities). One decode feeds every rung of a pass. Re-running is safe: every
  * output overwrites the same keys and rendition rows are upserted.
  */
 export class VideoProcessor {
@@ -64,7 +64,8 @@ export class VideoProcessor {
     try {
       const source = join(work, `source${extname(video.sourceFileS3Key) || '.bin'}`);
       await this.setProgress(videoId, 1, 'Preparing');
-      await timed('downloadMs', () => this.storage.download(video.sourceFileS3Key!, source));
+      await timed('downloadMs', () => this.storage.download(video.sourceFileS3Key!, source, signal));
+      signal?.throwIfAborted();
       let source2 = source;
       let podcast = false;
       let info: ProbeResult;
@@ -80,8 +81,9 @@ export class VideoProcessor {
       }
       const isShort = info.durationSeconds <= 180 && info.height >= info.width;
       const ladder = planLadder(info.width, info.height, info.fps);
-      const fast = ladder.filter((r) => FAST_RUNGS.has(r.name));
-      const full = ladder.filter((r) => !FAST_RUNGS.has(r.name));
+      const first = ladder.filter((r) => r.short <= 360).at(-1) ?? ladder[0];
+      const fast = [first];
+      const full = ladder.filter((r) => r !== first);
       await this.setProgress(videoId, 4, 'Processing SD', { durationSeconds: Math.round(info.durationSeconds), width: info.width, height: info.height, isShort: isShort && !podcast, isPodcast: podcast } as Partial<Video>);
 
       // HDR phone videos are converted to normal colour; without the filters they would play washed out and grey.
@@ -91,6 +93,7 @@ export class VideoProcessor {
       // Nothing is published before the safety check: a match holds the video for a moderator.
       // The uploaded file itself is fingerprinted (for a podcast, the sound file).
       const held = await timed('screeningMs', () => screen(this.prisma, this.config, video, source, info, work));
+      signal?.throwIfAborted();
       if (held) { await hold(this.prisma, videoId, held); this.log.warn(`${videoId}: held for review: ${held}`); return { speech: null }; }
       // These steps use independent video and audio streams. Keep the two-pass loudness target.
       const [thumbs, loud] = await Promise.all([
@@ -101,10 +104,12 @@ export class VideoProcessor {
       const done: MasterEntry[] = [];
       const fastWeight = full.length ? 40 : 90;
       await timed('sdEncodeMs', () => this.encode(source2, work, fast, info, hdr, info.hasAudio ? { loudness: loud } : null, (f) => this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined), signal));
-      const playable = await timed('sdPublishMs', () => this.publish(videoId, work, fast, info, done, thumbs, full.length ? 'SD ready · processing HD' : 'Playable · preparing seek previews', 5 + fastWeight));
+      signal?.throwIfAborted();
+      const playable = await timed('sdPublishMs', () => this.publish(videoId, work, fast, info, done, thumbs, full.length ? 'Playable · adding qualities' : 'Playable · preparing seek previews', 5 + fastWeight));
       if (playable !== null && !video.hlsMasterKey) this.log.log({ event: 'video_first_playable', videoId, processingToPlayableMs: Math.round(playable - started), ...timings });
       if (full.length) {
-        await this.encode(source2, work, full, info, hdr, null, (f) => this.setProgress(videoId, 50 + f * 45, 'SD ready · processing HD').catch(() => undefined), signal);
+        await this.encode(source2, work, full, info, hdr, null, (f) => this.setProgress(videoId, 50 + f * 45, 'Playable · adding qualities').catch(() => undefined), signal);
+        signal?.throwIfAborted();
         await this.publish(videoId, work, full, info, done, null, 'Playable · preparing seek previews', 95);
       }
 
@@ -119,6 +124,7 @@ export class VideoProcessor {
       } catch (e) {
         this.log.warn(`${videoId}: no seek previews: ${(e as Error).message.slice(0, 200)}`);
       }
+      signal?.throwIfAborted();
       await this.setProgress(videoId, 100, 'Ready');
       this.log.log(`${videoId}: ${ladder.map((r) => r.name).join(', ')} from ${info.width}x${info.height} ${info.durationSeconds.toFixed(1)}s`);
       if (!this.config.media.whisper || !info.hasAudio) return { speech: null };

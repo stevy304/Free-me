@@ -28,7 +28,7 @@ export interface Storage {
   completeMultipart(key: string, uploadId: string, parts: Array<{ partNumber: number; etag: string }>): Promise<void>;
   abortMultipart(key: string, uploadId: string): Promise<void>;
   head(key: string): Promise<{ size: number } | null>;
-  download(key: string, toPath: string): Promise<void>;
+  download(key: string, toPath: string, signal?: AbortSignal): Promise<void>;
   putFile(key: string, fromPath: string, opts: PutOptions): Promise<void>;
   putBuffer(key: string, body: Buffer, opts: PutOptions): Promise<void>;
   getText(key: string): Promise<string | null>;
@@ -81,10 +81,10 @@ export class S3Storage implements Storage {
     try { const r = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key })); return { size: r.ContentLength ?? 0 }; }
     catch (e) { if ((e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) return null; throw e; }
   }
-  async download(key: string, toPath: string) {
+  async download(key: string, toPath: string, signal?: AbortSignal) {
     await mkdir(dirname(toPath), { recursive: true });
-    const r = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
-    await pipeline(r.Body as Readable, createWriteStream(toPath));
+    const r = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }), { abortSignal: signal });
+    await pipeline(r.Body as Readable, createWriteStream(toPath), { signal });
   }
   async putFile(key: string, fromPath: string, opts: PutOptions) {
     const { size } = await stat(fromPath);
@@ -222,7 +222,11 @@ export class LocalStorage implements Storage {
 
   async abortMultipart(_key: string, uploadId: string) { await rm(this.partsDir(uploadId), { recursive: true, force: true }); }
   async head(key: string) { try { return { size: (await stat(this.path(key))).size }; } catch { return null; } }
-  async download(key: string, toPath: string) { await mkdir(dirname(toPath), { recursive: true }); await copyFile(this.path(key), toPath); }
+  async download(key: string, toPath: string, signal?: AbortSignal) {
+    await mkdir(dirname(toPath), { recursive: true });
+    if (signal) await pipeline(createReadStream(this.path(key)), createWriteStream(toPath), { signal });
+    else await copyFile(this.path(key), toPath);
+  }
   async putFile(key: string, fromPath: string) { const p = this.path(key); await mkdir(dirname(p), { recursive: true }); await copyFile(fromPath, p); }
   async putBuffer(key: string, body: Buffer) { const p = this.path(key); await mkdir(dirname(p), { recursive: true }); await writeFile(p, body); }
   async getText(key: string) { try { return await readFile(this.path(key), 'utf8'); } catch { return null; } }

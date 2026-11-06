@@ -18,8 +18,6 @@ export const LADDER: Rung[] = [
   { name: '1440p', short: 1440, kbps: 9000 },
   { name: '2160p', short: 2160, kbps: 16000 },
 ];
-/** Rungs done in the first, fast pass, so a video is watchable quickly; the rest follow. */
-export const FAST_RUNGS = new Set(['144p', '240p', '360p']);
 
 export interface PlannedRung extends Rung { width: number; height: number; videoKbps: number; maxKbps: number }
 
