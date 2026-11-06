@@ -53,8 +53,8 @@ export class LiveController {
   async studio(@CurrentAuth() auth: AuthContext) {
     const s = await this.attempt(() => this.live.mine(auth.user.id));
     const full = await this.prisma.liveStream.findUniqueOrThrow({ where: { id: s.id }, include: { channel: true } });
-    const past = await this.prisma.liveStream.findMany({ where: { channelId: s.channelId, status: 'ENDED' }, orderBy: { endedAt: 'desc' }, take: 10 });
     const premium = !!auth.user.premiumUntil && auth.user.premiumUntil > new Date();
+    const past = premium ? await this.prisma.liveStream.findMany({ where: { channelId: s.channelId, status: 'ENDED' }, orderBy: { endedAt: 'desc' }, take: 10 }) : [];
     return {
       premium, stream: await this.view(full),
       encoder: this.config.live.rtmpUrl && premium ? { server: this.config.live.rtmpUrl, streamKey: await this.live.streamKey(auth.user.id) } : null,

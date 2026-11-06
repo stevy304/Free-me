@@ -14,9 +14,9 @@ import { useShell } from '@/components/shell/ShellContext';
 interface Me { premium: { active: boolean; until: string | null }; payments: Payment[] }
 
 const PERKS = [
-  { icon: 'badge', title: 'Verified badge', text: 'The Free Me seal next to your name on your Space, your videos and in every conversation.' },
-  { icon: Icon.Wallet, title: 'Earn from your videos', text: 'Join monetisation: 60% of each day’s ad money is shared between monetised creators, by the ads shown on their videos. At most 2 ads per video.' },
-  { icon: Icon.Live, title: 'Live Studio', text: 'Go live from your browser, or from OBS, a TV encoder or a camera with a stream key.' },
+  { icon: 'badge', title: 'Verified badge', text: 'Show the Free Me seal on your Space, videos and conversations.' },
+  { icon: Icon.Wallet, title: 'Earn from your videos', text: 'Eligible creators share 60% of daily ad revenue based on the ads shown on their videos.' },
+  { icon: Icon.Live, title: 'Live Studio', text: 'Stream with OBS or a hardware encoder, and manage your broadcast from Live Studio.' },
   { icon: Icon.Hub, title: 'Premium dashboard', text: 'Your membership, earnings, withdrawals and tools in one place.' },
 ] as const;
 
@@ -50,17 +50,23 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
     if (id && !watching) api<{ payment: Payment }>(`/billing/payments/${id}`).then((r) => (r.payment.status === 'PENDING' ? watch(r.payment) : paid(r.payment))).catch(() => undefined);
   }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (error && !plans) return <p role="alert" className="mx-auto mt-10 max-w-xl rounded-xl bg-danger/10 px-4 py-3 text-danger">{error}</p>;
+  if (error && (!plans || !me)) return <p role="alert" className="mx-auto mt-10 max-w-xl rounded-xl bg-danger/10 px-4 py-3 text-danger">{error}</p>;
   if (!plans || !me) return <Icon.Spinner className="mx-auto mt-16 animate-spin text-muted" />;
   const active = me.premium.active;
+  const canPay = plans.methods.length > 0;
   const until = me.premium.until ? new Date(me.premium.until) : null;
   const daysLeft = until ? Math.max(0, Math.ceil((until.getTime() - Date.now()) / 86_400_000)) : 0;
   const name = viewer.channel?.name ?? viewer.profile?.displayName ?? viewer.user.email;
 
-  const checkout = (
-    <div className="rounded-3xl border border-line bg-elevated p-5 sm:p-6">
+  const checkout = !canPay ? (
+    <section className="self-start rounded-3xl border border-line bg-elevated p-5 sm:p-6" aria-labelledby="premium-availability">
+      <h2 id="premium-availability" className="font-display text-lg font-bold">Checkout is temporarily unavailable</h2>
+      <p className="mt-2 text-sm leading-relaxed text-muted">Premium purchases will be available once payments are set up.</p>
+    </section>
+  ) : (
+    <div className="self-start rounded-3xl border border-line bg-elevated p-5 sm:p-6">
       <p className="font-display text-[18px] font-bold">{active ? 'Add more time' : 'Choose how long'}</p>
-      <div role="radiogroup" aria-label="Length" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div role="radiogroup" aria-label="Length" className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
         {plans.premium.months.map((m) => (
           <button key={m} type="button" role="radio" aria-checked={months === m} onClick={() => setMonths(m)}
             className={`rounded-2xl border-2 px-3 py-2.5 text-left ${months === m ? 'border-brand bg-brand-soft' : 'border-line hover:border-faint'}`}>
@@ -79,6 +85,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
   return (
     <div className="mx-auto max-w-5xl px-4 pb-16 pt-6 sm:px-6">
       {notice && <p role="status" className="mb-4 flex items-center gap-2 rounded-2xl bg-brand-soft px-4 py-3 text-[14px] font-semibold text-brand"><Icon.CheckCircle size={20} filled />{notice}</p>}
+      {error && <p role="alert" className="mb-4 rounded-2xl bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p>}
       {watching?.status === 'PENDING' && <p role="status" className="mb-4 flex items-center gap-2 rounded-2xl bg-surface px-4 py-3 text-[14px]"><Icon.Spinner size={18} className="animate-spin" />Confirming your payment…</p>}
 
       <section className="relative overflow-hidden rounded-[28px] bg-[#071312] px-6 py-8 text-white sm:px-10 sm:py-10">
@@ -95,12 +102,12 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
               </>
             ) : (
               <>
-                <h1 className="mt-1 font-display text-[30px] font-extrabold leading-tight sm:text-[40px]">Get verified. Get paid. Go live.</h1>
-                <p className="mt-2 text-[16px] text-[#c9d6d4]"><b className="text-[22px] text-white">{usd(plans.premium.usdCents, locale)}</b> a month. Pay with MTN MoMo or a card.</p>
+                <h1 className="mt-1 font-display text-[30px] font-extrabold leading-tight sm:text-[40px]">Premium for creators</h1>
+                <p className="mt-2 text-[16px] text-[#c9d6d4]"><b className="text-[22px] text-white">{usd(plans.premium.usdCents, locale)}</b> per month.</p>
               </>
             )}
           </div>
-          {active && !extend && <button type="button" onClick={() => setExtend(true)} className="h-11 rounded-2xl bg-white px-5 text-[14px] font-bold text-[#071312] hover:bg-[#e9efee]">Extend</button>}
+          {active && canPay && !extend && <button type="button" onClick={() => setExtend(true)} className="h-11 rounded-2xl bg-white px-5 text-[14px] font-bold text-[#071312] hover:bg-[#e9efee]">Extend</button>}
         </div>
       </section>
 

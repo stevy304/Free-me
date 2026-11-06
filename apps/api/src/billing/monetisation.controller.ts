@@ -23,6 +23,11 @@ class PayoutDecisionDto {
 }
 class GrantDto { @ApiProperty() @IsEmail() email!: string; @ApiProperty({ enum: PREMIUM_MONTHS }) @IsInt() @Min(1) @Max(12) months!: number }
 
+class VerificationDto {
+  @IsString() @Length(1, 50) handle!: string;
+  @IsBoolean() verified!: boolean;
+}
+
 const payoutView = (p: Payout) => ({ id: p.id, amountCents: Number(p.amountCents), currency: p.currency, method: p.method, account: p.accountIdentifier, accountHolderName: p.accountHolderName, status: p.status, reference: p.referenceTransactionId, rejectionReason: p.rejectionReason, requestedAt: p.requestedAt, processedAt: p.processedAt });
 
 @ApiTags('monetisation')
@@ -189,6 +194,26 @@ export class AdminBillingController {
     await this.billing.grantPremium(u.id, body.months);
     await this.audit.record({ userId: auth.user.id, action: 'PREMIUM_GRANTED', entityType: 'User', entityId: u.id, req, details: { months: body.months } });
     return { premium: premiumView(await this.prisma.user.findUniqueOrThrow({ where: { id: u.id } })) };
+  }
+
+  @Post('verification')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Set or remove an administrator-issued verification badge' })
+  async verification(@CurrentAuth() auth: AuthContext, @Body() body: VerificationDto, @Req() req: AppRequest) {
+    const handle = body.handle.trim().toLowerCase().replace(/^@/, '');
+    const channel = await this.prisma.channel.findUnique({ where: { handle }, select: { id: true, userId: true } });
+    if (!channel) throw new NotFoundException('No Space uses this handle.');
+    const badge = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${channel.userId} FOR UPDATE`;
+      const user = await tx.user.findUniqueOrThrow({ where: { id: channel.userId } });
+      const source = body.verified ? 'ADMIN' : isPremium(user) ? 'PREMIUM' : null;
+      return tx.channel.update({
+        where: { id: channel.id }, data: { isVerified: source !== null, verificationSource: source },
+        select: { isVerified: true, verificationSource: true },
+      });
+    });
+    await this.audit.record({ userId: auth.user.id, action: body.verified ? 'VERIFICATION_GRANTED' : 'VERIFICATION_REMOVED', entityType: 'Channel', entityId: channel.id, req });
+    return { badge };
   }
 
   @Get('payments')

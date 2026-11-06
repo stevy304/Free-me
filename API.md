@@ -200,7 +200,7 @@ See MONETISATION.md for how the money is shared.
 | --- | --- | --- |
 | GET | `/live` | Spaces live now: `{ id, title, status, startedAt, playbackUrl (HLS), viewers, channel }` |
 | GET | `/live/:id` | One stream (`status` IDLE, LIVE or ENDED; `replayVideoId` once its recording is published) and the recent chat |
-| GET | `/hub/live` 🔒 | My Live Studio: `premium`, the current `stream`, `encoder: { server, streamKey }` (Premium, when RTMP is set up), past streams |
+| GET | `/hub/live` 🔒 | My Live Studio: `premium`, the current `stream`, `encoder: { server, streamKey }` (Premium, when RTMP is set up), past streams (Premium) |
 | PATCH | `/hub/live` 🔒 | `{ title }` |
 | POST | `/hub/live/key` 🔒 | A new encoder key (the old one stops working) |
 | POST | `/hub/live/end` 🔒 | End my stream |
@@ -218,7 +218,7 @@ Connect to path `/api/socket` (WebSocket transport, no trailing slash). Signed-i
 | receive (own room) | `payment` | `{ id }`: a payment settled |
 | receive (`video:<id>`) | `comments`, `reactions`, `processing` | `{ videoId, parentId }`, `{ likeCount }`, `{ progress, stage }` |
 | receive (`live:<id>`) | `started`, `ended`, `viewers`, `chat`, `title` | `{ count }`; chat lines `{ id, text, at, author }` |
-| send | `live:start` / `live:stop` | stream id (Premium owner) → `{ ok, error? }` |
+| send | `live:start` / `live:stop` | stream id (signed-in owner with a Space) → `{ ok, error? }` |
 | send | `live:chunk` | `[streamId, ArrayBuffer]`: one piece of the browser's MediaRecorder recording |
 | send | `live:chat` | `{ streamId, text }` (signed in, up to 200 characters, 10 lines in 20 s) |
 

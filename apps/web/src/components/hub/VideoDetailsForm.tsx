@@ -185,7 +185,7 @@ function Captions({ video, onSaved }: { video: HubVideo; onSaved: (v: HubVideo) 
   return (
     <div>
       <p className="text-[14px] font-medium">Captions</p>
-      <p className="text-[13px] text-muted">Help people who watch without sound or in another language. Upload a WebVTT (.vtt) or SubRip (.srt) file per language.</p>
+      <p className="text-[13px] text-muted">Captions can be generated after processing. Upload a WebVTT (.vtt) or SubRip (.srt) file if you want to provide your own.</p>
       {caps.length > 0 && (
         <ul className="mt-3 divide-y divide-line rounded-xl border border-line">
           {caps.map((c) => (

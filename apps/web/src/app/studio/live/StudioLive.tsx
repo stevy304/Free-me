@@ -20,7 +20,7 @@ const TYPES = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'vide
 const clock = (from: string | null, now: number) => { if (!from) return '0:00'; const s = Math.max(0, Math.floor((now - new Date(from).getTime()) / 1000)); const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60); return `${h ? `${h}:${String(m).padStart(2, '0')}` : m}:${String(s % 60).padStart(2, '0')}`; };
 
 /** Live Studio (Premium): go live from this browser (camera or screen), or from OBS, a TV encoder or a camera with the stream key. */
-export function StudioLive() {
+export function StudioLive({ basic = false }: { basic?: boolean }) {
   const { locale } = useShell();
   const [st, setSt] = useState<Studio | null>(null);
   const [title, setTitle] = useState('');
@@ -65,15 +65,33 @@ export function StudioLive() {
     try {
       if (title.trim() && title.trim() !== st.stream.title) await api('/hub/live', { method: 'PATCH', body: { title: title.trim() } });
       const sock = await getSocket();
-      const r = await sock.timeout(15_000).emitWithAck('live:start', st.stream.id);
-      if (!r.ok) throw new Error(r.error ?? 'The stream could not start.');
       const mimeType = TYPES.find((t) => MediaRecorder.isTypeSupported(t));
       const rec = new MediaRecorder(media, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 });
-      rec.ondataavailable = async (e) => { if (e.data.size) sock.emit('live:chunk', [st.stream.id, await e.data.arrayBuffer()]); };
-      rec.onstop = () => { void sock.timeout(30_000).emitWithAck('live:stop', st.stream.id).catch(() => undefined).finally(() => { setState('idle'); void load(); }); };
-      // Losing the connection ends the stream on the server: say so.
-      sock.once('disconnect', () => { if (recorder.current === rec) { setError('The connection dropped, so the stream ended. Go live again when you are back online.'); rec.stop(); } });
-      rec.start(1000);
+      const r = await sock.timeout(15_000).emitWithAck('live:start', st.stream.id);
+      if (!r.ok) throw new Error(r.error ?? 'The stream could not start.');
+      let chunks = Promise.resolve();
+      rec.ondataavailable = (e) => {
+        if (e.data.size) chunks = chunks.then(async () => {
+          const data = await e.data.arrayBuffer();
+          if (sock.connected) sock.emit('live:chunk', [st.stream.id, data]);
+        }).catch(() => undefined);
+      };
+      const disconnected = () => {
+        setError('The connection dropped, so the stream ended. Go live again when you are back online.');
+        if (rec.state === 'recording') rec.stop();
+      };
+      rec.onstop = () => {
+        sock.off('disconnect', disconnected);
+        if (recorder.current === rec) recorder.current = null;
+        void chunks.then(() => sock.connected ? sock.timeout(30_000).emitWithAck('live:stop', st.stream.id) : undefined)
+          .catch(() => undefined).finally(() => { setState('idle'); void load(); });
+      };
+      try { rec.start(1000); }
+      catch (error) {
+        await sock.timeout(30_000).emitWithAck('live:stop', st.stream.id).catch(() => undefined);
+        throw error;
+      }
+      sock.once('disconnect', disconnected);
       recorder.current = rec;
       setState('live');
       void load();
@@ -83,13 +101,14 @@ export function StudioLive() {
   const copy = async (what: string, text: string) => { try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(null), 1500); } catch { /* clipboard blocked */ } };
 
   if (!st) return error ? <p role="alert" className="mx-auto mt-10 max-w-xl rounded-xl bg-danger/10 px-4 py-3 text-danger">{error}</p> : <Icon.Spinner className="mx-auto mt-16 animate-spin text-muted" />;
-  if (!st.premium) {
+  if (!basic && !st.premium) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <section className="flex flex-col items-center gap-4 rounded-[28px] bg-[#071312] px-6 py-10 text-center text-white">
           <span className="grid h-16 w-16 place-items-center rounded-full bg-[#e5484d]"><Icon.Live size={34} /></span>
           <h1 className="font-display text-[30px] font-extrabold">Live Studio is part of Premium</h1>
           <p className="max-w-md text-[15px] text-[#c9d6d4]">Go live from your browser, or from OBS, a TV encoder or a camera. Your followers are told, viewers chat, and the recording is kept as a video.</p>
+          <Link href="/go-live" className="font-semibold text-white underline">Go live from your browser for free</Link>
           <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />Upgrade</Link>
         </section>
       </div>
@@ -101,13 +120,13 @@ export function StudioLive() {
   return (
     <div className="mx-auto max-w-[1400px] px-4 pb-16 pt-6 sm:px-6">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="flex flex-1 items-center gap-2 font-display text-[28px] font-extrabold"><Icon.Live size={28} className={live ? 'text-[#e5484d]' : ''} />Live Studio <VerifiedBadge size={22} /></h1>
+        <h1 className="flex flex-1 items-center gap-2 font-display text-[28px] font-extrabold"><Icon.Live size={28} className={live ? 'text-[#e5484d]' : ''} />{basic ? 'Go live' : 'Live Studio'} {!basic && <VerifiedBadge size={22} />}</h1>
         {live && <span className="flex items-center gap-2 rounded-full bg-[#e5484d] px-3 py-1.5 text-[13px] font-extrabold uppercase tracking-wide text-white"><span className="h-2 w-2 animate-pulse rounded-full bg-white" />Live · {clock(st.stream.startedAt, now)}</span>}
         {live && <span className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-[13px] font-semibold"><Icon.Eye size={16} />{viewers.toLocaleString(locale)} watching</span>}
       </div>
       {error && <p role="alert" className="mt-4 rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_360px]">
+      <div className={`mt-5 grid gap-5 ${basic ? '' : 'lg:grid-cols-[1fr_360px]'}`}>
         <div className="space-y-5">
           <section className="overflow-hidden rounded-3xl border border-line bg-elevated">
             <div className="relative aspect-video bg-black">
@@ -135,7 +154,7 @@ export function StudioLive() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
+          {!basic && <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
             <h2 className="flex items-center gap-2 font-display text-[18px] font-bold"><Icon.Monitor size={20} />OBS, TV encoder or camera</h2>
             {st.encoder ? (
               <>
@@ -149,9 +168,9 @@ export function StudioLive() {
                 <p className="mt-2 text-[12px] text-muted">Keep the key secret: anyone with it can broadcast on your Space. <button type="button" className="font-semibold text-danger hover:underline" onClick={() => void api<{ streamKey: string }>('/hub/live/key', { body: {} }).then((r) => setSt({ ...st, encoder: { ...st.encoder!, streamKey: r.streamKey } })).catch((e) => setError((e as Error).message))}>Make a new key</button></p>
               </>
             ) : <p className="mt-1 text-[14px] text-muted">Streaming from an encoder is not switched on for this server yet (the operator sets LIVE_RTMP_URL; see DEPLOYMENT.md → Live). You can go live from this browser.</p>}
-          </section>
+          </section>}
 
-          {st.past.length > 0 && (
+          {!basic && st.past.length > 0 && (
             <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
               <h2 className="font-display text-[18px] font-bold">Past streams</h2>
               <ul className="mt-2 divide-y divide-line text-[14px]">
@@ -167,7 +186,7 @@ export function StudioLive() {
             </section>
           )}
         </div>
-        <LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-[520px] lg:sticky lg:top-20 lg:h-[calc(100dvh-7rem)]" />
+        {!basic && <LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-[520px] lg:sticky lg:top-20 lg:h-[calc(100dvh-7rem)]" />}
       </div>
     </div>
   );

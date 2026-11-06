@@ -74,10 +74,25 @@ test('Premium by MTN MoMo: $10 a month charged in RWF, verified badge while it l
   await new Billing(ctx.prisma as never, ctx.config).reconcile();
   expect((await a.get('/api/me').expect(200)).body).toMatchObject({ premium: { active: true, until }, channel: { isVerified: true } });
 
+  const receipts = new Billing(ctx.prisma as never, ctx.config);
+  await Promise.all([receipts.sendReceipts(ctx.mail), receipts.sendReceipts(ctx.mail)]);
+  await receipts.sendReceipts(ctx.mail);
+  const delivered = ctx.mail.outbox.filter((m) => m.subject === 'Your Free Me payment receipt');
+  expect(delivered).toHaveLength(1);
+  expect(delivered[0]).toMatchObject({ to: 'maker@example.com', text: expect.stringContaining('RWF 14500') });
+
   // Membership ends: the badge goes; a badge given by administrators would stay.
   await ctx.prisma.user.update({ where: { email: 'maker@example.com' }, data: { premiumUntil: new Date(Date.now() - 1000) } });
   await new Billing(ctx.prisma as never, ctx.config).expirePremium();
   expect((await a.get('/api/me').expect(200)).body).toMatchObject({ premium: { active: false }, channel: { isVerified: false } });
+
+  const admin = await signIn(ctx.http, ctx.mail, 'admin@example.com');
+  const verify = (verified: boolean) => admin.agent.post('/api/admin/billing/verification').set('Origin', WEB).send({ handle: '@maker', verified });
+  await a.post('/api/admin/billing/verification').set('Origin', WEB).send({ handle: 'maker', verified: true }).expect(403);
+  await verify(true).expect(200, { badge: { isVerified: true, verificationSource: 'ADMIN' } });
+  await receipts.expirePremium();
+  expect((await a.get('/api/me').expect(200)).body.channel.isVerified).toBe(true);
+  await verify(false).expect(200, { badge: { isVerified: false, verificationSource: null } });
 
   // A declined prompt fails with a reason people understand.
   const p2 = (await a.post('/api/billing/premium').set('Origin', WEB).send({ method: 'mtn_momo', months: 3, phone: '+250788123456' }).expect(201)).body.payment;

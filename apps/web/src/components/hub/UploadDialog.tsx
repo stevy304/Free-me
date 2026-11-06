@@ -66,10 +66,11 @@ export function UploadDialog() {
 
   // Processing progress arrives as it happens; the page asks for the full state then.
   const [bump, setBump] = useState(0);
+  useRealtime('captions', () => setBump((b) => b + 1), snap?.videoId ? `video:${snap.videoId}` : null, !!snap?.videoId);
   useRealtime('processing', () => setBump((b) => b + 1), snap?.videoId ? `video:${snap.videoId}` : null, !!snap?.videoId);
   useEffect(() => {
     if (!bump || !snap?.videoId) return;
-    api<{ video: HubVideo }>(`/hub/videos/${snap.videoId}`).then((r) => setVideo((cur) => (cur && cur.processingProgress === r.video.processingProgress && cur.status === r.video.status && cur.processingStage === r.video.processingStage && cur.thumbnailCandidates.length === r.video.thumbnailCandidates.length ? cur : r.video))).catch(() => undefined);
+    api<{ video: HubVideo }>(`/hub/videos/${snap.videoId}`).then((r) => setVideo((cur) => (cur && cur.processingProgress === r.video.processingProgress && cur.status === r.video.status && cur.processingStage === r.video.processingStage && cur.thumbnailCandidates.length === r.video.thumbnailCandidates.length && (cur.captions?.length ?? 0) === (r.video.captions?.length ?? 0) ? cur : r.video))).catch(() => undefined);
   }, [bump]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

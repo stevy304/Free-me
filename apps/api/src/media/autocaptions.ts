@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { readFile, rm } from 'node:fs/promises';
 import type { AppConfig } from '../config/config';
 import { putMediaFile, toWebVtt } from './captions';
+import { publish, room } from '../realtime/publish';
 import { run } from './probe';
 import type { Storage } from './storage';
 
@@ -47,8 +48,17 @@ export async function autoCaptions(prisma: PrismaClient, storage: Storage, confi
     if (!video) return null;
     const told = video.language && CODE.test(video.language) ? video.language : null;
     if (told && video.captions.some((c) => c.language === told && c.source === 'UPLOADED')) return null;
-    const { language: heard } = await whisper(w.bin, ['-m', w.model, '-f', speech, '-l', told ?? 'auto', '-t', String(w.threads), '-ovtt', '-of', outBase], signal);
-    const language = told ?? heard;
+    const transcribe = (language: string) => whisper(w.bin, ['-m', w.model, '-f', speech, '-l', language, '-t', String(w.threads), '-ovtt', '-of', outBase], signal);
+    let language: string | null = told;
+    try {
+      const result = await transcribe(told ?? 'auto');
+      language = told ?? result.language;
+    }
+    catch (error) {
+      if (!told || signal?.aborted) throw error;
+      // A valid site language code is not necessarily supported by the installed model.
+      language = (await transcribe('auto')).language;
+    }
     if (!language || !CODE.test(language)) { log.warn(`${videoId}: language not recognised; no automatic captions`); return null; }
     if (video.captions.some((c) => c.language === language && c.source === 'UPLOADED')) return null;
     const { vtt, cues } = toWebVtt(await readFile(`${outBase}.vtt`, 'utf8'));
@@ -57,10 +67,10 @@ export async function autoCaptions(prisma: PrismaClient, storage: Storage, confi
     await putMediaFile(prisma, storage, videoId, key, Buffer.from(vtt), { contentType: 'text/vtt; charset=utf-8', cacheControl: 'public, max-age=300' });
     // Upload and automatic run can race: an upload that landed meanwhile wins.
     await prisma.$transaction(async (tx) => {
-      const now = await tx.caption.findUnique({ where: { videoId_language: { videoId, language } } });
-      if (now?.source === 'UPLOADED') return;
-      await tx.caption.upsert({ where: { videoId_language: { videoId, language } }, create: { videoId, language, source: 'AUTO', key, cueCount: cues }, update: { source: 'AUTO', key, cueCount: cues } });
+      await tx.caption.createMany({ data: [{ videoId, language, source: 'AUTO', key, cueCount: cues }], skipDuplicates: true });
+      await tx.caption.updateMany({ where: { videoId, language, source: 'AUTO' }, data: { key, cueCount: cues } });
     });
+    publish(room.video(videoId), 'captions');
     log.log(`${videoId}: automatic captions (${language}, ${cues} cues)`);
     return { language, cues };
   } catch (e) {

@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import type { Payment, Prisma, PrismaClient, User } from '@prisma/client';
 import { PROPOSED_SPLIT, allocatePool, splitRevenue } from '@free-me/shared';
 import type { AppConfig } from '../config/config';
-import { createProviders, ProviderError, type PaymentProvider, type ProviderName } from './providers';
+import { createProviders, currencyDigits, ProviderError, type PaymentProvider, type ProviderName } from './providers';
+import { type MailService, noticeMail } from '../mail/mail.service';
 import { publish, room } from '../realtime/publish';
 
 export const PREMIUM_MONTHS = [1, 3, 6, 12] as const;
@@ -72,7 +73,10 @@ export class Billing {
     try { r = await provider.check(p.providerRef, { amountMinor: p.amountMinor, currency: p.currency }); }
     catch (e) { this.log.warn(`payment ${p.id}: ${(e as Error).message}`); return p; }
     if (r.status === 'PENDING') {
-      if (Date.now() - p.createdAt.getTime() > DAY) return this.prisma.payment.update({ where: { id }, data: { status: 'FAILED', failureReason: 'The payment was not completed in time.' } });
+      if (Date.now() - p.createdAt.getTime() > DAY) {
+        await this.prisma.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'FAILED', failureReason: 'The payment was not completed in time.' } });
+        return this.prisma.payment.findUniqueOrThrow({ where: { id } });
+      }
       return p;
     }
     if (r.status === 'FAILED') {
@@ -82,7 +86,7 @@ export class Billing {
     }
     await this.prisma.$transaction(async (tx) => {
       // Only the first caller to flip PENDING → SUCCEEDED fulfils (the API and the worker may both check).
-      const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', paidAt: new Date() } });
+      const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', paidAt: new Date(), receiptDueAt: new Date() } });
       if (flipped.count) await this.fulfil(tx, p);
     });
     publish(room.user(p.userId), 'payment', { id });
@@ -91,10 +95,7 @@ export class Billing {
 
   private async fulfil(tx: Prisma.TransactionClient, p: Payment) {
     if (p.purpose === 'PREMIUM') {
-      const u = await tx.user.findUniqueOrThrow({ where: { id: p.userId } });
-      const from = isPremium(u) ? u.premiumUntil!.getTime() : Date.now();
-      await tx.user.update({ where: { id: u.id }, data: { premiumUntil: new Date(from + (p.months ?? 1) * MONTH) } });
-      await tx.channel.updateMany({ where: { userId: u.id, isVerified: false }, data: { isVerified: true, verificationSource: 'PREMIUM' } });
+      await this.extendPremium(tx, p.userId, p.months ?? 1);
     } else if (p.campaignId) {
       await tx.campaign.updateMany({ where: { id: p.campaignId, status: 'DRAFT' }, data: { status: 'PENDING_REVIEW' } });
     }
@@ -102,12 +103,45 @@ export class Billing {
 
   /** Grants Premium without a payment (administrators: gifts, partners). */
   async grantPremium(userId: string, months: number) {
-    await this.prisma.$transaction(async (tx) => {
-      const u = await tx.user.findUniqueOrThrow({ where: { id: userId } });
-      const from = isPremium(u) ? u.premiumUntil!.getTime() : Date.now();
-      await tx.user.update({ where: { id: userId }, data: { premiumUntil: new Date(from + months * MONTH) } });
-      await tx.channel.updateMany({ where: { userId, isVerified: false }, data: { isVerified: true, verificationSource: 'PREMIUM' } });
+    await this.prisma.$transaction((tx) => this.extendPremium(tx, userId, months));
+  }
+
+  private async extendPremium(tx: Prisma.TransactionClient, userId: string, months: number) {
+    // Serialize grants and purchases for the same account so both extensions are applied.
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    const from = isPremium(user) ? user.premiumUntil!.getTime() : Date.now();
+    await tx.user.update({ where: { id: userId }, data: { premiumUntil: new Date(from + months * MONTH) } });
+    await tx.channel.updateMany({ where: { userId, isVerified: false }, data: { isVerified: true, verificationSource: 'PREMIUM' } });
+  }
+
+  async sendReceipts(mail: MailService) {
+    const payments = await this.prisma.payment.findMany({
+      where: { status: 'SUCCEEDED', receiptDueAt: { lte: new Date() } },
+      include: { user: { select: { email: true } } }, orderBy: { receiptDueAt: 'asc' }, take: 50,
     });
+    for (const payment of payments) {
+      const retryAt = new Date(Date.now() + 10 * 60_000);
+      const claim = await this.prisma.payment.updateMany({
+        where: { id: payment.id, receiptDueAt: payment.receiptDueAt }, data: { receiptDueAt: retryAt },
+      });
+      if (!claim.count) continue;
+      try {
+        const digits = currencyDigits(payment.currency);
+        const raw = payment.amountMinor.toString().padStart(digits + 1, '0');
+        const amount = digits ? `${raw.slice(0, -digits)}.${raw.slice(-digits)}` : raw;
+        const item = payment.purpose === 'PREMIUM' ? `Premium (${payment.months ?? 1} month(s))` : 'Ad campaign';
+        await mail.send(noticeMail(payment.user.email, 'Your Free Me payment receipt', [
+          item, `Amount paid: ${payment.currency} ${amount}`, `Payment date (UTC): ${payment.paidAt!.toISOString().slice(0, 10)}`,
+          `Receipt reference: ${payment.id}`,
+        ], { label: 'View payment history', url: `${this.config.appUrl}${payment.purpose === 'PREMIUM' ? '/premium' : '/ads'}` }));
+        await this.prisma.payment.updateMany({
+          where: { id: payment.id, receiptDueAt: retryAt }, data: { receiptDueAt: null, receiptSentAt: new Date() },
+        });
+      } catch (error) {
+        this.log.warn(`Receipt ${payment.id} could not be sent: ${(error as Error).message}`);
+      }
+    }
   }
 
   /** Worker: checks pending payments (MoMo has no reliable callback; card payers may close the tab). */

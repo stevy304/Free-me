@@ -29,6 +29,7 @@ export interface BillingConfig {
 
 /** Live streaming (see DEPLOYMENT.md → Live). */
 export interface LiveConfig {
+  browserLimit: number;
   /** Encoder address shown to creators for OBS and TV encoders, e.g. rtmp://live.freeme.example/live (null: browser only). */
   rtmpUrl: string | null;
   /** Shared secret in nginx-rtmp's on_publish / on_publish_done callback addresses. */
@@ -191,7 +192,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (rtmpUrl && !/^rtmps?:\/\/[^/]+\/.+/.test(rtmpUrl)) problems.push('LIVE_RTMP_URL must look like rtmp://live.freeme.example/live.');
   const rtmpSecret = env.LIVE_RTMP_SECRET?.trim() || null;
   if (rtmpUrl && (!rtmpSecret || rtmpSecret.length < 24)) problems.push('LIVE_RTMP_SECRET (24+ random characters) is required with LIVE_RTMP_URL.');
-  const live: LiveConfig = { rtmpUrl, rtmpSecret, rtmpHlsDir: env.LIVE_RTMP_HLS_DIR?.trim() || null };
+  const browserLimit = Number(env.LIVE_BROWSER_LIMIT ?? 3);
+  if (!Number.isInteger(browserLimit) || browserLimit < 1) problems.push('LIVE_BROWSER_LIMIT must be a positive integer.');
+  const live: LiveConfig = { browserLimit, rtmpUrl, rtmpSecret, rtmpHlsDir: env.LIVE_RTMP_HLS_DIR?.trim() || null };
 
   if (problems.length) throw new ConfigError(`Free Me API configuration:\n- ${problems.join('\n- ')}`);
   return {

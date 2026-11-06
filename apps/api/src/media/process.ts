@@ -118,6 +118,9 @@ export class VideoProcessor {
         mark(p.map((r) => r.name).join('+'));
       }
       this.log.log(`${videoId}: ${ladder.map((r) => r.name).join(', ')} from ${info.width}x${info.height} ${info.durationSeconds.toFixed(1)}s (${times.join(', ')})`);
+      if (this.config.media.whisper && !info.hasAudio) {
+        await this.prisma.video.updateMany({ where: { id: videoId }, data: { captionAttemptedAt: new Date() } });
+      }
       if (!this.config.media.whisper || !info.hasAudio) return { speech: null };
       // The speech track for automatic captions, kept after the work folder goes; captioning runs after the lock.
       const speech = join(this.config.media.scratchDir, `${videoId}.speech.wav`);

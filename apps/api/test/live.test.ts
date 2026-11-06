@@ -59,22 +59,17 @@ test('instant updates: the creator hears about a comment at once; viewers of the
   await next(evil, 'disconnect');
 }, 30_000);
 
-test('Live Studio from the browser: Premium only; recording pieces become HLS for viewers, with chat and a "live" notice; the recording becomes a video', async () => {
+test('Free browser streaming; recording pieces become HLS for viewers, with chat and a "live" notice; the recording becomes a video', async () => {
   const host = await signIn(ctx.http, ctx.mail, 'host@example.com');
   await host.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'host', name: 'Host' }).expect(201);
   const fan = await signIn(ctx.http, ctx.mail, 'fan@example.com');
   await fan.agent.post('/api/channels/host/follow').set('Origin', WEB).expect(200);
 
-  let studio = (await host.agent.get('/api/hub/live').expect(200)).body;
+  const studio = (await host.agent.get('/api/hub/live').expect(200)).body;
   expect(studio).toMatchObject({ premium: false, encoder: null, stream: { status: 'IDLE' } });
   const hostSocket = await connect(cookieOf(host.res));
-  expect(await hostSocket.emitWithAck('live:start', studio.stream.id)).toEqual({ ok: false, error: 'Live Studio is part of Premium.' });
-
-  const hostUser = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'host@example.com' } });
-  await new Billing(ctx.prisma as never, ctx.config).grantPremium(hostUser.id, 1);
+  await host.agent.post('/api/hub/live/key').set('Origin', WEB).send({}).expect(403);
   await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ title: 'Morning show' }).expect(200);
-  studio = (await host.agent.get('/api/hub/live').expect(200)).body;
-  expect(studio.encoder).toEqual({ server: 'rtmp://live.freeme.test/live', streamKey: expect.stringMatching(/^fm_/) });
   const id = studio.stream.id;
 
   const viewer = await connect(cookieOf(fan.res));
@@ -97,7 +92,7 @@ test('Live Studio from the browser: Premium only; recording pieces become HLS fo
   const seg = pl.split('\n').find((l) => l.endsWith('.ts'))!;
   expect((await request(ctx.http).get(`/api/storage/local/pub/live/${id}/${seg}`).expect(200)).body.length).toBeGreaterThan(1000);
   const now = (await request(ctx.http).get('/api/live').expect(200)).body.streams;
-  expect(now).toEqual([expect.objectContaining({ id, title: 'Morning show', status: 'LIVE', playbackUrl: expect.stringContaining(`/live/${id}/index.m3u8`), channel: expect.objectContaining({ handle: 'host', isVerified: true }) })]);
+  expect(now).toEqual([expect.objectContaining({ id, title: 'Morning show', status: 'LIVE', playbackUrl: expect.stringContaining(`/live/${id}/index.m3u8`), channel: expect.objectContaining({ handle: 'host', isVerified: false }) })]);
 
   // Chat: signed-in viewers only, heard by everyone in the room, kept for latecomers.
   const line = next(hostSocket, 'chat');
@@ -124,7 +119,7 @@ test('Live Studio from the browser: Premium only; recording pieces become HLS fo
   const again = (await host.agent.get('/api/hub/live').expect(200)).body;
   expect(again.stream).toMatchObject({ status: 'IDLE' });
   expect(again.stream.id).not.toBe(id);
-  expect(again.encoder.streamKey).toBe(studio.encoder.streamKey);
+  expect(again.encoder).toBeNull();
 }, 120_000);
 
 test('OBS and TV encoders: nginx-rtmp asks the API; a valid key goes live under the stream id, never the key', async () => {

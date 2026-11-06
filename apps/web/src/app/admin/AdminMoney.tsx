@@ -22,6 +22,8 @@ export function AdminMoney() {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [handle, setHandle] = useState('');
+  const [busy, setBusy] = useState(false);
   const [gift, setGift] = useState({ email: '', months: 1 });
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export function AdminMoney() {
     } catch (e) { setError((e as Error).message); }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  const run = async (fn: () => Promise<unknown>, done: string) => { setError(null); setMsg(null); try { await fn(); setMsg(done); await load(); } catch (e) { setError((e as Error).message); } };
+  const run = async (fn: () => Promise<unknown>, done: string) => { setBusy(true); setError(null); setMsg(null); try { await fn(); setMsg(done); await load(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
 
   if (!s) return error ? <p role="alert" className="mt-4 rounded-xl bg-danger/10 px-4 py-3 text-danger">{error}</p> : <Icon.Spinner className="mx-auto mt-10 animate-spin text-muted" />;
   return (
@@ -99,7 +101,21 @@ export function AdminMoney() {
         <div className="mt-2 flex flex-wrap gap-2">
           <input className={`${inputClass} max-w-xs`} type="email" placeholder="Email address" value={gift.email} onChange={(e) => setGift({ ...gift, email: e.target.value })} />
           <select className={`${inputClass} w-36`} value={gift.months} onChange={(e) => setGift({ ...gift, months: Number(e.target.value) })}>{[1, 3, 6, 12].map((m) => <option key={m} value={m}>{m} {m === 1 ? 'month' : 'months'}</option>)}</select>
-          <button type="button" disabled={!gift.email.includes('@')} onClick={() => void run(() => api('/admin/billing/premium', { body: gift }), `Premium given to ${gift.email}.`)} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Give Premium</button>
+          <button type="button" disabled={busy || !gift.email.includes('@')} onClick={() => void run(() => api('/admin/billing/premium', { body: gift }), `Premium given to ${gift.email}.`)} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Give Premium</button>
+        </div>
+      </section>
+      <section className="rounded-2xl border border-line p-4">
+        <h2 className="text-[18px] font-semibold">Space verification</h2>
+        <p className="text-[13px] text-muted">Manage an administrator-issued badge by Space handle. An active Premium badge still applies after removal.</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <input aria-label="Space handle" className={`${inputClass} max-w-xs`} placeholder="@handle" value={handle} onChange={(e) => setHandle(e.target.value)} />
+          {[true, false].map((verified) => (
+            <button key={String(verified)} type="button" disabled={busy || !handle.trim()}
+              onClick={() => void run(() => api('/admin/billing/verification', { body: { handle, verified } }), verified ? 'Verification badge granted.' : 'Administrator badge removed.')}
+              className="h-10 rounded-xl border border-line px-4 text-sm font-semibold hover:bg-surface disabled:opacity-50">
+              {verified ? 'Grant badge' : 'Remove admin badge'}
+            </button>
+          ))}
         </div>
       </section>
     </div>

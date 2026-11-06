@@ -1,16 +1,19 @@
 import { Logger } from '@nestjs/common';
 import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AppConfig } from '../config/config';
 import { mediaPrefix, wantedLocation } from './keys';
 import { LATE_FOLDERS } from './captions';
-import { autoCaptions } from './autocaptions';
+import { autoCaptions, extractSpeech } from './autocaptions';
+import { AudioOnly, probe } from './probe';
 import { MediaError, VideoProcessor } from './process';
 import type { Storage } from './storage';
 import { ViewCounter } from './views';
 
-export type MediaJob = { name: 'transcode'; videoId: string } | { name: 'relocate'; videoId: string } | { name: 'purge'; videoId: string };
+export type MediaJob = { name: 'transcode'; videoId: string } | { name: 'relocate'; videoId: string } | { name: 'purge'; videoId: string } | { name: 'caption'; videoId: string };
 
 /** Thrown when a video is busy with another job; the queue retries later. */
 export class VideoBusy extends Error {}
@@ -56,7 +59,46 @@ export class MediaJobs {
       }
     });
     // Automatic captions after the video is ready and unlocked: publishing or moving it never waits for them.
-    if (done.speech) await autoCaptions(this.prisma, this.storage, this.config, videoId, done.speech, signal);
+    if (done.speech) {
+      await autoCaptions(this.prisma, this.storage, this.config, videoId, done.speech, signal);
+      if (!signal?.aborted) await this.prisma.video.updateMany({ where: { id: videoId }, data: { captionAttemptedAt: new Date() } });
+    }
+  }
+
+  async captionBackfillCandidates() {
+    if (!this.config.media.whisper) return [];
+    return this.prisma.video.findMany({
+      where: { status: 'READY', processingStage: 'Ready', takenDownAt: null, sourceFileS3Key: { not: null }, captionAttemptedAt: null, updatedAt: { lt: new Date(Date.now() - 15 * 60_000) }, captions: { none: {} } },
+      orderBy: { createdAt: 'asc' }, take: 2, select: { id: true },
+    });
+  }
+
+  private async backfillCaption(videoId: string, signal?: AbortSignal) {
+    if (!this.config.media.whisper) return;
+    const video = await this.prisma.video.findFirst({
+      where: { id: videoId, status: 'READY', takenDownAt: null, captionAttemptedAt: null, captions: { none: {} } },
+      select: { sourceFileS3Key: true },
+    });
+    if (!video?.sourceFileS3Key) return;
+    await mkdir(this.config.media.scratchDir, { recursive: true });
+    const work = await mkdtemp(join(this.config.media.scratchDir, 'captions-'));
+    try {
+      const source = join(work, `source${extname(video.sourceFileS3Key)}`);
+      const speech = join(work, 'speech.wav');
+      await this.storage.download(video.sourceFileS3Key, source);
+      const info = await probe(this.config.media.ffprobePath, source).catch((error: unknown) => {
+        if (error instanceof AudioOnly) return { hasAudio: true };
+        throw error;
+      });
+      if (info.hasAudio) {
+        await extractSpeech(this.config.media.ffmpegPath, source, speech, signal);
+        await autoCaptions(this.prisma, this.storage, this.config, videoId, speech, signal);
+      }
+      signal?.throwIfAborted();
+      await this.prisma.video.updateMany({ where: { id: videoId }, data: { captionAttemptedAt: new Date() } });
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
   }
 
   /** Moves media between the public (CDN) and private (signed links) prefixes after a visibility change or a removal. */
@@ -134,6 +176,13 @@ export class MediaJobs {
 
   async run(job: MediaJob, final: boolean, signal?: AbortSignal) {
     if (job.name === 'transcode') return this.transcode(job.videoId, final, signal);
+    if (job.name === 'caption') {
+      try { return await this.backfillCaption(job.videoId, signal); }
+      catch (error) {
+        if (final && !signal?.aborted) await this.prisma.video.updateMany({ where: { id: job.videoId }, data: { captionAttemptedAt: new Date() } });
+        throw error;
+      }
+    }
     if (job.name === 'relocate') return this.relocate(job.videoId);
     return this.purge(job.videoId);
   }

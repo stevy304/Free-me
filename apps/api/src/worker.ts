@@ -1,3 +1,4 @@
+import { MailService } from './mail/mail.service';
 import 'reflect-metadata';
 import { ConsoleLogger, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
@@ -48,11 +49,20 @@ async function main() {
   await maintenance.upsertJobScheduler('recover-stuck', { every: 15 * 60_000 }, { name: 'recover-stuck' });
   // Money: check pending payments every minute; end memberships and share yesterday's ad revenue every 15 minutes.
   const billing = new Billing(prisma, config);
+  const mail = new MailService(config);
+  await maintenance.upsertJobScheduler('billing-receipts', { every: 60_000 }, { name: 'billing-receipts' });
   await maintenance.upsertJobScheduler('billing-payments', { every: 60_000 }, { name: 'billing-payments' });
   await maintenance.upsertJobScheduler('billing-daily', { every: 15 * 60_000 }, { name: 'billing-daily' });
   const media = new Queue(MEDIA_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
+  if (config.media.whisper) await maintenance.upsertJobScheduler('caption-backfill', { every: 5 * 60_000 }, { name: 'caption-backfill' });
   const maint = new Worker('maintenance', async (job) => {
     if (job.name === 'stale-uploads') await jobs.cleanupStaleUploads();
+    else if (job.name === 'caption-backfill') {
+      for (const { id } of await jobs.captionBackfillCandidates()) {
+        await media.add('caption', { name: 'caption', videoId: id }, { ...jobOptions('caption'), jobId: `caption-${id}`, priority: 100, attempts: 3 });
+      }
+    }
+    else if (job.name === 'billing-receipts') await billing.sendReceipts(mail);
     else if (job.name === 'billing-payments') await billing.reconcile();
     else if (job.name === 'billing-daily') { await billing.expirePremium(); const n = await billing.settleAds(); if (n) log.log(`Settled ${n} day(s) of ad revenue`); }
     else if (job.name === 'recover-stuck') {
