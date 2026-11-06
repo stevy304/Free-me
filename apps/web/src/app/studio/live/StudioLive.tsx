@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Icon from '@/components/icons';
 import { inputClass } from '@/components/Pickers';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
+import { ControlRoom } from '@/components/live/ControlRoom';
 import { LiveChat } from '@/components/live/LiveChat';
 import { api } from '@/lib/client-api';
 import { getSocket, useRealtime } from '@/lib/realtime';
@@ -27,13 +28,15 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   const [source, setSource] = useState<'camera' | 'screen'>('camera');
   const [media, setMedia] = useState<MediaStream | null>(null);
   const [state, setState] = useState<'idle' | 'starting' | 'live' | 'ending'>('idle');
+  const [encoderRtt, setEncoderRtt] = useState<number | null>(null);
   const [viewers, setViewers] = useState(0);
   const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
-  const preview = useRef<HTMLVideoElement>(null);
+  const capture = useRef<(() => Promise<{ stream: MediaStream; stop: () => void }>) | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
+  useEffect(() => () => { if (recorder.current?.state === 'recording') recorder.current.stop(); }, []);
 
   const load = useCallback(async () => {
     try { const r = await api<Studio>('/hub/live'); setSt(r); setTitle((t) => t || r.stream.title); setViewers(r.stream.viewers); } catch (e) { setError((e as Error).message); }
@@ -43,7 +46,6 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   useRealtime<{ count: number }>('viewers', (d) => setViewers(d.count), st ? `live:${st.stream.id}` : null, !!st);
   useRealtime('started', () => void load(), st ? `live:${st.stream.id}` : null, !!st);
   useRealtime('ended', () => { setState('idle'); void load(); }, st ? `live:${st.stream.id}` : null, !!st);
-  useEffect(() => { if (preview.current) preview.current.srcObject = media; }, [media]);
   useEffect(() => () => { media?.getTracks().forEach((t) => t.stop()); }, [media]);
 
   const pick = async (kind: 'camera' | 'screen') => {
@@ -54,33 +56,51 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       else {
         const screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
         const mic = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
-        setMedia(new MediaStream([...screen.getVideoTracks(), ...(mic?.getAudioTracks() ?? screen.getAudioTracks())]));
+        setMedia(new MediaStream([...screen.getTracks(), ...(mic?.getAudioTracks() ?? [])]));
       }
     } catch { setError(kind === 'camera' ? 'Allow the camera and microphone to go live from this browser.' : 'Screen sharing was not allowed.'); }
   };
 
   const goLive = async () => {
-    if (!st || !media) return;
-    setError(null); setState('starting');
+    if (!st || !media || !capture.current) return;
+    setError(null); setEncoderRtt(null); setState('starting');
+    let output: Awaited<ReturnType<NonNullable<typeof capture.current>>> | undefined;
     try {
+      output = await capture.current();
+      const stopOutput = output.stop;
       if (title.trim() && title.trim() !== st.stream.title) await api('/hub/live', { method: 'PATCH', body: { title: title.trim() } });
       const sock = await getSocket();
       const mimeType = TYPES.find((t) => MediaRecorder.isTypeSupported(t));
-      const rec = new MediaRecorder(media, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 });
+      const rec = new MediaRecorder(output.stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 });
       const r = await sock.timeout(15_000).emitWithAck('live:start', st.stream.id);
       if (!r.ok) throw new Error(r.error ?? 'The stream could not start.');
       let chunks = Promise.resolve();
+      let queued = 0;
+      let congested = false;
+      const failStream = () => {
+        congested = true;
+        setError('The encoder could not keep up with the stream. Check your connection and try again.');
+        if (rec.state === 'recording') rec.stop();
+      };
       rec.ondataavailable = (e) => {
-        if (e.data.size) chunks = chunks.then(async () => {
+        if (!e.data.size || congested || !sock.connected) return;
+        queued += e.data.size;
+        if (queued > 8 * 1024 * 1024) { failStream(); return; }
+        chunks = chunks.then(async () => {
+          if (congested || !sock.connected) return;
           const data = await e.data.arrayBuffer();
-          if (sock.connected) sock.emit('live:chunk', [st.stream.id, data]);
-        }).catch(() => undefined);
+          const sentAt = performance.now();
+          const result = await sock.timeout(8000).emitWithAck('live:chunk', [st.stream.id, data]);
+          if (!result?.ok) failStream();
+          else setEncoderRtt(Math.round(performance.now() - sentAt));
+        }).catch(failStream).finally(() => { queued -= e.data.size; });
       };
       const disconnected = () => {
         setError('The connection dropped, so the stream ended. Go live again when you are back online.');
         if (rec.state === 'recording') rec.stop();
       };
       rec.onstop = () => {
+        stopOutput();
         sock.off('disconnect', disconnected);
         if (recorder.current === rec) recorder.current = null;
         void chunks.then(() => sock.connected ? sock.timeout(30_000).emitWithAck('live:stop', st.stream.id) : undefined)
@@ -95,7 +115,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       recorder.current = rec;
       setState('live');
       void load();
-    } catch (e) { setError((e as Error).message); setState('idle'); }
+    } catch (e) { output?.stop(); setError((e as Error).message); setState('idle'); }
   };
   const end = () => { setState('ending'); if (recorder.current?.state === 'recording') { const r = recorder.current; recorder.current = null; r.stop(); } else void api('/hub/live/end', { body: {} }).finally(() => { setState('idle'); void load(); }); };
   const copy = async (what: string, text: string) => { try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(null), 1500); } catch { /* clipboard blocked */ } };
@@ -122,6 +142,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="flex flex-1 items-center gap-2 font-display text-[28px] font-extrabold"><Icon.Live size={28} className={live ? 'text-[#e5484d]' : ''} />{basic ? 'Go live' : 'Live Studio'} {!basic && <VerifiedBadge size={22} />}</h1>
         {live && <span className="flex items-center gap-2 rounded-full bg-[#e5484d] px-3 py-1.5 text-[13px] font-extrabold uppercase tracking-wide text-white"><span className="h-2 w-2 animate-pulse rounded-full bg-white" />Live · {clock(st.stream.startedAt, now)}</span>}
+        {!basic && state === 'live' && encoderRtt !== null && <span className="rounded-full bg-surface px-3 py-1.5 text-[13px]" title="Round-trip time for the latest recording chunk">Encoder response · {encoderRtt} ms</span>}
         {live && <span className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-[13px] font-semibold"><Icon.Eye size={16} />{viewers.toLocaleString(locale)} watching</span>}
       </div>
       {error && <p role="alert" className="mt-4 rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
@@ -129,19 +150,11 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       <div className={`mt-5 grid gap-5 ${basic ? '' : 'lg:grid-cols-[1fr_360px]'}`}>
         <div className="space-y-5">
           <section className="overflow-hidden rounded-3xl border border-line bg-elevated">
-            <div className="relative aspect-video bg-black">
-              <video ref={preview} autoPlay muted playsInline className="h-full w-full object-contain" />
-              {!media && (
-                <div className="absolute inset-0 grid place-items-center p-6 text-center text-white/80">
-                  <div><Icon.Camera size={44} className="mx-auto" /><p className="mt-2 text-[15px]">Choose your camera or your screen to see a preview.</p></div>
-                </div>
-              )}
-            </div>
             <div className="space-y-3 p-4 sm:p-5">
               <label className="block"><span className="text-[13px] font-semibold">Title</span><input className={`mt-1 ${inputClass}`} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={100} disabled={state === 'live'} /></label>
               <div className="flex flex-wrap gap-2">
-                <button type="button" disabled={state !== 'idle'} onClick={() => void pick('camera')} aria-pressed={source === 'camera' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'camera' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.Camera size={18} />Camera</button>
-                <button type="button" disabled={state !== 'idle'} onClick={() => void pick('screen')} aria-pressed={source === 'screen' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'screen' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.ScreenShare size={18} />Screen</button>
+                <button type="button" disabled={state === 'starting' || state === 'ending'} onClick={() => void pick('camera')} aria-pressed={source === 'camera' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'camera' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.Camera size={18} />Camera</button>
+                <button type="button" disabled={state === 'starting' || state === 'ending'} onClick={() => void pick('screen')} aria-pressed={source === 'screen' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'screen' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.ScreenShare size={18} />Screen</button>
                 <span className="ml-auto flex gap-2">
                   {state === 'live' || (live && st.stream.startedAt) ? (
                     <button type="button" onClick={end} disabled={state === 'ending'} className="h-10 rounded-xl bg-[#e5484d] px-5 text-[14px] font-bold text-white disabled:opacity-60">{state === 'ending' ? 'Ending…' : 'End stream'}</button>
@@ -153,6 +166,8 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
               <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted">Viewers watch at <a href={watchUrl} target="_blank" rel="noreferrer" className="font-semibold text-brand">{watchUrl.replace(/^https?:\/\//, '')}</a><button type="button" onClick={() => void copy('link', watchUrl)} className="rounded-lg px-2 py-0.5 font-semibold hover:bg-surface">{copied === 'link' ? 'Copied' : 'Copy'}</button></p>
             </div>
           </section>
+
+          <ControlRoom streamId={st.stream.id} basic={basic} host={media} capture={capture} active={state === 'live'} />
 
           {!basic && <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
             <h2 className="flex items-center gap-2 font-display text-[18px] font-bold"><Icon.Monitor size={20} />OBS, TV encoder or camera</h2>
