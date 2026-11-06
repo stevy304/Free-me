@@ -122,7 +122,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
       import('hls.js').then(({ default: H }) => {
         if (cancelled) return;
         if (!H.isSupported()) { setError('This browser cannot play this video.'); return; }
-        const h = new H({ capLevelToPlayerSize: true, startLevel: -1, maxBufferLength: 30, backBufferLength: 60 });
+        // startFragPrefetch: the first segment downloads while the player is still setting up.
+        const h = new H({ capLevelToPlayerSize: true, startLevel: -1, startFragPrefetch: true, maxBufferLength: 30, backBufferLength: 60 });
         hls.current = h;
         h.on(H.Events.MANIFEST_PARSED, () => setLevels(h.levels.map((l, index) => ({ index, height: l.height, width: l.width, label: label(l.height, l.width) })).reverse()));
         h.on(H.Events.LEVEL_SWITCHED, (_e, d) => { const l = h.levels[d.level]; setPlayingLevel(l ? Math.min(l.height, l.width) : null); });

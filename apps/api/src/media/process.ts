@@ -5,7 +5,7 @@ import { extname, join, relative, sep } from 'node:path';
 import type { AppConfig } from '../config/config';
 import { AUDIO, HD_RUNGS, codecsFor, isHighRung, masterPlaylist, planLadder, type MasterEntry, type PlannedRung } from './ladder';
 import { BT709_TAGS, ffmpegFilters, loudnessFilter, measureLoudness, toneMap, type Hdr, type Loudness } from './filters';
-import { AudioOnly, MediaError, probe, run, type ProbeResult } from './probe';
+import { AudioOnly, MediaError, keyframeGap, probe, run, type ProbeResult } from './probe';
 import { mediaPrefix, wantedLocation } from './keys';
 import { LATE_FOLDERS } from './captions';
 import { extractSpeech } from './autocaptions';
@@ -48,9 +48,16 @@ export class VideoProcessor {
   }
 
   /** Returns the extracted speech track (outside the work folder) when automatic captions should be made from it. */
-  async process(videoId: string, signal?: AbortSignal): Promise<{ speech: string | null }> {
+  /**
+   * `playable` (the first job): checks, thumbnails, the 360p rendition and seek previews, so the video can be watched
+   * in seconds. It answers `more: true` when higher qualities remain: they are a second, lower-priority job
+   * (`rest`), so every new upload becomes watchable before any video gets its 1080p. Podcasts and videos of 360p or
+   * less finish in the first job.
+   */
+  async process(videoId: string, signal?: AbortSignal, part: 'playable' | 'rest' = 'playable'): Promise<{ speech: string | null; more: boolean }> {
     const video = await this.prisma.video.findUnique({ where: { id: videoId } });
-    if (!video?.sourceFileS3Key) return { speech: null }; // deleted, or never uploaded
+    if (!video?.sourceFileS3Key) return { speech: null, more: false }; // deleted, or never uploaded
+    if (part === 'rest' && !video.hlsMasterKey) part = 'playable'; // nothing playable yet: start from the beginning
     const started = performance.now();
     const timings: Record<string, number> = {};
     const timed = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
@@ -63,7 +70,7 @@ export class VideoProcessor {
     await mkdir(work, { recursive: true });
     try {
       const source = join(work, `source${extname(video.sourceFileS3Key) || '.bin'}`);
-      await this.setProgress(videoId, 1, 'Preparing');
+      if (part === 'playable') await this.setProgress(videoId, 1, 'Preparing');
       await timed('downloadMs', () => this.storage.download(video.sourceFileS3Key!, source, signal));
       signal?.throwIfAborted();
       let source2 = source;
@@ -85,66 +92,108 @@ export class VideoProcessor {
       const fast = [first];
       const remaining = ladder.filter((r) => r !== first);
       const passes = [remaining.filter((r) => r.short < first.short || HD_RUNGS.has(r.name)), remaining.filter(isHighRung)].filter((rungs) => rungs.length);
-      await this.setProgress(videoId, 4, 'Processing SD', { durationSeconds: Math.round(info.durationSeconds), width: info.width, height: info.height, isShort: isShort && !podcast, isPodcast: podcast } as Partial<Video>);
 
       // HDR phone videos are converted to normal colour; without the filters they would play washed out and grey.
       const filters = await ffmpegFilters(this.config.media.ffmpegPath);
       const hdr: Hdr = info.hdr && filters.has('zscale') && filters.has('tonemap') ? info.hdr : null;
-      if (info.hdr && !hdr) this.log.warn(`${videoId}: HDR source2 but this ffmpeg lacks zscale/tonemap; colours will look flat`);
-      // Nothing is published before the safety check: a match holds the video for a moderator.
-      // The uploaded file itself is fingerprinted (for a podcast, the sound file).
-      const held = await timed('screeningMs', () => screen(this.prisma, this.config, video, source, info, work));
-      signal?.throwIfAborted();
-      if (held) { await hold(this.prisma, videoId, held); this.log.warn(`${videoId}: held for review: ${held}`); return { speech: null }; }
-      // These steps use independent video and audio streams. Keep the two-pass loudness target.
-      const [thumbs, loud] = await Promise.all([
-        timed('thumbnailsMs', () => this.thumbnails(source2, work, info, hdr, signal)),
-        info.hasAudio ? timed('loudnessMs', () => measureLoudness(this.config.media.ffmpegPath, source2, signal)) : null,
-      ]);
-      signal?.throwIfAborted();
+      if (info.hdr && !hdr) this.log.warn(`${videoId}: HDR source but this ffmpeg lacks zscale/tonemap; colours will look flat`);
       const done: MasterEntry[] = [];
       const fastWeight = passes.length ? 40 : 90;
-      await timed('sdEncodeMs', () => this.encode(source2, work, fast, info, hdr, info.hasAudio ? { loudness: loud } : null, (f) => this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined), signal));
-      signal?.throwIfAborted();
-      const playable = await timed('sdPublishMs', () => this.publish(videoId, work, fast, info, done, thumbs, passes.length ? 'Playable · adding qualities' : 'Playable · preparing seek previews', 5 + fastWeight));
-      if (playable !== null && !video.hlsMasterKey) this.log.log({ event: 'video_first_playable', videoId, processingToPlayableMs: Math.round(playable - started), ...timings });
-      const weight = (rungs: PlannedRung[]) => rungs.reduce((sum, rung) => sum + rung.width * rung.height, 400_000);
+
+      if (part === 'playable') {
+        await this.setProgress(videoId, 4, 'Processing SD', { durationSeconds: Math.round(info.durationSeconds), width: info.width, height: info.height, isShort: isShort && !podcast, isPodcast: podcast } as Partial<Video>);
+        // Nothing is published before the safety check: a match holds the video for a moderator.
+        // The uploaded file itself is fingerprinted (for a podcast, the sound file).
+        const held = await timed('screeningMs', () => screen(this.prisma, this.config, video, source, info, work));
+        signal?.throwIfAborted();
+        if (held) { await hold(this.prisma, videoId, held); this.log.warn(`${videoId}: held for review: ${held}`); return { speech: null, more: false }; }
+        // These steps use independent video and audio streams. Keep the two-pass loudness target.
+        const [thumbs, loud] = await Promise.all([
+          timed('thumbnailsMs', () => this.thumbnails(source2, work, info, hdr, signal)),
+          info.hasAudio ? timed('loudnessMs', () => measureLoudness(this.config.media.ffmpegPath, source2, signal)) : null,
+        ]);
+        signal?.throwIfAborted();
+        await timed('sdEncodeMs', () => this.encode(source2, work, fast, info, hdr, info.hasAudio ? { loudness: loud } : null, (f) => this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined), signal));
+        signal?.throwIfAborted();
+        const playable = await timed('sdPublishMs', () => this.publish(videoId, work, fast, info, done, thumbs, passes.length ? 'Playable · adding qualities' : 'Playable · preparing seek previews', 5 + fastWeight));
+        if (playable !== null && !video.hlsMasterKey) this.log.log({ event: 'video_first_playable', videoId, processingToPlayableMs: Math.round(playable - started), ...timings });
+        // Seek previews from the 360p rendition just made: cheap, so they come with the first job.
+        try {
+          const board = await timed('storyboardMs', () => this.storyboard(join(work, 'out', 'hls', first.name, 'index.m3u8'), work, info, null, signal));
+          const current = await this.prisma.video.findUniqueOrThrow({ where: { id: videoId }, select: { mediaLocation: true } });
+          await this.storage.putFile(mediaPrefix(videoId, current.mediaLocation) + board.meta.key, board.file, { contentType: TYPES['.jpg'], cacheControl: IMMUTABLE });
+          await this.prisma.video.update({ where: { id: videoId }, data: { storyboard: board.meta as unknown as Prisma.InputJsonValue } });
+        } catch (e) {
+          if (signal?.aborted) throw e;
+          this.log.warn(`${videoId}: no seek previews: ${(e as Error).message.slice(0, 200)}`);
+        }
+        // Higher qualities wait behind every other upload's first job (a podcast's work dir holds its video: finish here).
+        if (passes.length && !podcast) {
+          await this.setProgress(videoId, 5 + fastWeight, 'Playable · adding qualities');
+          this.log.log({ event: 'video_playable_job_done', videoId, ...timings });
+          return { speech: null, more: true };
+        }
+      } else {
+        // Second job: the renditions already published stay in the master playlist.
+        done.push(...await this.publishedEntries(videoId, ladder));
+      }
+
+      // Higher qualities. The top rung is copied from the upload when it is already suitable H.264.
+      const copyTop = await timed('copyCheckMs', () => this.copyPlan(ladder, info, hdr, source2, signal));
+      const weight = (rungs: PlannedRung[]) => rungs.reduce((sum, rung) => sum + (rung === copyTop?.rung ? 0 : rung.width * rung.height), 400_000);
       const total = passes.reduce((sum, rungs) => sum + weight(rungs), 0);
       let progress = 5 + fastWeight;
-      for (const [index, rungs] of passes.entries()) {
+      for (const [index, base] of passes.entries()) {
+        const rungs = base.map((r) => (r === copyTop?.rung ? { ...r, copy: copyTop.copy } : r));
         const stage = 'Playable · adding qualities';
         const from = progress;
-        const span = (95 - (5 + fastWeight)) * weight(rungs) / total;
+        const span = (95 - (5 + fastWeight)) * weight(base) / total;
         const quality = rungs.at(-1)!.name;
         await timed(`encode_${quality}Ms`, () => this.encode(source2, work, rungs, info, hdr, null, (f) => this.setProgress(videoId, from + f * span, stage).catch(() => undefined), signal));
         signal?.throwIfAborted();
         progress += span;
-        await timed(`publish_${quality}Ms`, () => this.publish(videoId, work, rungs, info, done, null, index === passes.length - 1 ? 'Playable · preparing seek previews' : stage, Math.round(progress)));
-      }
-
-      // Seek previews are optional and can be expensive on long or HDR sources.
-      try {
-        signal?.throwIfAborted();
-        const board = await timed('storyboardMs', () => this.storyboard(join(work, 'out', 'hls', first.name, 'index.m3u8'), work, info, null, signal));
-        const current = await this.prisma.video.findUniqueOrThrow({ where: { id: videoId }, select: { mediaLocation: true } });
-        await this.storage.putFile(mediaPrefix(videoId, current.mediaLocation) + board.meta.key, board.file, { contentType: TYPES['.jpg'], cacheControl: IMMUTABLE });
-        await this.prisma.video.update({ where: { id: videoId }, data: { storyboard: board.meta as unknown as Prisma.InputJsonValue } });
-        this.log.log({ event: 'video_storyboard_ready', videoId, storyboardMs: timings.storyboardMs });
-      } catch (e) {
-        this.log.warn(`${videoId}: no seek previews: ${(e as Error).message.slice(0, 200)}`);
+        await timed(`publish_${quality}Ms`, () => this.publish(videoId, work, rungs, info, done, null, index === passes.length - 1 ? 'Ready' : stage, Math.round(progress)));
       }
       signal?.throwIfAborted();
       await this.setProgress(videoId, 100, 'Ready');
-      this.log.log({ event: 'video_processing_complete', videoId, qualities: ladder.map((r) => r.name), ...timings });
-      if (!this.config.media.whisper || !info.hasAudio) return { speech: null };
+      this.log.log({ event: 'video_processing_complete', videoId, qualities: ladder.map((r) => r.name), copied: copyTop?.rung.name ?? null, ...timings });
+      if (!this.config.media.whisper || !info.hasAudio) return { speech: null, more: false };
       // The speech track for automatic captions, kept after the work folder goes; captioning runs after the lock.
       const speech = join(this.config.media.scratchDir, `${videoId}.speech.wav`);
-      try { await extractSpeech(this.config.media.ffmpegPath, source2, speech, signal); return { speech }; }
-      catch (e) { this.log.warn(`${videoId}: could not extract speech: ${(e as Error).message.slice(0, 200)}`); return { speech: null }; }
+      try { await extractSpeech(this.config.media.ffmpegPath, source2, speech, signal); return { speech, more: false }; }
+      catch (e) { this.log.warn(`${videoId}: could not extract speech: ${(e as Error).message.slice(0, 200)}`); return { speech: null, more: false }; }
     } finally {
       await rm(work, { recursive: true, force: true }).catch(() => undefined);
     }
   }
+
+  /**
+   * Copying instead of encoding the top rung (often 1080p, the most expensive): only when the upload is H.264 8-bit
+   * 4:2:0, normal colour, not rotated, exactly that size, at most 60 fps, at a bitrate viewers can stream, with a
+   * keyframe at least every 4.5 s (segments are cut at keyframes). Otherwise it is encoded as usual.
+   */
+  private async copyPlan(ladder: PlannedRung[], info: ProbeResult, hdr: Hdr, source: string, signal?: AbortSignal): Promise<{ rung: PlannedRung; copy: { codecs: string; kbps: number } } | null> {
+    const top = ladder.at(-1)!;
+    if (!this.config.media.copyTopRung || ladder.length < 2 || !isHighRung(top)) return null;
+    const profiles: Record<string, string> = { High: '6400', Main: '4d40', 'Constrained Baseline': '42e0', Baseline: '4200' };
+    const ok = info.videoCodec === 'h264' && !info.hdr && !hdr && info.pixFmt === 'yuv420p' && !info.rotated && info.fps <= 60
+      && top.width === info.width && top.height === info.height && !!info.profile && !!profiles[info.profile] && !!info.level && info.level <= 52
+      && !!info.videoKbps && info.videoKbps <= top.maxKbps * 1.25;
+    if (!ok) return null;
+    const gap = await keyframeGap(this.config.media.ffprobePath, source, signal).catch(() => Infinity);
+    if (gap > 4.5) return null;
+    return { rung: top, copy: { codecs: `avc1.${profiles[info.profile!]}${info.level!.toString(16).padStart(2, '0')}`, kbps: info.videoKbps! } };
+  }
+
+  /** Master playlist entries of the renditions a video already has (for the second job). */
+  private async publishedEntries(videoId: string, ladder: PlannedRung[]): Promise<MasterEntry[]> {
+    const rows = await this.prisma.videoRendition.findMany({ where: { videoId } });
+    return rows.map((r) => {
+      const planned = ladder.find((p) => p.name === r.resolution);
+      return { name: r.resolution, width: r.width, height: r.height, bandwidth: Math.max(planned?.maxKbps ?? 0, Math.round(r.bitrateKbps * 1.3)) * 1000, codecs: r.codecs, frameRate: r.frameRate, playlist: r.playlistKey.replace(/^hls\//, '') };
+    });
+  }
+
 
   /** Turns a sound file into a video: the creator's cover (or a plain dark picture) with a waveform along the bottom. */
   private async podcastVideo(video: Video, audio: string, work: string, seconds: number, signal?: AbortSignal): Promise<string> {
@@ -232,33 +281,38 @@ export class VideoProcessor {
   private async encodeWith(enc: AppConfig['media']['encoder'], source: string, work: string, rungs: PlannedRung[], info: ProbeResult, hdr: Hdr, audio: { loudness: Loudness | null } | null, onProgress: (f: number) => void, signal?: AbortSignal) {
     if (!rungs.length) return;
     const fps = Math.min(60, info.fps);
-    const top = rungs.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a));
+    // A rung copied from the upload needs no filter; the others are scaled and encoded.
+    const encoded = rungs.filter((r) => !r.copy);
+    const top = (encoded.length ? encoded : rungs).reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a));
     const pre = `${info.fps > 60 ? `fps=${fps},` : ''}${hdr ? `${toneMap(hdr, top.width, top.height)},` : ''}`;
     const scale = (r: PlannedRung) => `scale=${r.width}:${r.height}:flags=bicubic,format=${enc === 'qsv' ? 'nv12' : 'yuv420p'}`;
     // Scale the source once, to the pass's largest rung; the smaller rungs are made from that (much less work
     // than scaling each one from a 1080p or 4K source).
-    const ti = rungs.indexOf(top);
+    const ti = encoded.indexOf(top);
     const toTop = `scale=${top.width}:${top.height}:flags=bicubic`;
-    const filter = rungs.length === 1
-      ? `[0:v]${pre}${scale(rungs[0])}[o0]`
-      : `[0:v]${pre}${toTop},split=${rungs.length}${rungs.map((_, i) => `[s${i}]`).join('')};${rungs.map((r, i) => `[s${i}]${i === ti ? `format=${enc === 'qsv' ? 'nv12' : 'yuv420p'}` : scale(r)}[o${i}]`).join(';')}`;
-    const args = ['-hide_banner', '-y', '-nostats', '-progress', 'pipe:1', '-i', source, '-filter_complex', filter];
-    for (const [i, r] of rungs.entries()) {
+    const filter = !encoded.length ? null : encoded.length === 1
+      ? `[0:v]${pre}${scale(encoded[0])}[o0]`
+      : `[0:v]${pre}${toTop},split=${encoded.length}${encoded.map((_, i) => `[s${i}]`).join('')};${encoded.map((r, i) => `[s${i}]${i === ti ? `format=${enc === 'qsv' ? 'nv12' : 'yuv420p'}` : scale(r)}[o${i}]`).join(';')}`;
+    const args = ['-hide_banner', '-y', '-nostats', '-progress', 'pipe:1', '-i', source, ...(filter ? ['-filter_complex', filter] : [])];
+    // Short first segments (1 s) so playback starts sooner; keyframes at 0, 1, 2, 4, 6 … seconds in every rung.
+    const hls = (dir: string) => ['-f', 'hls', '-hls_time', '4', '-hls_init_time', '1', '-hls_playlist_type', 'vod', '-hls_segment_type', 'fmp4', '-hls_flags', 'independent_segments',
+      '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', join(dir, 'seg_%05d.m4s'), join(dir, 'index.m3u8')];
+    for (const r of rungs) {
       const dir = join(work, 'out', 'hls', r.name);
       await mkdir(dir, { recursive: true });
-      args.push('-map', `[o${i}]`, ...(hdr ? BT709_TAGS : []));
+      if (r.copy) { args.push('-map', '0:v:0', '-c:v', 'copy', ...hls(dir)); continue; }
+      args.push('-map', `[o${encoded.indexOf(r)}]`, ...(hdr ? BT709_TAGS : []));
       args.push(
         ...this.videoArgs(enc, r),
-        '-force_key_frames', 'expr:gte(t,n_forced*2)', '-sc_threshold', '0', '-movflags', '+faststart',
-        '-f', 'hls', '-hls_time', '4', '-hls_playlist_type', 'vod', '-hls_segment_type', 'fmp4', '-hls_flags', 'independent_segments',
-        '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', join(dir, 'seg_%05d.m4s'), join(dir, 'index.m3u8'),
+        '-force_key_frames', 'expr:if(lt(t,2),gte(t,n_forced),gte(t,(n_forced-1)*2))', '-sc_threshold', '0', '-movflags', '+faststart',
+        ...hls(dir),
       );
     }
     if (audio) {
       const dir = join(work, 'out', 'hls', 'audio');
       await mkdir(dir, { recursive: true });
       args.push('-map', '0:a:0', '-af', loudnessFilter(audio.loudness), '-c:a', 'aac', '-b:a', `${AUDIO.kbps}k`, '-ac', '2', '-ar', '48000',
-        '-f', 'hls', '-hls_time', '4', '-hls_playlist_type', 'vod', '-hls_segment_type', 'fmp4', '-hls_flags', 'independent_segments',
+        '-f', 'hls', '-hls_time', '4', '-hls_init_time', '1', '-hls_playlist_type', 'vod', '-hls_segment_type', 'fmp4', '-hls_flags', 'independent_segments',
         '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', join(dir, 'seg_%05d.m4s'), join(dir, 'index.m3u8'));
     }
     let last = 0;
@@ -294,10 +348,14 @@ export class VideoProcessor {
     }));
     for (const r of rungs) {
       const sizes = await Promise.all((await walk(join(out, 'hls', r.name))).map((f) => stat(f).then((s) => s.size)));
-      const codecs = codecsFor(r) + (info.hasAudio ? `,${AUDIO.codecs}` : '');
-      const bandwidth = r.maxKbps * 1000; // video only; the master playlist adds the shared audio
-      const data = { width: r.width, height: r.height, bitrateKbps: r.videoKbps, playlistKey: `hls/${r.name}/index.m3u8`, fileSizeBytes: BigInt(sizes.reduce((a, b) => a + b, 0)), codecs, frameRate: Math.min(60, info.fps) };
+      const codecs = (r.copy?.codecs ?? codecsFor(r)) + (info.hasAudio ? `,${AUDIO.codecs}` : '');
+      // Video only (the master playlist adds the shared audio); a copied rung at its own peak, with room.
+      const bandwidth = r.copy ? Math.max(r.maxKbps, Math.round(r.copy.kbps * 1.3)) * 1000 : r.maxKbps * 1000;
+      const data = { width: r.width, height: r.height, bitrateKbps: r.copy?.kbps ?? r.videoKbps, playlistKey: `hls/${r.name}/index.m3u8`, fileSizeBytes: BigInt(sizes.reduce((a, b) => a + b, 0)), codecs, frameRate: Math.min(60, info.fps) };
       await this.prisma.videoRendition.upsert({ where: { videoId_resolution: { videoId, resolution: r.name } }, create: { videoId, resolution: r.name, ...data }, update: data });
+      // Replaces the entry an earlier, interrupted attempt left (the second job starts from what is published).
+      const at = done.findIndex((d) => d.name === r.name);
+      if (at >= 0) done.splice(at, 1);
       done.push({ name: r.name, width: r.width, height: r.height, bandwidth, codecs, frameRate: data.frameRate, playlist: `${r.name}/index.m3u8` });
     }
     await this.storage.putBuffer(`${prefix}hls/master.m3u8`, Buffer.from(masterPlaylist(done, info.hasAudio)), { contentType: TYPES['.m3u8'], cacheControl: SHORT });

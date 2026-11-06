@@ -29,11 +29,12 @@ async function main() {
   // Instant updates from the worker (processing progress, notifications, payments) reach browsers through Redis.
   const emitter = new Emitter(new Redis(config.redisUrl));
   setRealtimeSink((r, event, data) => emitter.to(r).emit(event, data));
-  const jobs = new MediaJobs(prisma, createStorage(config), config, new Redis(config.redisUrl));
+  // Follow-up jobs (higher qualities) go back on the queue, behind every waiting upload's first job.
+  const jobs = new MediaJobs(prisma, createStorage(config), config, new Redis(config.redisUrl), async (next) => { await media.add(next.name, next, jobOptions(next)); });
 
   const worker = new Worker<MediaJob>(MEDIA_QUEUE, async (job, _token, signal) => {
-    if (job.data.name === 'transcode') {
-      log.log({ event: 'transcode_started', videoId: job.data.videoId, attempt: job.attemptsMade + 1, queueWaitMs: Math.max(0, (job.processedOn ?? Date.now()) - job.timestamp) });
+    if (job.data.name === 'transcode' || job.data.name === 'upgrade') {
+      log.log({ event: job.data.name === 'upgrade' ? 'upgrade_started' : 'transcode_started', videoId: job.data.videoId, attempt: job.attemptsMade + 1, queueWaitMs: Math.max(0, (job.processedOn ?? Date.now()) - job.timestamp) });
     }
     try { await jobs.run(job.data, job.attemptsMade + 1 >= (job.opts.attempts ?? 1), signal); }
     catch (e) {
@@ -59,9 +60,10 @@ async function main() {
     else if (job.name === 'billing-payments') await billing.reconcile();
     else if (job.name === 'billing-daily') { await billing.expirePremium(); const n = await billing.settleAds(); if (n) log.log(`Settled ${n} day(s) of ad revenue`); }
     else if (job.name === 'recover-stuck') {
-      for (const videoId of await jobs.stuckVideos()) {
-        const transcode = { name: 'transcode', videoId } as const;
-        await media.add(transcode.name, transcode, jobOptions(transcode));
+      // A playable video that stopped before its higher qualities only needs the second job.
+      for (const { id: videoId, playable } of await jobs.stuckVideos()) {
+        const job = { name: playable ? 'upgrade' : 'transcode', videoId } as const;
+        await media.add(job.name, job, jobOptions(job));
       }
     } else await jobs.views.flush();
   }, { connection: connection(), prefix: config.media.queuePrefix, concurrency: 1 });

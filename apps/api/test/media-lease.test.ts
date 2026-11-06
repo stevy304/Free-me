@@ -11,7 +11,7 @@ test('a worker renews its short lease and stops processing if ownership is lost'
       await new Promise<void>((_resolve, reject) => {
         signal!.addEventListener('abort', () => reject(signal!.reason), { once: true });
       });
-      return { speech: null };
+      return { speech: null, more: false };
     });
 
     const failed = expect(jobs.transcode('video', true)).rejects.toBeInstanceOf(VideoBusy);

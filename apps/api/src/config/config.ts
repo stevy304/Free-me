@@ -98,6 +98,8 @@ export interface MediaConfig {
   presetHigh: string;
   /** libx264 (CPU), or a GPU encoder: nvenc (NVIDIA) or qsv (Intel Quick Sync). Falls back to libx264 if it fails. */
   encoder: 'libx264' | 'nvenc' | 'qsv';
+  /** Use the upload's own H.264 for the top rung when it is already suitable (no re-encoding). */
+  copyTopRung: boolean;
   workerConcurrency: number;
   /** BullMQ key prefix (lets tests run beside a real queue). */
   queuePrefix: string;
@@ -157,6 +159,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     driver, s3, localDir: env.LOCAL_STORAGE_DIR?.trim() || './.data/storage', publicBaseUrl, maxUploadBytes, partBytes,
     scratchDir: env.SCRATCH_DIR?.trim() || '/tmp/freeme-scratch', ffmpegPath: env.FFMPEG_PATH?.trim() || 'ffmpeg', ffprobePath: env.FFPROBE_PATH?.trim() || 'ffprobe',
     preset: env.TRANSCODE_PRESET?.trim() || 'veryfast', presetHigh: env.TRANSCODE_PRESET_HIGH?.trim() || 'superfast',
+    copyTopRung: env.COPY_TOP_RUNG !== 'false',
     encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
     whisper: env.WHISPER_CPP_PATH?.trim() && env.WHISPER_MODEL?.trim()
       ? { bin: env.WHISPER_CPP_PATH.trim(), model: env.WHISPER_MODEL.trim(), threads: Math.max(1, Number(env.WHISPER_THREADS) || 4) } : null,

@@ -1,7 +1,11 @@
 import { spawn } from 'node:child_process';
 import { hdrOf, type Hdr } from './filters';
 
-export interface ProbeResult { durationSeconds: number; width: number; height: number; fps: number; hasAudio: boolean; videoCodec: string; hdr: Hdr }
+export interface ProbeResult {
+  durationSeconds: number; width: number; height: number; fps: number; hasAudio: boolean; videoCodec: string; hdr: Hdr;
+  /** For copying the video as it is (no re-encoding): its pixel format, H.264 profile and level, bitrate and rotation. */
+  pixFmt?: string; profile?: string; level?: number; videoKbps?: number; rotated?: boolean;
+}
 
 export class MediaError extends Error {
   /** A problem with the file itself: retrying will not help, and the message is shown to the creator. */
@@ -39,5 +43,21 @@ export async function probe(ffprobe: string, path: string): Promise<ProbeResult>
   const [w, h] = rotation === 90 ? [v.height, v.width] : [v.width, v.height];
   const [num, den] = String(v.avg_frame_rate || v.r_frame_rate || '30/1').split('/').map(Number);
   const fps = den ? num / den : 30;
-  return { durationSeconds: duration, width: w, height: h, fps: Number.isFinite(fps) && fps > 0 && fps < 241 ? fps : 30, hasAudio: !!data.streams?.some((s) => s.codec_type === 'audio'), videoCodec: v.codec_name, hdr: hdrOf(v) };
+  const fmt = data.format as { duration?: string; bit_rate?: string } | undefined;
+  // The video's own bitrate, or (when the container does not say) the file's, which includes the audio.
+  const bps = Number(v.bit_rate) || Number(fmt?.bit_rate) || 0;
+  return {
+    durationSeconds: duration, width: w, height: h, fps: Number.isFinite(fps) && fps > 0 && fps < 241 ? fps : 30, hasAudio: !!data.streams?.some((s) => s.codec_type === 'audio'), videoCodec: v.codec_name, hdr: hdrOf(v),
+    pixFmt: v.pix_fmt, profile: v.profile, level: Number(v.level) || undefined, videoKbps: bps ? Math.round(bps / 1000) : undefined, rotated: rotation !== 0 || Math.abs(Number(v.tags?.rotate ?? v.side_data_list?.find((d: any) => d.rotation !== undefined)?.rotation ?? 0)) % 360 !== 0,
+  };
+}
+
+/** Largest gap between keyframes (seconds) in the first two minutes: copied video is cut into segments at keyframes. */
+export async function keyframeGap(ffprobe: string, path: string, signal?: AbortSignal): Promise<number> {
+  const { stdout } = await run(ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-skip_frame', 'nokey', '-show_entries', 'frame=pts_time', '-of', 'csv=p=0', '-read_intervals', '%+120', path], undefined, signal);
+  const t = stdout.split(/[\n,]/).map((x) => x.trim()).filter(Boolean).map(Number).filter((x) => Number.isFinite(x));
+  if (t.length < 2) return Infinity;
+  let gap = 0;
+  for (let i = 1; i < t.length; i++) gap = Math.max(gap, t[i] - t[i - 1]);
+  return gap;
 }

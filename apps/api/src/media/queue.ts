@@ -10,13 +10,18 @@ import { createStorage, type Storage } from './storage';
 export const MEDIA_QUEUE = 'media';
 export const STORAGE = Symbol('STORAGE');
 
-/** Job options: transcodes retry twice; moves wait while a video is busy; deletes retry until done. */
+/**
+ * Job options: transcodes retry twice; moves wait while a video is busy; deletes retry until done. Upgrades (the
+ * higher qualities) have a lower priority: every waiting first job (making a video playable) runs before them.
+ */
 export function jobOptions(job: MediaJob) {
   const { name, videoId } = job;
+  const encoding = name === 'transcode' || name === 'upgrade';
   return {
-    deduplication: name === 'transcode' ? { id: videoId } : undefined,
-    attempts: name === 'transcode' ? 3 : 20,
-    backoff: { type: 'exponential' as const, delay: name === 'transcode' ? 30_000 : 5_000 },
+    deduplication: encoding ? { id: `${name}:${videoId}` } : undefined,
+    ...(name === 'upgrade' ? { priority: 10 } : {}),
+    attempts: encoding ? 3 : 20,
+    backoff: { type: 'exponential' as const, delay: encoding ? 30_000 : 5_000 },
     removeOnComplete: { age: 24 * 3600, count: 1000 },
     removeOnFail: { age: 7 * 24 * 3600 },
   };

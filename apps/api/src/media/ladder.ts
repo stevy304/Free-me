@@ -23,7 +23,11 @@ export const HD_RUNGS = new Set(['480p', '720p']);
 /** Rungs from 1080p up use TRANSCODE_PRESET_HIGH (faster by default): they cost the most CPU. */
 export const isHighRung = (r: Rung) => r.short >= 1080;
 
-export interface PlannedRung extends Rung { width: number; height: number; videoKbps: number; maxKbps: number }
+export interface PlannedRung extends Rung {
+  width: number; height: number; videoKbps: number; maxKbps: number;
+  /** The upload's own H.264 is used for this rung as it is (no re-encoding): its codec string and bitrate. */
+  copy?: { codecs: string; kbps: number };
+}
 
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 
