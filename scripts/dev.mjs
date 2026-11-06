@@ -96,6 +96,10 @@ if (local(db.hostname) && has('psql')) {
     if (r.status !== 0) fail(`Could not create the database user. Create it yourself, then run npm run dev again:\n  sudo su postgres -c "psql -c \\"CREATE ROLE ${user} LOGIN CREATEDB PASSWORD '${pass}'\\""\n  sudo su postgres -c "createdb -O ${user} ${name}"`);
   }
 }
+// The database client must match the schema of the code being run: after a git pull it is out of date (npm install
+// only regenerates it when packages change), and the API then answers 500 ("Unknown field …").
+say('Preparing the database client…');
+run('npx prisma generate', { stdio: ['ignore', 'ignore', 'inherit'] });
 say('Applying database migrations…');
 run('npx prisma migrate deploy', { stdio: ['ignore', 'ignore', 'inherit'] });
 run('npm run -s db:seed');
