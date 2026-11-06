@@ -15,6 +15,18 @@ export interface SafetyConfig {
   newAccountDailyUploads: number;
 }
 
+/** Prices and payment providers (see ENVIRONMENT.md → Payments). Money is in US cents unless named otherwise. */
+export interface BillingConfig {
+  premiumUsdCents: number;
+  adDayUsdCents: number;
+  /** Smallest balance a creator can withdraw. */
+  payoutMinUsdCents: number;
+  /** MTN MoMo Collections (request to pay). The charge is in `currency`, at `perUsd` units of it for one US dollar. */
+  momo: { baseUrl: string; subscriptionKey: string; apiUser: string; apiKey: string; targetEnvironment: string; currency: string; perUsd: number } | null;
+  /** Flutterwave Standard checkout (cards worldwide, and mobile money in many countries). Charged in US dollars. */
+  flutterwave: { baseUrl: string; secretKey: string; webhookHash: string | null } | null;
+}
+
 export interface AppConfig {
   nodeEnv: 'development' | 'test' | 'production';
   port: number;
@@ -40,6 +52,7 @@ export interface AppConfig {
   safety: SafetyConfig;
   /** Who runs the service, shown on the legal pages and in notices (see ENVIRONMENT.md). */
   legal: LegalConfig;
+  billing: BillingConfig;
 }
 
 export interface LegalConfig {
@@ -138,6 +151,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     postalAddress: env.LEGAL_POSTAL_ADDRESS?.trim() || null, jurisdiction: env.LEGAL_JURISDICTION?.trim() || null,
   };
 
+  const cents = (k: string, d: number) => { const v = env[k]?.trim(); if (!v) return d; const n = Number(v); if (!Number.isInteger(n) || n < 1) problems.push(`${k} must be a whole number of US cents (e.g. 1000 for $10).`); return n; };
+  const momoKeys = ['MOMO_SUBSCRIPTION_KEY', 'MOMO_API_USER', 'MOMO_API_KEY'];
+  const momoSet = momoKeys.filter((k) => env[k]?.trim());
+  if (momoSet.length && momoSet.length < momoKeys.length) problems.push(`Set all of ${momoKeys.join(', ')} for MTN MoMo, or none.`);
+  const momoCurrency = (env.MOMO_CURRENCY?.trim() || 'RWF').toUpperCase();
+  const perUsd = Number(env.MOMO_RATE_PER_USD);
+  if (momoSet.length && momoCurrency !== 'USD' && !(perUsd > 0)) problems.push(`MOMO_RATE_PER_USD is required: how many ${momoCurrency} make one US dollar (prices are set in dollars).`);
+  const billing: BillingConfig = {
+    premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
+    momo: momoSet.length === momoKeys.length ? {
+      baseUrl: (env.MOMO_BASE_URL?.trim() || 'https://sandbox.momodeveloper.mtn.com').replace(/\/+$/, ''), subscriptionKey: env.MOMO_SUBSCRIPTION_KEY!.trim(),
+      apiUser: env.MOMO_API_USER!.trim(), apiKey: env.MOMO_API_KEY!.trim(), targetEnvironment: env.MOMO_TARGET_ENVIRONMENT?.trim() || 'sandbox',
+      currency: momoCurrency, perUsd: momoCurrency === 'USD' ? 1 : perUsd,
+    } : null,
+    flutterwave: env.FLW_SECRET_KEY?.trim() ? { baseUrl: (env.FLW_BASE_URL?.trim() || 'https://api.flutterwave.com').replace(/\/+$/, ''), secretKey: env.FLW_SECRET_KEY.trim(), webhookHash: env.FLW_WEBHOOK_HASH?.trim() || null } : null,
+  };
+
   if (problems.length) throw new ConfigError(`Free Me API configuration:\n- ${problems.join('\n- ')}`);
   return {
     nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
@@ -145,7 +175,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,
     mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)),
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
-    media, legal,
+    media, legal, billing,
     safety: {
       scanUrl: env.SAFETY_SCAN_URL?.trim() || null, scanToken: env.SAFETY_SCAN_TOKEN?.trim() || null,
       timeoutMs: Math.max(1000, Number(env.SAFETY_SCAN_TIMEOUT_MS) || 60_000), failClosed: env.SAFETY_SCAN_FAIL_CLOSED === 'true',

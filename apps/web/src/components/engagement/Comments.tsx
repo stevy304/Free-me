@@ -10,6 +10,7 @@ import { buttonClass } from '@/components/Dialog';
 import { useShell } from '@/components/shell/ShellContext';
 import { api } from '@/lib/client-api';
 import { compactNumber, timeAgo } from '@/lib/format';
+import { VerifiedBadge } from '@/components/VerifiedBadge';
 
 export interface CommentData {
   id: string; parentId: string | null; content: string; deleted: boolean; isPinned: boolean; replyCount: number; createdAt: string; editedAt: string | null;
@@ -96,7 +97,7 @@ function CommentItem({ c, videoId, onChange, onRemoved, onReplied, isReply = fal
         {c.isPinned && <p className="mb-0.5 flex items-center gap-1 text-[12px] text-muted"><Icon.Pin size={13} filled />Pinned by the creator</p>}
         <p className="flex flex-wrap items-center gap-x-1.5 text-[13px]">
           <span className={author.isCreator ? 'rounded-full bg-surface px-2 py-0.5' : ''}>{who}</span>
-          {author.isVerified && <Icon.Verified size={13} aria-label="Verified" className="text-muted" />}
+          {author.isVerified && <VerifiedBadge size={14} />}
           <span className="text-muted" suppressHydrationWarning>{timeAgo(c.createdAt, locale)}{c.editedAt ? ' (edited)' : ''}</span>
         </p>
         {editing

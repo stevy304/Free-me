@@ -108,9 +108,12 @@ model User {
   status                UserStatus        @default(ACTIVE)
   emailVerifiedAt       DateTime?
   lastLoginAt           DateTime?
+  /// Premium membership runs until this moment (null or past: not a member).
+  premiumUntil          DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
+  payments              Payment[]
   oauthAccounts         OAuthAccount[]
   sessions              Session[]
 
@@ -209,6 +212,8 @@ model Channel {
   country               String?           // ISO 3166-1 alpha-2
   defaultLanguage       String?           // BCP 47
   isVerified            Boolean           @default(false)
+  /// Why the badge shows: "PREMIUM" (removed when membership ends) or "ADMIN" (kept).
+  verificationSource    String?
   subscriberCount       Int               @default(0)
   totalViews            BigInt            @default(0)
   createdAt             DateTime          @default(now())
@@ -251,6 +256,8 @@ model Video {
   screeningClearedAt    DateTime?
   customThumbnail       Boolean           @default(false)
   isShort               Boolean           @default(false)
+  /// Made from a sound file (a podcast or music): the cover image with a waveform.
+  isPodcast             Boolean           @default(false)
   madeForKids           Boolean           @default(false)
   processingProgress    Int               @default(0)   // 0-100
   processingStage       String?           // "Uploading", "SD ready", "HD processing", ...
@@ -508,14 +515,22 @@ model Campaign {
   budgetAmountCents     BigInt            // minor units of `currency`
   spentAmountCents      BigInt            @default(0)
   targetCountries       String[]          // ISO 3166-1 alpha-2; empty = worldwide
-  cpmRateCents          Int               // cost per 1,000 impressions, minor units
-  adCreativeUrl         String            // Video or banner asset URL
+  cpmRateCents          Int               @default(0) // cost per 1,000 impressions, minor units (0: priced per day)
+  adCreativeUrl         String?           // Video or banner asset URL
+  /// The ad itself: one of the business's own videos (public or unlisted, ready).
+  videoId               String?
+  /// Days bought and the price of one day (minor units of `currency`).
+  days                  Int               @default(0)
+  dailyRateCents        Int               @default(0)
+  reviewNote            String?
+  reviewedAt            DateTime?
   destinationUrl        String            // Advertiser landing page
   headline              String
   startDate             DateTime
   endDate               DateTime
   impressionsCount      BigInt            @default(0)
   clicksCount           BigInt            @default(0)
+  payments              Payment[]
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
@@ -792,4 +807,61 @@ model VideoDailyStat {
 
   @@id([videoId, day])
   @@index([day])
+}
+
+// -------------------------------------------------------------
+// PAYMENTS (Premium and ad campaigns)
+// -------------------------------------------------------------
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+enum PaymentPurpose {
+  PREMIUM
+  AD_CAMPAIGN
+}
+
+model Payment {
+  id                    String            @id @default(uuid())
+  userId                String
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose               PaymentPurpose
+  /// "mtn_momo" or "flutterwave".
+  provider              String
+  /// The provider's reference (MoMo X-Reference-Id, Flutterwave tx_ref).
+  providerRef           String            @unique
+  /// What is charged, in minor units of `currency` (whole francs for RWF).
+  amountMinor           BigInt
+  currency              String
+  /// The price in US cents, whatever currency was charged.
+  usdCents              Int
+  status                PaymentStatus     @default(PENDING)
+  months                Int?
+  campaignId            String?
+  campaign              Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  phone                 String?
+  checkoutUrl           String?
+  failureReason         String?
+  createdAt             DateTime          @default(now())
+  paidAt                DateTime?
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+// One row per settled day of ad revenue (makes settlement safe to run twice).
+model AdDaySettlement {
+  day                   DateTime          @id @db.Date
+  currency              String
+  grossCents            BigInt
+  creatorPoolCents      BigInt
+  allocatedCents        BigInt
+  platformCents         BigInt
+  reinvestCents         BigInt
+  impressions           Int
+  channels              Int
+  createdAt             DateTime          @default(now())
 }

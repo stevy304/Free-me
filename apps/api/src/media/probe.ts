@@ -19,6 +19,9 @@ export function run(cmd: string, args: string[], onStdout?: (chunk: string) => v
   });
 }
 
+/** The file is sound only (a podcast or a song): it is turned into a video before processing. */
+export class AudioOnly extends Error { constructor(readonly durationSeconds: number) { super('audio only'); } }
+
 /** Reads what the file really is (never trusting its name). Throws MediaError for files that are not usable video. */
 export async function probe(ffprobe: string, path: string): Promise<ProbeResult> {
   let out: string;
@@ -26,7 +29,10 @@ export async function probe(ffprobe: string, path: string): Promise<ProbeResult>
   catch { throw new MediaError('This file could not be read as a video. Upload an MP4, MOV, MKV, WebM or another common video format.'); }
   const data = JSON.parse(out) as { format?: { duration?: string }; streams?: Array<Record<string, any>> };
   const v = data.streams?.find((s) => s.codec_type === 'video' && s.disposition?.attached_pic !== 1);
-  if (!v || !v.width || !v.height) throw new MediaError('This file has no video picture. Upload a video file.');
+  if (!v || !v.width || !v.height) {
+    if (data.streams?.some((s) => s.codec_type === 'audio')) throw new AudioOnly(Number(data.format?.duration ?? 0));
+    throw new MediaError('This file has no video picture. Upload a video file.');
+  }
   const duration = Number(data.format?.duration ?? v.duration ?? 0);
   if (!(duration > 0)) throw new MediaError('This video has no length. The file may be damaged.');
   const rotation = Math.abs(Number(v.tags?.rotate ?? v.side_data_list?.find((d: any) => d.rotation !== undefined)?.rotation ?? 0)) % 180;

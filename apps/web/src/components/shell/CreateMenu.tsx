@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useUploads } from '../hub/UploadsContext';
 
-/** "Create": upload a video or open your videos. Shows upload progress while files are uploading. */
+/** "Create": upload a video, post a Moment, upload a podcast, go live, or open Creator Hub. Shows upload progress while files are uploading. */
 export function CreateMenu() {
   const { openDialog, items } = useUploads();
   const [open, setOpen] = useState(false);
@@ -30,7 +30,10 @@ export function CreateMenu() {
       </button>
       {open && (
         <div role="menu" className="absolute right-0 top-12 z-50 w-60 overflow-hidden rounded-2xl border border-line bg-elevated py-2 shadow-[var(--shadow)]">
-          <button role="menuitem" type="button" onClick={() => { setOpen(false); openDialog(); }} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Upload size={20} strokeWidth={1.6} />Upload video</button>
+          <button role="menuitem" type="button" onClick={() => { setOpen(false); openDialog(null, 'video'); }} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Upload size={20} strokeWidth={1.6} />Upload video</button>
+          <button role="menuitem" type="button" onClick={() => { setOpen(false); openDialog(null, 'moment'); }} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Moments size={20} />Post a Moment</button>
+          <button role="menuitem" type="button" onClick={() => { setOpen(false); openDialog(null, 'podcast'); }} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Mic size={20} />Upload podcast</button>
+          <Link role="menuitem" href="/studio/live" onClick={() => setOpen(false)} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Live size={20} />Go live</Link>
           <Link role="menuitem" href="/hub" onClick={() => setOpen(false)} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Hub size={20} />Creator Hub</Link>
         </div>
       )}

@@ -15,6 +15,7 @@ import { Thumbnail, VideoRow } from '@/components/video/VideoCard';
 import { api } from '@/lib/client-api';
 import { compactNumber, duration, followersLabel, fullDate, timeAgo, viewsLabel } from '@/lib/format';
 import type { VideoCardData } from '@/lib/types';
+import { VerifiedBadge } from '@/components/VerifiedBadge';
 
 export interface WatchVideo extends VideoCardData {
   description: string | null; status: string; visibility: string; likeCount: number; commentCount: number; commentsOpen: boolean; playbackUrl: string | null; processingStage: string | null;
@@ -117,7 +118,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   }, [v.id, v.commentsOpen, v.commentCount]);
 
   const player = v.playbackUrl
-    ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} storyboard={v.storyboardUrl} captions={v.captions ?? []} onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
+    ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} storyboard={v.storyboardUrl} captions={v.captions ?? []} withAds onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
     : <div className="grid aspect-video w-full place-items-center rounded-[24px] bg-[#0b1413] text-center text-[15px] text-[#9fb0ad]"><div><Icon.Spinner className="mx-auto mb-3 animate-spin" />{v.takenDownAt ? 'This video was removed. See Creator Hub for details.' : v.processingStage ?? 'This video is still being processed.'}</div></div>;
 
   const pill = 'flex h-11 shrink-0 items-center gap-2 rounded-full border border-[#2bb5ab]/70 px-5 text-[14px] font-semibold text-white shadow-[0_0_14px_rgb(43_181_171/0.16)] transition-colors hover:bg-[#2bb5ab]/12';
@@ -260,7 +261,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
         <div className="mx-4 mt-4 flex items-center gap-3">
           <Link href={`/@${v.channel.handle}`} className="flex min-w-0 flex-1 items-center gap-2.5">
             <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={36} />
-            <span className="min-w-0"><span className="flex items-center gap-1 truncate text-[14px] font-semibold">{v.channel.name}{v.channel.isVerified && <Icon.Verified size={13} aria-label="Verified" className="shrink-0 text-[#9fb0ad]" />}</span><span className="block text-[12px] text-[#9fb0ad]" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</span></span>
+            <span className="min-w-0"><span className="flex items-center gap-1 truncate text-[14px] font-semibold">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={14} />}</span><span className="block text-[12px] text-[#9fb0ad]" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</span></span>
           </Link>
           {initialViewer.isOwner
             ? <Link href="/hub" className="flex h-9 shrink-0 items-center rounded-full border border-white/25 px-4 text-[13px] font-semibold">Creator Hub</Link>
@@ -325,7 +326,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
         <aside className="hidden h-fit rounded-[20px] border border-line bg-elevated p-4 sm:block lg:sticky lg:top-20">
           <Link href={`/@${v.channel.handle}`} className="flex items-center gap-3">
             <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={52} />
-            <div className="min-w-0"><p className="flex items-center gap-1 truncate font-display text-[17px] font-bold">{v.channel.name}{v.channel.isVerified && <Icon.Verified size={15} aria-label="Verified" className="text-brand" />}</p><p className="text-[13px] text-muted" suppressHydrationWarning>@{v.channel.handle} · {followersLabel(v.channel.followerCount, locale)}</p></div>
+            <div className="min-w-0"><p className="flex items-center gap-1 truncate font-display text-[17px] font-bold">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={16} />}</p><p className="text-[13px] text-muted" suppressHydrationWarning>@{v.channel.handle} · {followersLabel(v.channel.followerCount, locale)}</p></div>
           </Link>
           <div className="mt-4 [&>div]:w-full [&_button]:w-full [&_button]:justify-center">
             {initialViewer.isOwner

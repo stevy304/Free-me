@@ -8,6 +8,7 @@ import { MediaJobs, VideoBusy, type MediaJob } from './media/jobs';
 import { MediaError } from './media/probe';
 import { MEDIA_QUEUE, jobOptions } from './media/queue';
 import { createStorage } from './media/storage';
+import { Billing } from './billing/billing';
 
 /**
  * The media worker (server 4): transcodes uploads, moves media on visibility changes, deletes removed videos and
@@ -38,9 +39,15 @@ async function main() {
   await maintenance.upsertJobScheduler('flush-views', { every: 15_000 }, { name: 'flush-views' });
   await maintenance.upsertJobScheduler('stale-uploads', { every: 3600_000 }, { name: 'stale-uploads' });
   await maintenance.upsertJobScheduler('recover-stuck', { every: 15 * 60_000 }, { name: 'recover-stuck' });
+  // Money: check pending payments every minute; end memberships and share yesterday's ad revenue every 15 minutes.
+  const billing = new Billing(prisma, config);
+  await maintenance.upsertJobScheduler('billing-payments', { every: 60_000 }, { name: 'billing-payments' });
+  await maintenance.upsertJobScheduler('billing-daily', { every: 15 * 60_000 }, { name: 'billing-daily' });
   const media = new Queue(MEDIA_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
   const maint = new Worker('maintenance', async (job) => {
     if (job.name === 'stale-uploads') await jobs.cleanupStaleUploads();
+    else if (job.name === 'billing-payments') await billing.reconcile();
+    else if (job.name === 'billing-daily') { await billing.expirePremium(); const n = await billing.settleAds(); if (n) log.log(`Settled ${n} day(s) of ad revenue`); }
     else if (job.name === 'recover-stuck') {
       // One recovery job per video per hour at most (job ids are unique while the job exists).
       for (const id of await jobs.stuckVideos()) await media.add('transcode', { name: 'transcode', videoId: id }, { ...jobOptions('transcode'), jobId: `recover-${id}-${Math.floor(Date.now() / 3600_000)}` });

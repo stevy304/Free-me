@@ -7,7 +7,10 @@ export const VIDEO_TYPES: Record<string, string> = {
   '.mp4': 'video/mp4', '.m4v': 'video/x-m4v', '.mov': 'video/quicktime', '.mkv': 'video/x-matroska', '.webm': 'video/webm',
   '.avi': 'video/x-msvideo', '.wmv': 'video/x-ms-wmv', '.flv': 'video/x-flv', '.mpeg': 'video/mpeg', '.mpg': 'video/mpeg',
   '.3gp': 'video/3gpp', '.ts': 'video/mp2t', '.mts': 'video/mp2t',
+  // Podcasts and music: audio files become a video (the cover image with a moving waveform).
+  '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.flac': 'audio/flac',
 };
+export const AUDIO_EXTENSIONS = new Set(['.mp3', '.m4a', '.aac', '.wav', '.ogg', '.opus', '.flac']);
 
 /** Where a video's media belongs: private videos and removed videos behind signed links, the rest on the CDN. */
 export const wantedLocation = (v: { visibility: string; takenDownAt: Date | null }) => (v.visibility === 'PRIVATE' || v.takenDownAt ? 'PRIVATE' : 'PUBLIC') as 'PRIVATE' | 'PUBLIC';

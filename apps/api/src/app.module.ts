@@ -18,6 +18,7 @@ import { SiteController } from './health/site.controller';
 import { EngagementModule } from './engagement/engagement.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { TrustModule } from './trust/trust.module';
+import { BillingModule } from './billing/billing.module';
 
 @Module({})
 export class AppModule {
@@ -25,7 +26,7 @@ export class AppModule {
     return {
       module: AppModule,
       global: true,
-      imports: [DatabaseModule, CommonModule, MailModule, VideosModule, AuthModule, UsersModule, ChannelsModule, CatalogModule, AdminModule, EngagementModule, TrustModule, NotificationsModule],
+      imports: [DatabaseModule, CommonModule, MailModule, VideosModule, AuthModule, UsersModule, ChannelsModule, CatalogModule, AdminModule, EngagementModule, TrustModule, NotificationsModule, BillingModule],
       controllers: [HealthController, SiteController],
       providers: [
         { provide: APP_CONFIG, useValue: config },
