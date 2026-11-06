@@ -18,16 +18,16 @@ export const LADDER: Rung[] = [
   { name: '1440p', short: 1440, kbps: 9000 },
   { name: '2160p', short: 2160, kbps: 16000 },
 ];
-/**
- * Processing passes, so a video gets better quickly instead of all at once: SD first (watchable within seconds),
- * then HD up to 720p, then 1080p and above. Each pass decodes the source once for all its rungs.
- */
-export const FAST_RUNGS = new Set(['144p', '240p', '360p']);
+
 export const HD_RUNGS = new Set(['480p', '720p']);
 /** Rungs from 1080p up use TRANSCODE_PRESET_HIGH (faster by default): they cost the most CPU. */
 export const isHighRung = (r: Rung) => r.short >= 1080;
 
-export interface PlannedRung extends Rung { width: number; height: number; videoKbps: number; maxKbps: number }
+export interface PlannedRung extends Rung {
+  width: number; height: number; videoKbps: number; maxKbps: number;
+  /** The upload's own H.264 is used for this rung as it is (no re-encoding): its codec string and bitrate. */
+  copy?: { codecs: string; kbps: number };
+}
 
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 

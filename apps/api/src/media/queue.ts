@@ -5,17 +5,24 @@ import { APP_CONFIG, type AppConfig } from '../config/config';
 import { PrismaService } from '../database/prisma.service';
 import { RedisService } from '../database/redis.service';
 import { MediaJobs, type MediaJob } from './jobs';
+import { LocalChunks } from './chunks';
 import { createStorage, type Storage } from './storage';
 
 export const MEDIA_QUEUE = 'media';
 export const STORAGE = Symbol('STORAGE');
 
-/** Job options: transcodes retry twice; moves wait while a video is busy; deletes retry until done. */
-export function jobOptions(name: MediaJob['name']) {
+/**
+ * Job options: transcodes retry twice; moves wait while a video is busy; deletes retry until done. Upgrades (the
+ * higher qualities) have a lower priority: every waiting first job (making a video playable) runs before them.
+ */
+export function jobOptions(job: MediaJob) {
+  const { name, videoId } = job;
+  const encoding = name === 'transcode' || name === 'upgrade';
   return {
-    jobId: undefined as string | undefined,
-    attempts: name === 'transcode' ? 3 : 20,
-    backoff: { type: 'exponential' as const, delay: name === 'transcode' ? 30_000 : 5_000 },
+    deduplication: encoding ? { id: `${name}:${videoId}` } : undefined,
+    ...(name === 'upgrade' ? { priority: 10 } : {}),
+    attempts: encoding ? 3 : 20,
+    backoff: { type: 'exponential' as const, delay: encoding ? 30_000 : 5_000 },
     removeOnComplete: { age: 24 * 3600, count: 1000 },
     removeOnFail: { age: 7 * 24 * 3600 },
   };
@@ -36,12 +43,14 @@ export class MediaQueue implements OnModuleDestroy {
     // BullMQ does not close a connection it was given, so this service owns and closes it.
     this.connection = config.redisUrl ? new Redis(config.redisUrl, { maxRetriesPerRequest: null }) : null;
     this.queue = this.connection ? new Queue(MEDIA_QUEUE, { connection: this.connection, prefix: config.media.queuePrefix }) : null;
-    this.inline = this.queue ? null : new MediaJobs(prisma, storage, config, redis.client);
+    this.inline = this.queue ? null : new MediaJobs(prisma, storage, config, redis.client, null,
+      new LocalChunks(config.media.chunkConcurrency, { ffmpegPath: config.media.ffmpegPath, storage, scratchDir: config.media.scratchDir }));
     if (this.inline) this.log.warn('REDIS_URL is not set: media jobs run inside the API (development only).');
   }
 
   async add(job: MediaJob) {
-    if (this.queue) { await this.queue.add(job.name, job, jobOptions(job.name)); return; }
+    if (this.queue) { await this.queue.add(job.name, job, jobOptions(job)); return; }
+    if (job.name === 'transcode') this.log.log({ event: 'transcode_started', videoId: job.videoId, attempt: 1, queueWaitMs: 0 });
     void this.inline!.run(job, true).catch((e) => this.log.error(`${job.name} ${job.videoId}: ${(e as Error).message}`));
   }
 

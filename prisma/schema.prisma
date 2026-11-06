@@ -261,11 +261,14 @@ model Video {
   isShort               Boolean           @default(false)
   /// Made from a sound file (a podcast or music): the cover image with a waveform.
   isPodcast             Boolean           @default(false)
+  /// An ad uploaded in Ad Studio: unlisted, never in feeds, search or the Space's videos.
+  isAd                  Boolean           @default(false)
   madeForKids           Boolean           @default(false)
   processingProgress    Int               @default(0)   // 0-100
   processingStage       String?           // "Uploading", "SD ready", "HD processing", ...
   processingError       String?
   mediaLocation         MediaLocation     @default(PRIVATE)
+  uploadPartBytes       BigInt?           // negotiated size for resumable uploads
   uploadId              String?           // multipart upload in progress
   sourceSizeBytes       BigInt?
   monetizationEnabled   Boolean           @default(false)
@@ -852,6 +855,8 @@ model Payment {
   campaignId            String?
   campaign              Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   phone                 String?
+  /// Manual payments: the transaction id the payer sent from their MoMo / bank message.
+  payerReference        String?
   checkoutUrl           String?
   failureReason         String?
   createdAt             DateTime          @default(now())
@@ -907,4 +912,12 @@ model LiveStream {
 
   @@index([status, startedAt])
   @@index([channelId, createdAt])
+}
+
+// Settings administrators change from the app (payment methods and prices). Secrets are encrypted.
+model AppSetting {
+  key                   String            @id
+  value                 Json
+  updatedBy             String?
+  updatedAt             DateTime          @updatedAt
 }

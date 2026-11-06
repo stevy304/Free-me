@@ -150,6 +150,11 @@ as it is). The worker sends its updates (processing, payments) through Redis too
 ## Scaling
 
 - **More uploads at once:** add media servers (`ROLE=media`), all pulling from the same queue. Each runs `WORKER_CONCURRENCY` videos at a time (default 2; one per 2–4 cores). Uploads go straight from the browser to object storage in parts, so the application servers carry no upload traffic.
+- **New uploads first:** processing is two jobs. The first makes a video playable (360p, thumbnails, seek previews); the second adds 480p and up at a lower priority, so a new upload never waits behind another video's 1080p or 4K. Measured with one busy worker: a second upload was playable after 13 s instead of about 55 s.
+- **Long videos on several servers:** a video of 2 minutes or more is cut into 30-second pieces (`CHUNK_SECONDS`) on the `media-chunks` queue. Every media server takes pieces, so adding a server shortens long videos, not only the queue. Pieces made on another server travel through object storage under `tmp/chunks/` and are deleted when joined; add a lifecycle rule on the bucket that expires `tmp/` after 1 day, for pieces left by a crashed server. Background pieces (higher qualities) run at a lower CPU priority, so new uploads stay quick. Measured on one machine split into two 2-core "servers": a 150-second 1080p video was playable in 21 s instead of 33 s and fully ready in 100 s instead of 155 s; one server alone stays the same (157 s vs 155 s).
+- **Smaller uploads from phones:** in browsers that can encode H.264 (Chrome, Edge, Safari 16.4+, Android), a video over 20 MB whose bitrate is well above what viewers need is first made smaller in the browser (1080p at 6 Mbps, keyframes every 2 s, sound copied), typically 2–5× less data to send. The server then copies that H.264 as the top quality instead of encoding it again. HDR videos, very long ones (more than about 450 MB after compressing), and browsers without an H.264 encoder upload the original, as before. The creator can choose "Upload the original instead" while it runs.
+- **No re-encoding when not needed:** a suitable H.264 upload keeps its own top quality (`COPY_TOP_RUNG`). On a 60-second 1080p camera file the 1080p step went from 10.8 s to 0.6 s.
+- **Fast start for viewers:** the first segments are 1 second long, the player downloads the first one while it sets up, the page opens its connection to the CDN early, and the start of the next video is loaded near the end of the current one. Caddy serves HTTP/3 by default (UDP 443 is open in the firewall).
 - **Faster processing per video:** a video gets better in three steps: SD (144p–360p, watchable), then HD (480p, 720p), then 1080p and above. On 4 cores a 60-second 1080p video was playable after 14 s, in 720p after 29 s and in 1080p after 41 s. Processing time grows with length and with the number of cores: a server with twice the cores is about twice as fast, and a GPU (`VIDEO_ENCODER=nvenc` or `qsv`) is several times faster again. The worker log prints how long each step took. `TRANSCODE_PRESET` (default `veryfast`) and `TRANSCODE_PRESET_HIGH` (1080p+, default `superfast`) trade speed for file size.
 - **More viewers:** almost all traffic is video segments from the CDN, which scales by itself. Add application servers behind Caddy for pages, the API and WebSockets; they share Redis and the database. Put PgBouncer in front of PostgreSQL when you pass a few hundred API connections, and a read replica when the database CPU stays above 60%.
 - **Measure before you promise:** `deploy/loadtest/watch.js` (k6) ramps to a number of simultaneous viewers who open pages and play videos as a player would. Run it at 500, then 2,000, then your launch target, and add servers where it shows a limit.
@@ -171,3 +176,18 @@ Free Go Live supports a host and two invited guests. Premium Studio allows six g
 Guests need an authenticated Free Me account and a private invitation link. Enable the Socket.IO Redis adapter for signaling across API nodes. Direct WebRTC connections use STUN by default. For networks that require relaying, set `LIVE_TURN_URLS` to your comma-separated coturn addresses and set `LIVE_TURN_SECRET` to the coturn `static-auth-secret` on each API node. The API signs temporary credentials. Keep the shared secret on the servers.
 
 Browser composition applies to browser broadcasts. External encoders still supply their own composed program feed through Premium RTMP.
+
+## Upload and playback timing
+
+With JSON logging enabled, match the API and worker events by `videoId`.
+
+| Event | What it measures |
+| --- | --- |
+| `upload_completed` | Browser bytes acknowledged and average bytes per second during active transfer runs, including signing and retry delays. Pauses, bytes resumed from an earlier tab, and server finalization are separate. `finalizeMs` measures server-side assembly and verification. |
+| `transcode_started` | `queueWaitMs` measures time since enqueue. Use attempt 1 for initial queue wait. On later attempts the value includes earlier attempts and backoff. The inline development worker reports zero. |
+| `video_first_playable` | `processingToPlayableMs` runs from worker processing start through publication of the first playable HLS renditions. The event also records download, probe, screening, thumbnail, loudness, SD encode, and SD publish timings. Thumbnail and loudness timings overlap. |
+| `video_storyboard_ready` | `storyboardMs` measures generating seek previews after playback is available. |
+
+The browser records the separate `free-me:play-to-playing` User Timing measure from the first play event to the first playing event for a source. Inspect it in the browser Performance panel. It measures viewer startup and stays in that browser.
+
+Uploads start with four concurrent parts. On sufficiently large files, the browser samples acknowledged throughput, tries up to six, and returns to the previous setting if the gain is under 10%. Retries reduce concurrency to a minimum of two. Use the API's transfer rate, retries, and peak concurrency to compare similar file sizes and network conditions.

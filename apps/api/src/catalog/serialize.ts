@@ -8,7 +8,7 @@ export const videoCard = (v: Video & { channel: Channel }, urls: MediaUrls) => (
   channel: { handle: v.channel.handle, name: v.channel.name, avatarUrl: v.channel.avatarUrl, isVerified: v.channel.isVerified },
 });
 
-export const PUBLIC_VIDEO = { status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', publishedAt: { not: null }, takenDownAt: null } as const;
+export const PUBLIC_VIDEO = { status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', publishedAt: { not: null }, takenDownAt: null, isAd: false } as const;
 
 /** Videos anyone with the link may watch: public or unlisted, ready, not removed. */
 export const LINKED_VIDEO: Prisma.VideoWhereInput = { status: 'READY', visibility: { in: ['PUBLIC', 'UNLISTED'] }, takenDownAt: null };

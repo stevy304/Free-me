@@ -128,6 +128,9 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
 
   // A business: its ad is one of its own short videos.
   const biz = await creator('shop@example.com', 'shop');
+  // Ad Studio is part of Premium.
+  await biz.post('/api/ads/campaigns').set('Origin', WEB).send({}).expect(400);
+  await new Billing(ctx.prisma as never, ctx.config).grantPremium((await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'shop@example.com' } })).id, 1);
   const shopCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'shop' } });
   const adVideo = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Our shop', durationSeconds: 20, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
   const tooLong = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Long', durationSeconds: 300, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
@@ -146,7 +149,7 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   expect((await request(ctx.http).get(`/api/videos/${short.id}/ads`).expect(200)).body.slots).toEqual([]);
 
   const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
-  expect((await admin.get('/api/admin/billing').expect(200)).body).toMatchObject({ premiumMembers: 1, waiting: { adReviews: 1 }, last30Days: { adsUsdCents: 2100 } });
+  expect((await admin.get('/api/admin/billing').expect(200)).body).toMatchObject({ premiumMembers: 2, waiting: { adReviews: 1 }, last30Days: { adsUsdCents: 2100 } });
   await maker.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(403);
   await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(200);
 
@@ -186,4 +189,52 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   expect((await maker.get('/api/hub/monetisation').expect(200)).body.balance.availableCents).toBe(180);
   const again = (await maker.post('/api/hub/monetisation/payouts').set('Origin', WEB).send({ phone: '0788555444', accountHolderName: 'Maker Name' }).expect(201)).body.payout;
   expect((await admin.post(`/api/admin/billing/payouts/${again.id}`).set('Origin', WEB).send({ action: 'paid', reference: 'MOMO-778899' }).expect(200)).body.payout).toMatchObject({ status: 'PAID', reference: 'MOMO-778899' });
+});
+
+test('payment settings in the app: manual payments confirmed by an administrator; secrets stored encrypted; administrators have every Premium feature', async () => {
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  const buyer = await creator('buyer@example.com', 'buyer');
+  await buyer.get('/api/admin/billing/settings').expect(403);
+
+  // Administrators can use Premium features (Live Studio) without a membership.
+  expect((await admin.get('/api/me').expect(200)).body.premium).toMatchObject({ active: true, admin: true });
+  await admin.post('/api/channels').set('Origin', WEB).send({ handle: 'boss', name: 'Boss' }).expect(201);
+  expect((await admin.get('/api/hub/live').expect(200)).body.premium).toBe(true);
+
+  // Manual payments: needs at least one complete account.
+  await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ manual: { enabled: true, currency: 'RWF', perUsd: 1450, accounts: [] } }).expect(400);
+  const saved = (await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({
+    prices: { premiumUsdCents: 800 },
+    manual: { enabled: true, currency: 'RWF', perUsd: 1450, accounts: [{ label: 'MTN MoMo', number: '0788 000 111', name: 'Free Me Ltd' }], instructions: 'Confirmed within 2 hours.' },
+  }).expect(200)).body;
+  expect(saved).toMatchObject({ prices: { premiumUsdCents: 800 }, manual: { active: true, accounts: [{ label: 'MTN MoMo' }] } });
+  const plans = (await request(ctx.http).get('/api/billing/plans').expect(200)).body;
+  expect(plans.premium.usdCents).toBe(800);
+  expect(plans.methods).toContainEqual({ name: 'manual', currency: 'RWF', perUsd: 1450, accounts: [{ label: 'MTN MoMo', number: '0788 000 111', name: 'Free Me Ltd' }], instructions: 'Confirmed within 2 hours.' });
+
+  // The buyer pays by hand: a reference code, then the transaction id; an administrator confirms.
+  const pay = (await buyer.post('/api/billing/premium').set('Origin', WEB).send({ method: 'manual', months: 1 }).expect(201)).body.payment;
+  expect(pay).toMatchObject({ method: 'manual', status: 'PENDING', amount: '11600', currency: 'RWF', usdCents: 800, reference: expect.stringMatching(/^FM-[A-Z2-9]{6}$/) });
+  await buyer.post(`/api/billing/payments/${pay.id}/proof`).set('Origin', WEB).send({ reference: '1' }).expect(400);
+  expect((await buyer.post(`/api/billing/payments/${pay.id}/proof`).set('Origin', WEB).send({ reference: 'MP231106.1234.A56789' }).expect(200)).body.payment.payerReference).toBe('MP231106.1234.A56789');
+  // The worker does not decide manual payments.
+  await new Billing(ctx.prisma as never, ctx.config).reconcile();
+  expect((await buyer.get(`/api/billing/payments/${pay.id}`).expect(200)).body.payment.status).toBe('PENDING');
+  const queue = (await admin.get('/api/admin/billing/manual').expect(200)).body.payments;
+  expect(queue).toEqual([expect.objectContaining({ id: pay.id, email: 'buyer@example.com', payerReference: 'MP231106.1234.A56789' })]);
+  await admin.post(`/api/admin/billing/payments/${pay.id}/confirm`).set('Origin', WEB).send({ approve: false }).expect(400);
+  expect((await admin.post(`/api/admin/billing/payments/${pay.id}/confirm`).set('Origin', WEB).send({ approve: true }).expect(200)).body.payment.status).toBe('SUCCEEDED');
+  expect((await buyer.get('/api/me').expect(200)).body).toMatchObject({ premium: { active: true }, channel: { isVerified: true } });
+  await admin.post(`/api/admin/billing/payments/${pay.id}/confirm`).set('Origin', WEB).send({ approve: true }).expect(400);
+
+  // MoMo keys entered in the app (live address), checked with the provider, stored encrypted, shown masked.
+  const base = ctx.config.billing.momo!.baseUrl;
+  const mo = (await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ momo: { enabled: true, sandbox: false, baseUrl: base, targetEnvironment: 'mtnrwanda', subscriptionKey: 'sub-1', apiUser: 'user-1', apiKey: 'key-1', currency: 'RWF', perUsd: 1400 } }).expect(200)).body.momo;
+  expect(mo).toMatchObject({ source: 'app', active: true, subscriptionKey: '••••ub-1', apiKey: '••••ey-1', perUsd: 1400 });
+  const row = await ctx.prisma.appSetting.findUniqueOrThrow({ where: { key: 'billing' } });
+  expect(JSON.stringify(row.value)).not.toContain('key-1');
+  expect((await admin.post('/api/admin/billing/settings/test').set('Origin', WEB).send({}).expect(200)).body.momo).toEqual({ ok: true, message: 'Connected.' });
+  // Leaving secrets empty keeps them.
+  await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ momo: { enabled: true, sandbox: false, baseUrl: base, currency: 'RWF', perUsd: 1500 } }).expect(200);
+  expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.methods.find((m: any) => m.name === 'mtn_momo')).toMatchObject({ currency: 'RWF', perUsd: 1500 });
 });

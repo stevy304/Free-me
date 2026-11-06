@@ -64,19 +64,19 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 
 | Method | Path | Description |
 | --- | --- | --- |
-| POST | `/uploads` | `{ fileName, sizeBytes }`: creates a private draft video and a multipart upload; `{ videoId, partSize, partCount }`. Video formats only; up to `MAX_UPLOAD_MB` |
+| POST | `/uploads` | `{ fileName, sizeBytes, ad? }`: creates a private draft video (with `ad: true`, Premium only: an unlisted ad video for Ad Studio, never in feeds or the Space) and a multipart upload; `{ videoId, partSize, partCount }`. Video formats only; up to `MAX_UPLOAD_MB` |
 | POST | `/uploads/:id/parts` | `{ partNumbers }` (up to 100): signed addresses to `PUT` each part to (valid 1 hour). Each response's `ETag` header is the part's tag |
 | GET | `/uploads/:id` | Parts already stored, for resuming |
-| POST | `/uploads/:id/complete` | `{ parts: [{ partNumber, etag }] }`: assembles the file, checks its size and queues processing |
+| POST | `/uploads/:id/complete` | `{}`: reads the parts from storage, assembles the file, checks its size and queues processing. Optional `transfer: { bytes, durationMs, retries, peakParallel }` reports browser transfer timing. The legacy `parts` manifest is also accepted |
 | DELETE | `/uploads/:id` | Cancels an unfinished upload |
 
 ## Creator Hub (creators) 🔒
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/hub/videos?cursor=` | My videos in every state: processing progress and stage, errors, renditions, thumbnails (signed when private), likes, dislikes (only the creator sees these), comments, removal |
+| GET | `/hub/videos?cursor=&ads=` | My videos in every state (`ads=true`: my ad videos instead, for Ad Studio): processing progress and stage, errors, renditions, thumbnails (signed when private), likes, dislikes (only the creator sees these), comments, removal |
 | GET | `/hub/videos/:id` | One of my videos |
-| PATCH | `/hub/videos/:id` | `title`, `description`, `visibility` (PUBLIC, UNLISTED, PRIVATE), `category` (slug), `tags`, `language`, `madeForKids`, `commentsEnabled`, `thumbnail` (0–2: a generated frame). Publishing sets the publish date; visibility changes move the media |
+| PATCH | `/hub/videos/:id` | `title`, `description`, `visibility` (PUBLIC, UNLISTED, PRIVATE), `category` (slug), `tags`, `language`, `madeForKids`, `commentsEnabled`, `thumbnail` (0–2: a generated frame). An ad video cannot be made Public. Publishing sets the publish date; visibility changes move the media |
 | PUT | `/hub/videos/:id/thumbnail` | Body: a JPEG, PNG or WebP image (up to 2 MB), checked by its bytes |
 | PUT | `/hub/videos/:id/captions/:lang` | Body: a WebVTT or SubRip (.srt) file, up to 1 MB. Cleaned to WebVTT (times normalised; markup other than `<b>`, `<i>`, `<u>` removed). Replaces captions in that language, automatic ones included. `:lang` from the language list |
 | DELETE | `/hub/videos/:id/captions/:lang` | Removes captions in one language |
@@ -176,7 +176,7 @@ Premium gives the verified badge (`channel.isVerified`), which goes when the mem
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/ads/campaigns` 🔒 | My campaigns with `impressions` and `clicks` |
-| POST | `/ads/campaigns` 🔒 | `{ businessName, country, headline, destinationUrl (https), videoId (my own video, Public or Unlisted, 5–90 s), days (1–90), targetCountries? }`: a draft |
+| POST | `/ads/campaigns` 🔒 Premium | `{ businessName, country, headline, destinationUrl (https), videoId (my own video, Public or Unlisted, 5–90 s), days (1–90), targetCountries? }`: a draft |
 | POST | `/ads/campaigns/:id/pay` 🔒 | `{ method, phone? }`: pay a draft (days × the daily price); then it waits for review |
 | POST | `/ads/campaigns/:id/pause` 🔒 | Pause or resume a running campaign |
 | DELETE | `/ads/campaigns/:id` 🔒 | Delete an unpaid draft |

@@ -24,6 +24,9 @@ const label = (h: number, w: number) => `${Math.min(h, w)}p`;
  * after real watching (30 s, or half of a short video). `startAt` resumes where the viewer stopped; `onProgress` is
  * called every 10 seconds of playback, on pause, at the end and when the page is left, to remember the position.
  */
+/** How long autoplay waits to learn whether an ad plays first. */
+const ADS_WAIT_MS = 1500;
+
 export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange, storyboard, captions = [], withAds = false }: {
   src: string; poster?: string | null; videoId?: string; durationHint?: number; autoPlay?: boolean; theater?: boolean; onTheater?: () => void; onEnded?: () => void;
   startAt?: number; onProgress?: (seconds: number, ended: boolean) => void; onPlayingChange?: (playing: boolean) => void;
@@ -37,6 +40,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const box = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const hls = useRef<Hls | null>(null);
+  const firstPlay = useRef<{ started: number | null; measured: boolean }>({ started: null, measured: false });
   const [playing, setPlaying] = useState(false);
   const [waiting, setWaiting] = useState(true);
   const [time, setTime] = useState(0);
@@ -66,17 +70,22 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const [adSlots, setAdSlots] = useState<AdSlot[]>([]);
   const [ad, setAd] = useState<AdSlot | null>(null);
   const adsPlayed = useRef(new Set<number>());
+  // Autoplay waits for this: the ad before the video (if any) plays first, so the video never flashes on before it.
+  // Never more than ADS_WAIT_MS, so a slow answer costs a moment, not the start.
+  const adsReady = useRef<Promise<void>>(Promise.resolve());
+  const preRoll = useRef(false);
   useEffect(() => {
-    setAdSlots([]); setAd(null); adsPlayed.current = new Set();
-    if (!withAds || !videoId) return;
+    setAdSlots([]); setAd(null); adsPlayed.current = new Set(); preRoll.current = false;
+    if (!withAds || !videoId) { adsReady.current = Promise.resolve(); return; }
     let off = false;
-    fetch(`/api/videos/${videoId}/ads`, { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : { slots: [] })).then((j: { slots: AdSlot[] }) => {
+    const fetched = fetch(`/api/videos/${videoId}/ads`, { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : { slots: [] })).then((j: { slots: AdSlot[] }) => {
       if (off || !j.slots?.length) return;
       setAdSlots(j.slots);
       const pre = j.slots.find((x) => x.at === 0);
-      if (pre && (video.current?.currentTime ?? 0) < 3 && !(startAt > 0)) { video.current?.pause(); adsPlayed.current.add(0); setAd(pre); }
+      if (pre && (video.current?.currentTime ?? 0) < 3 && !(startAt > 0)) { video.current?.pause(); adsPlayed.current.add(0); preRoll.current = true; setAd(pre); }
       else if (pre) adsPlayed.current.add(0); // resuming part-way: no ad before
     }).catch(() => undefined);
+    adsReady.current = Promise.race([fetched, new Promise<void>((done) => setTimeout(done, ADS_WAIT_MS))]);
     return () => { off = true; };
   }, [videoId, withAds]); // eslint-disable-line react-hooks/exhaustive-deps
   const adDone = () => { setAd(null); video.current?.play().catch(() => undefined); };
@@ -110,6 +119,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   // Source: native HLS on Safari/iOS, hls.js elsewhere.
   useEffect(() => {
     const el = video.current!;
+    firstPlay.current = { started: null, measured: false };
     setError(null); setLevels([]); setLevel(-1); reported.current = false; watched.current = 0;
     const v = Number(store.get('fm_volume') ?? '1'); const m = store.get('fm_muted') === '1';
     el.volume = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1; el.muted = m; setVolume(el.volume); setMuted(m);
@@ -120,7 +130,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
       import('hls.js').then(({ default: H }) => {
         if (cancelled) return;
         if (!H.isSupported()) { setError('This browser cannot play this video.'); return; }
-        const h = new H({ capLevelToPlayerSize: true, startLevel: -1, maxBufferLength: 30, backBufferLength: 60 });
+        // startFragPrefetch: the first segment downloads while the player is still setting up.
+        const h = new H({ capLevelToPlayerSize: true, startLevel: -1, startFragPrefetch: true, maxBufferLength: 30, backBufferLength: 60 });
         hls.current = h;
         h.on(H.Events.MANIFEST_PARSED, () => setLevels(h.levels.map((l, index) => ({ index, height: l.height, width: l.width, label: label(l.height, l.width) })).reverse()));
         h.on(H.Events.LEVEL_SWITCHED, (_e, d) => { const l = h.levels[d.level]; setPlayingLevel(l ? Math.min(l.height, l.width) : null); });
@@ -135,7 +146,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
         h.loadSource(src); h.attachMedia(el);
       });
     }
-    if (autoPlay) el.play().catch(() => { el.muted = true; setMuted(true); el.play().catch(() => undefined); });
+    const start = () => { if (!cancelled && !preRoll.current) el.play().catch(() => { el.muted = true; setMuted(true); el.play().catch(() => undefined); }); };
+    if (autoPlay) { if (withAds) void adsReady.current.then(start); else start(); }
     return () => { cancelled = true; hls.current?.destroy(); hls.current = null; el.removeAttribute('src'); el.load(); };
   }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -234,7 +246,20 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     <div ref={box} onMouseMove={poke} onMouseLeave={() => playing && setIdle(true)}
       className={`group relative aspect-video w-full select-none overflow-hidden bg-black ${full ? '' : 'sm:rounded-[24px]'} ${showUi ? '' : 'cursor-none'}`}>
       <video ref={video} playsInline poster={poster ?? undefined} className="h-full w-full" onPointerUp={onTap} onClick={(e) => { if ((e.nativeEvent as PointerEvent).pointerType === 'touch') return; toggle(); }} onDoubleClick={(e) => { if ((e.nativeEvent as PointerEvent).pointerType === 'touch') return; fullscreen(); }}
-        onPlay={() => setPlaying(true)} onPause={() => { setPlaying(false); save(); }} onWaiting={() => setWaiting(true)} onPlaying={() => setWaiting(false)} onCanPlay={() => setWaiting(false)}
+        onPlay={() => {
+          firstPlay.current.started ??= performance.now();
+          setPlaying(true);
+        }} onPause={() => {
+          if (!firstPlay.current.measured) firstPlay.current.started = null;
+          setPlaying(false); save();
+        }} onWaiting={() => setWaiting(true)} onPlaying={() => {
+          setWaiting(false);
+          const { started, measured } = firstPlay.current;
+          if (started !== null && !measured) {
+            performance.measure('free-me:play-to-playing', { start: started });
+            firstPlay.current.measured = true;
+          }
+        }} onCanPlay={() => setWaiting(false)}
         onTimeUpdate={onTime} onDurationChange={(e) => setDuration(e.currentTarget.duration)} onEnded={() => { setPlaying(false); save(true); onEnded?.(); }}
         onVolumeChange={(e) => { setMuted(e.currentTarget.muted); setVolume(e.currentTarget.volume); }}>
         {captions.map((c) => <track key={c.language} kind="subtitles" src={c.url} srcLang={c.language} label={captionLabel(c)} />)}

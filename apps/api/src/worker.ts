@@ -2,7 +2,8 @@ import { MailService } from './mail/mail.service';
 import 'reflect-metadata';
 import { ConsoleLogger, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
-import { Queue, UnrecoverableError, Worker } from 'bullmq';
+import { Queue, QueueEvents, UnrecoverableError, Worker } from 'bullmq';
+import { CHUNK_QUEUE, QueueChunks, runChunk, type ChunkResult, type ChunkTask } from './media/chunks';
 import Redis from 'ioredis';
 import { ConfigError, loadConfig } from './config/config';
 import { MediaJobs, VideoBusy, type MediaJob } from './media/jobs';
@@ -30,9 +31,20 @@ async function main() {
   // Instant updates from the worker (processing progress, notifications, payments) reach browsers through Redis.
   const emitter = new Emitter(new Redis(config.redisUrl));
   setRealtimeSink((r, event, data) => emitter.to(r).emit(event, data));
-  const jobs = new MediaJobs(prisma, createStorage(config), config, new Redis(config.redisUrl));
+  // Follow-up jobs (higher qualities) go back on the queue, behind every waiting upload's first job.
+  // Long videos are encoded in pieces: every worker (this one included) takes pieces from the chunk queue.
+  const storage = createStorage(config);
+  const chunkQueue = new Queue<ChunkTask>(CHUNK_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
+  const chunkEvents = new QueueEvents(CHUNK_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
+  const jobs = new MediaJobs(prisma, storage, config, new Redis(config.redisUrl), async (next) => { await media.add(next.name, next, jobOptions(next)); }, new QueueChunks(chunkQueue, chunkEvents));
+  const chunkWorker = new Worker<ChunkTask, ChunkResult>(CHUNK_QUEUE, (job, _token, signal) => runChunk(job.data, { ffmpegPath: config.media.ffmpegPath, storage, scratchDir: config.media.scratchDir }, signal),
+    { connection: connection(), prefix: config.media.queuePrefix, concurrency: config.media.chunkConcurrency, lockDuration: 60_000 });
+  chunkWorker.on('failed', (j, e) => log.warn(`piece ${j?.data.index} of ${j?.data.videoId} attempt ${j?.attemptsMade}: ${e.message.slice(0, 300)}`));
 
   const worker = new Worker<MediaJob>(MEDIA_QUEUE, async (job, _token, signal) => {
+    if (job.data.name === 'transcode' || job.data.name === 'upgrade') {
+      log.log({ event: job.data.name === 'upgrade' ? 'upgrade_started' : 'transcode_started', videoId: job.data.videoId, attempt: job.attemptsMade + 1, queueWaitMs: Math.max(0, (job.processedOn ?? Date.now()) - job.timestamp) });
+    }
     try { await jobs.run(job.data, job.attemptsMade + 1 >= (job.opts.attempts ?? 1), signal); }
     catch (e) {
       if (e instanceof MediaError) throw new UnrecoverableError(e.message); // a bad file: retrying will not help
@@ -46,7 +58,7 @@ async function main() {
   const maintenance = new Queue('maintenance', { connection: connection(), prefix: config.media.queuePrefix });
   await maintenance.upsertJobScheduler('flush-views', { every: 15_000 }, { name: 'flush-views' });
   await maintenance.upsertJobScheduler('stale-uploads', { every: 3600_000 }, { name: 'stale-uploads' });
-  await maintenance.upsertJobScheduler('recover-stuck', { every: 15 * 60_000 }, { name: 'recover-stuck' });
+  await maintenance.upsertJobScheduler('recover-stuck', { every: 5 * 60_000 }, { name: 'recover-stuck' });
   // Money: check pending payments every minute; end memberships and share yesterday's ad revenue every 15 minutes.
   const billing = new Billing(prisma, config);
   const mail = new MailService(config);
@@ -59,15 +71,18 @@ async function main() {
     if (job.name === 'stale-uploads') await jobs.cleanupStaleUploads();
     else if (job.name === 'caption-backfill') {
       for (const { id } of await jobs.captionBackfillCandidates()) {
-        await media.add('caption', { name: 'caption', videoId: id }, { ...jobOptions('caption'), jobId: `caption-${id}`, priority: 100, attempts: 3 });
+        await media.add('caption', { name: 'caption', videoId: id }, { ...jobOptions({ name: 'caption', videoId: id }), jobId: `caption-${id}`, priority: 100, attempts: 3 });
       }
     }
     else if (job.name === 'billing-receipts') await billing.sendReceipts(mail);
     else if (job.name === 'billing-payments') await billing.reconcile();
     else if (job.name === 'billing-daily') { await billing.expirePremium(); const n = await billing.settleAds(); if (n) log.log(`Settled ${n} day(s) of ad revenue`); }
     else if (job.name === 'recover-stuck') {
-      // One recovery job per video per hour at most (job ids are unique while the job exists).
-      for (const id of await jobs.stuckVideos()) await media.add('transcode', { name: 'transcode', videoId: id }, { ...jobOptions('transcode'), jobId: `recover-${id}-${Math.floor(Date.now() / 3600_000)}` });
+      // A playable video that stopped before its higher qualities only needs the second job.
+      for (const { id: videoId, playable } of await jobs.stuckVideos()) {
+        const job = { name: playable ? 'upgrade' : 'transcode', videoId } as const;
+        await media.add(job.name, job, jobOptions(job));
+      }
     } else await jobs.views.flush();
   }, { connection: connection(), prefix: config.media.queuePrefix, concurrency: 1 });
 
@@ -85,13 +100,16 @@ async function main() {
         let sync = syncs.get(s.id);
         if (!sync) { sync = new LiveSync(liveStorage, s.id, join(liveDir, s.id)); syncs.set(s.id, sync); }
         if (s.status === 'LIVE') await sync.tick().catch((e) => log.warn(`live ${s.id}: ${(e as Error).message}`));
-        else { syncs.delete(s.id); await finishLive(prisma, liveStorage, sync, (videoId) => media.add('transcode', { name: 'transcode', videoId }, jobOptions('transcode')).then(() => undefined), log, config.media.ffmpegPath); }
+        else { syncs.delete(s.id); await finishLive(prisma, liveStorage, sync, async (videoId) => {
+          const transcode = { name: 'transcode', videoId } as const;
+          await media.add(transcode.name, transcode, jobOptions(transcode));
+        }, log, config.media.ffmpegPath); }
       }
     } catch (e) { log.warn(`live: ${(e as Error).message}`); } finally { liveBusy = false; }
   }, 1500) : null;
 
   log.log(`Media worker running (concurrency ${config.media.workerConcurrency}, storage ${config.media.driver}, preset ${config.media.preset})`);
-  const stop = async () => { log.log('Stopping…'); if (liveTimer) clearInterval(liveTimer); await Promise.allSettled([worker.close(), maint.close(), maintenance.close(), media.close()]); await prisma.$disconnect(); process.exit(0); };
+  const stop = async () => { log.log('Stopping…'); if (liveTimer) clearInterval(liveTimer); await Promise.allSettled([worker.close(), maint.close(), maintenance.close(), media.close(), chunkWorker.close(), chunkQueue.close(), chunkEvents.close()]); await prisma.$disconnect(); process.exit(0); };
   process.on('SIGTERM', stop); process.on('SIGINT', stop);
 }
 

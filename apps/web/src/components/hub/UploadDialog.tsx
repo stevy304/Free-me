@@ -93,12 +93,13 @@ export function UploadDialog() {
     const pct = snap.total ? Math.floor((snap.sent / snap.total) * 100) : 0;
     if (snap.state === 'error') status = <span className="flex items-center gap-2 text-danger"><Icon.Warning size={16} />{snap.error}</span>;
     else if (snap.state === 'cancelled') status = 'Upload cancelled';
-    else if (snap.state !== 'done') status = <span className="tabular-nums">{snap.state === 'paused' ? 'Paused' : snap.state === 'finishing' ? 'Finishing upload…' : `Uploading ${pct}%`} · {formatBytes(snap.sent)} of {formatBytes(snap.total)}{snap.state === 'uploading' && snap.bytesPerSecond ? ` · ${formatBytes(snap.bytesPerSecond)}/s · ${formatEta(snap.secondsLeft)}` : ''}</span>;
+    else if (snap.state === 'compressing') status = <span className="tabular-nums">Making it smaller to save data · {Math.floor((snap.compress?.progress ?? 0) * 100)}% of {formatBytes(snap.compress?.originalBytes ?? snap.total)}</span>;
+    else if (snap.state !== 'done') status = <span className="tabular-nums">{snap.state === 'paused' ? 'Paused' : snap.state === 'finishing' ? 'Finishing upload…' : snap.state === 'starting' ? 'Starting…' : `Uploading ${pct}%`} · {formatBytes(snap.sent)} of {formatBytes(snap.total)}{snap.compress?.savedBytes ? ` (was ${formatBytes(snap.compress.originalBytes)})` : ''}{snap.state === 'uploading' && snap.bytesPerSecond ? ` · ${formatBytes(snap.bytesPerSecond)}/s · ${formatEta(snap.secondsLeft)}` : ''}</span>;
     else if (video?.status === 'FAILED') status = <span className="flex items-center gap-2 text-danger"><Icon.Warning size={16} />{video.processingError}</span>;
     else if (video?.processingStage === 'Ready') status = <span className="flex items-center gap-2 text-brand"><Icon.CheckCircle size={16} />Processing complete · {video.renditions.at(-1)}</span>;
     else status = <span className="tabular-nums">Upload complete · {video?.processingStage ?? 'Processing'} {video ? `${video.processingProgress}%` : ''}</span>;
   }
-  const bar = snap ? (snap.state === 'done' ? (video?.processingProgress ?? 0) : snap.total ? (snap.sent / snap.total) * 100 : 0) : 0;
+  const bar = snap ? (snap.state === 'done' ? (video?.processingProgress ?? 0) : snap.state === 'compressing' ? (snap.compress?.progress ?? 0) * 100 : snap.total ? (snap.sent / snap.total) * 100 : 0) : 0;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-0 sm:p-6" role="dialog" aria-modal="true" aria-label="Upload video">
@@ -154,7 +155,7 @@ export function UploadDialog() {
                 </div>
                 <div className="space-y-2 p-3 text-[13px]">
                   {video && <div><p className="text-muted">Video link</p>{video.status === 'READY' ? <Link href={`/watch?v=${video.id}`} target="_blank" className="flex items-center gap-1 break-all text-brand">/watch?v={video.id}<Icon.ExternalLink size={13} /></Link> : <p className="break-all text-faint">/watch?v={video.id}</p>}</div>}
-                  <div><p className="text-muted">File</p><p className="break-all">{item.upload.file.name} · {formatBytes(item.upload.file.size)}</p></div>
+                  <div><p className="text-muted">File</p><p className="break-all">{item.upload.original.name} · {formatBytes(item.upload.original.size)}{item.upload.file !== item.upload.original ? ` · sending a ${formatBytes(item.upload.file.size)} copy` : ''}</p></div>
                 </div>
               </div>
             </aside>
@@ -167,9 +168,10 @@ export function UploadDialog() {
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[13px] text-muted">
               <span className="min-w-0">{status}</span>
               <span className="flex gap-2">
+                {snap.state === 'compressing' && <button type="button" onClick={() => item!.upload.skipCompression()} className="flex items-center gap-1 rounded-full px-3 py-1 hover:bg-surface">Upload the original instead</button>}
                 {snap.state === 'uploading' && <button type="button" onClick={() => item!.upload.pause()} className="flex items-center gap-1 rounded-full px-3 py-1 hover:bg-surface"><Icon.Pause size={14} />Pause</button>}
                 {(snap.state === 'paused' || snap.state === 'error') && <button type="button" onClick={() => item!.upload.resume()} className="flex items-center gap-1 rounded-full px-3 py-1 text-brand hover:bg-surface"><Icon.Play size={14} />Resume</button>}
-                {snap.state !== 'done' && snap.state !== 'cancelled' && <button type="button" onClick={() => void item!.upload.cancel()} className="rounded-full px-3 py-1 hover:bg-surface">Cancel upload</button>}
+                {snap.state !== 'done' && snap.state !== 'cancelled' && snap.state !== 'finishing' && <button type="button" onClick={() => void item!.upload.cancel()} className="rounded-full px-3 py-1 hover:bg-surface">Cancel upload</button>}
               </span>
             </div>
           </footer>

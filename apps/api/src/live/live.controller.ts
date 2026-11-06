@@ -11,6 +11,7 @@ import { Webhook } from '../common/origin.guard';
 import type { AuthContext } from '../common/request';
 import { publish, room } from '../realtime/publish';
 import { LiveError, LiveService } from './live.service';
+import { hasPremiumAccess } from '../billing/billing';
 import { endLive, LIVE_PLAYLIST } from './sync';
 
 class TitleDto { @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 100) title?: string }
@@ -66,7 +67,7 @@ export class LiveController {
   async studio(@CurrentAuth() auth: AuthContext) {
     const s = await this.attempt(() => this.live.mine(auth.user.id));
     const full = await this.prisma.liveStream.findUniqueOrThrow({ where: { id: s.id }, include: { channel: true } });
-    const premium = !!auth.user.premiumUntil && auth.user.premiumUntil > new Date();
+    const premium = hasPremiumAccess(auth.user);
     const past = premium ? await this.prisma.liveStream.findMany({ where: { channelId: s.channelId, status: 'ENDED' }, orderBy: { endedAt: 'desc' }, take: 10 }) : [];
     return {
       premium, stream: await this.view(full),
@@ -89,7 +90,7 @@ export class LiveController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Make a new encoder key (the old one stops working)' })
   async resetKey(@CurrentAuth() auth: AuthContext) {
-    if (!(auth.user.premiumUntil && auth.user.premiumUntil > new Date())) throw new ForbiddenException('Live Studio is part of Premium.');
+    if (!hasPremiumAccess(auth.user)) throw new ForbiddenException('Live Studio is part of Premium.');
     return { streamKey: await this.live.streamKey(auth.user.id, true) };
   }
 

@@ -1,7 +1,8 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
-import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, Inject, Logger, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
+import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsInt, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { hasPremiumAccess } from '../billing/billing';
 import { extname } from 'node:path';
 import { APP_CONFIG, type AppConfig } from '../config/config';
 import { PrismaService } from '../database/prisma.service';
@@ -16,10 +17,20 @@ import type { Storage } from '../media/storage';
 class StartUploadDto {
   @ApiProperty({ example: 'my-trip.mp4' }) @IsString() @MaxLength(255) fileName!: string;
   @ApiProperty({ example: 734003200 }) @IsInt() @Min(1) sizeBytes!: number;
+  @ApiPropertyOptional({ description: 'An ad for Ad Studio (Premium): unlisted, kept out of feeds and the Space' }) @IsOptional() @IsBoolean() ad?: boolean;
 }
 class PartNumbersDto { @ApiProperty({ example: [1, 2, 3] }) @IsArray() @ArrayMaxSize(100) @IsInt({ each: true }) @Min(1, { each: true }) @Max(10_000, { each: true }) partNumbers!: number[] }
 class PartDto { @IsInt() @Min(1) @Max(10_000) partNumber!: number; @IsString() @MaxLength(200) etag!: string }
-class CompleteDto { @ApiProperty({ type: [PartDto] }) @IsArray() @ArrayMaxSize(10_000) @ValidateNested({ each: true }) @Type(() => PartDto) parts!: PartDto[] }
+class TransferDto {
+  @IsInt() @Min(0) @Max(Number.MAX_SAFE_INTEGER) bytes!: number;
+  @IsInt() @Min(0) @Max(Number.MAX_SAFE_INTEGER) durationMs!: number;
+  @IsInt() @Min(0) @Max(100_000) retries!: number;
+  @IsInt() @Min(0) @Max(32) peakParallel!: number;
+}
+class CompleteDto {
+  @ApiProperty({ type: [PartDto], required: false }) @IsOptional() @IsArray() @ArrayMaxSize(10_000) @ValidateNested({ each: true }) @Type(() => PartDto) parts?: PartDto[];
+  @IsOptional() @IsObject() @ValidateNested() @Type(() => TransferDto) transfer?: TransferDto;
+}
 
 /**
  * Resumable uploads straight to object storage: the API hands out a signed address per part, the browser sends the
@@ -30,6 +41,7 @@ class CompleteDto { @ApiProperty({ type: [PartDto] }) @IsArray() @ArrayMaxSize(1
 @Controller('uploads')
 @RequireAuth('CREATOR')
 export class UploadsController {
+  private readonly log = new Logger(UploadsController.name);
   constructor(
     private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly limits: RateLimitService,
     private readonly queue: MediaQueue, @Inject(STORAGE) private readonly storage: Storage, @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -59,12 +71,23 @@ export class UploadsController {
     const open = await this.prisma.video.count({ where: { channelId: channel.id, status: 'UPLOADING' } });
     if (open >= 20) throw new ConflictException('Finish or cancel your unfinished uploads first.');
     const title = body.fileName.slice(0, body.fileName.length - ext.length).replace(/[_]+/g, ' ').trim().slice(0, 100) || 'Untitled video';
-    const video = await this.prisma.video.create({ data: { channelId: channel.id, title, status: 'UPLOADING', visibility: 'PRIVATE', sourceSizeBytes: BigInt(body.sizeBytes), processingStage: 'Uploading' } });
+    const partSize = this.config.media.driver === 's3' && body.sizeBytes >= 4 * 1024 ** 3
+      ? Math.max(this.config.media.partBytes, 64 * 1024 ** 2)
+      : this.config.media.partBytes;
+    if (body.ad && !hasPremiumAccess(auth.user)) throw new ForbiddenException('Ad Studio is part of Premium.');
+    const video = await this.prisma.video.create({ data: { channelId: channel.id, title, status: 'UPLOADING', visibility: body.ad ? 'UNLISTED' : 'PRIVATE', isAd: !!body.ad, sourceSizeBytes: BigInt(body.sizeBytes), uploadPartBytes: BigInt(partSize), processingStage: 'Uploading' } });
     const key = sourceKey(video.id, ext);
-    const uploadId = await this.storage.createMultipart(key, type);
-    await this.prisma.video.update({ where: { id: video.id }, data: { sourceFileS3Key: key, uploadId } });
+    let uploadId: string | undefined;
+    try {
+      uploadId = await this.storage.createMultipart(key, type);
+      await this.prisma.video.update({ where: { id: video.id }, data: { sourceFileS3Key: key, uploadId } });
+    } catch (error) {
+      if (uploadId) await this.storage.abortMultipart(key, uploadId);
+      await this.prisma.video.delete({ where: { id: video.id } });
+      throw error;
+    }
     await this.audit.record({ userId: auth.user.id, action: 'UPLOAD_STARTED', entityType: 'Video', entityId: video.id, req, details: { sizeBytes: body.sizeBytes, ext } });
-    return { videoId: video.id, title, partSize: this.config.media.partBytes, partCount: Math.ceil(body.sizeBytes / this.config.media.partBytes) };
+    return { videoId: video.id, title, partSize, partCount: Math.ceil(body.sizeBytes / partSize) };
   }
 
   @Get(':id')
@@ -72,8 +95,13 @@ export class UploadsController {
   async state(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     const v = await this.mine(auth, id);
     if (v.status !== 'UPLOADING' || !v.uploadId) return { videoId: v.id, status: v.status, parts: [] };
-    const parts = await this.storage.listParts(v.sourceFileS3Key!, v.uploadId);
-    return { videoId: v.id, status: v.status, sizeBytes: Number(v.sourceSizeBytes), partSize: this.config.media.partBytes, parts };
+    const key = v.sourceFileS3Key!;
+    const parts = await this.storage.listParts(key, v.uploadId).catch(async (error: unknown) => {
+      if (await this.storage.head(key)) return [];
+      throw error;
+    });
+    const assembled = parts.length === 0 && (await this.storage.head(key))?.size === Number(v.sourceSizeBytes);
+    return { videoId: v.id, status: v.status, assembled, sizeBytes: Number(v.sourceSizeBytes), partSize: Number(v.uploadPartBytes ?? this.config.media.partBytes), parts };
   }
 
   @Post(':id/parts')
@@ -82,34 +110,69 @@ export class UploadsController {
   async parts(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: PartNumbersDto) {
     const v = await this.mine(auth, id);
     if (v.status !== 'UPLOADING' || !v.uploadId) throw new ConflictException('This upload is already finished.');
-    const max = Math.ceil(Number(v.sourceSizeBytes) / this.config.media.partBytes);
+    const max = Math.ceil(Number(v.sourceSizeBytes) / Number(v.uploadPartBytes ?? this.config.media.partBytes));
     if (body.partNumbers.some((n) => n > max)) throw new BadRequestException('Part number out of range.');
-    const urls: Record<number, string> = {};
-    for (const n of body.partNumbers) urls[n] = await this.storage.partUrl(v.sourceFileS3Key!, v.uploadId, n, 3600);
-    return { urls };
+    const entries = await Promise.all([...new Set(body.partNumbers)].map(async (n) =>
+      [n, await this.storage.partUrl(v.sourceFileS3Key!, v.uploadId!, n, 3600)] as const,
+    ));
+    return { urls: Object.fromEntries(entries) };
   }
 
   @Post(':id/complete')
   @HttpCode(200)
   @ApiOperation({ summary: 'Finish the upload and start processing' })
   async complete(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: CompleteDto, @Req() req: AppRequest) {
+    const started = performance.now();
     const v = await this.mine(auth, id);
+    if (v.status === 'PROCESSING' || v.status === 'READY') return { videoId: v.id, status: v.status };
     if (v.status !== 'UPLOADING' || !v.uploadId) throw new ConflictException('This upload is already finished.');
-    const expected = Math.ceil(Number(v.sourceSizeBytes) / this.config.media.partBytes);
-    const numbers = new Set(body.parts.map((p) => p.partNumber));
-    if (numbers.size !== expected || [...numbers].some((n) => n > expected)) throw new BadRequestException(`Upload all ${expected} parts first.`);
-    try { await this.storage.completeMultipart(v.sourceFileS3Key!, v.uploadId, body.parts); }
-    catch { throw new BadRequestException('Some parts are missing or damaged. Resume the upload to send them again.'); }
-    const stored = await this.storage.head(v.sourceFileS3Key!);
+    const expected = Math.ceil(Number(v.sourceSizeBytes) / Number(v.uploadPartBytes ?? this.config.media.partBytes));
+    const key = v.sourceFileS3Key!;
+    let stored = await this.storage.head(key);
+    if (!stored) {
+      const parts = body.parts ?? await this.storage.listParts(key, v.uploadId).catch(async (error: unknown) => {
+        stored = await this.storage.head(key);
+        if (stored) return [];
+        throw error;
+      });
+      const numbers = new Set(parts.map((p) => p.partNumber));
+      if (!stored && (parts.length !== expected || numbers.size !== expected || [...numbers].some((n) => n > expected))) throw new BadRequestException(`Upload all ${expected} parts first.`);
+      try { if (!stored) await this.storage.completeMultipart(key, v.uploadId, parts); }
+      catch {
+        // The object may already exist if storage completed the upload before the response was lost.
+        stored = await this.storage.head(key);
+        if (!stored) throw new BadRequestException('Some parts are missing or damaged. Resume the upload to send them again.');
+      }
+      stored ??= await this.storage.head(key);
+    }
     if (!stored || stored.size !== Number(v.sourceSizeBytes)) {
       await this.storage.deletePrefix(`src/${v.id}/`);
       await this.prisma.video.update({ where: { id: v.id }, data: { status: 'FAILED', uploadId: null, processingStage: 'Failed', processingError: 'The uploaded file is incomplete. Upload it again.' } });
       throw new BadRequestException('The uploaded file is incomplete. Upload it again.');
     }
-    await this.prisma.$transaction([
-      this.prisma.video.update({ where: { id: v.id }, data: { status: 'PROCESSING', uploadId: null, processingStage: 'Waiting to process', processingProgress: 0 } }),
-      this.prisma.videoFile.create({ data: { videoId: v.id, s3Key: v.sourceFileS3Key!, bucketName: this.config.media.s3?.bucket ?? 'local', fileSize: BigInt(stored.size), mimeType: VIDEO_TYPES[extname(v.sourceFileS3Key!)] ?? 'application/octet-stream' } }),
-    ]);
+    const size = stored.size;
+    const transitioned = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.video.updateMany({
+        where: { id: v.id, status: 'UPLOADING', uploadId: v.uploadId },
+        data: { status: 'PROCESSING', uploadId: null, processingStage: 'Waiting to process', processingProgress: 0 },
+      });
+      if (!result.count) return false;
+      await tx.videoFile.create({ data: { videoId: v.id, s3Key: key, bucketName: this.config.media.s3?.bucket ?? 'local', fileSize: BigInt(size), mimeType: VIDEO_TYPES[extname(key)] ?? 'application/octet-stream' } });
+      return true;
+    });
+    if (!transitioned) {
+      const latest = await this.mine(auth, id);
+      if (latest.status === 'PROCESSING' || latest.status === 'READY') return { videoId: v.id, status: latest.status };
+      throw new ConflictException('This upload is already finished.');
+    }
+    const transfer = body.transfer;
+    this.log.log({
+      event: 'upload_completed', videoId: v.id, sourceBytes: size,
+      transferBytes: transfer?.bytes, transferMs: transfer?.durationMs,
+      transferBytesPerSecond: transfer?.durationMs ? Math.round(transfer.bytes * 1000 / transfer.durationMs) : undefined,
+      retries: transfer?.retries, peakParallel: transfer?.peakParallel,
+      finalizeMs: Math.round(performance.now() - started),
+    });
     await this.queue.add({ name: 'transcode', videoId: v.id });
     await this.audit.record({ userId: auth.user.id, action: 'UPLOAD_COMPLETED', entityType: 'Video', entityId: v.id, req });
     return { videoId: v.id, status: 'PROCESSING' };

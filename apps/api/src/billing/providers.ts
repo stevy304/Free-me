@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { BillingConfig } from '../config/config';
+import type { EffectiveBilling, ManualConfig } from './settings';
 
-export type ProviderName = 'mtn_momo' | 'flutterwave';
+export type ProviderName = 'mtn_momo' | 'flutterwave' | 'manual';
 export type ProviderStatus = { status: 'PENDING' } | { status: 'SUCCEEDED' } | { status: 'FAILED'; reason: string };
 
 export interface StartPayment {
@@ -135,6 +136,57 @@ export class FlutterwaveProvider implements PaymentProvider {
   }
 }
 
-export function createProviders(c: BillingConfig): Partial<Record<ProviderName, PaymentProvider>> {
-  return { ...(c.momo ? { mtn_momo: new MomoProvider(c.momo) } : {}), ...(c.flutterwave ? { flutterwave: new FlutterwaveProvider(c.flutterwave) } : {}) };
+/**
+ * Pay by hand: the payer sends the amount to one of the operator's accounts (MoMo number, Airtel Money, bank) with
+ * a reference code, then enters the transaction id from their confirmation message. An administrator checks it
+ * and confirms (Administration → Money). Works without any payment provider account.
+ */
+export class ManualProvider implements PaymentProvider {
+  readonly name = 'manual' as const;
+  constructor(readonly c: ManualConfig) {}
+  get currency() { return this.c.currency; }
+  charge(usdCents: number) {
+    const d = currencyDigits(this.c.currency);
+    return this.c.currency === 'USD' ? BigInt(usdCents) : BigInt(Math.ceil((usdCents / 100) * this.c.perUsd)) * 10n ** BigInt(d);
+  }
+  async start() {
+    // A short code people can type in a MoMo or bank transfer message.
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const code = Array.from(randomUUID().replace(/-/g, '').slice(0, 6), (h) => alphabet[parseInt(h, 16) % alphabet.length]).join('');
+    return { providerRef: `FM-${code}-${randomUUID().slice(0, 4)}`, checkoutUrl: null };
+  }
+  /** Never decided automatically: an administrator confirms or rejects it. */
+  async check(): Promise<ProviderStatus> { return { status: 'PENDING' }; }
+}
+
+export function createProviders(c: EffectiveBilling | BillingConfig): Partial<Record<ProviderName, PaymentProvider>> {
+  const manual = 'manual' in c ? c.manual : null;
+  return {
+    ...(c.momo ? { mtn_momo: new MomoProvider(c.momo) } : {}),
+    ...(c.flutterwave ? { flutterwave: new FlutterwaveProvider(c.flutterwave) } : {}),
+    ...(manual ? { manual: new ManualProvider(manual) } : {}),
+  };
+}
+
+/** MTN MoMo sandbox: creates an API user and key from just the subscription key (momodeveloper.mtn.com). */
+export async function createMomoSandboxUser(baseUrl: string, subscriptionKey: string, callbackHost: string) {
+  const user = randomUUID();
+  const a = await call(`${baseUrl}/v1_0/apiuser`, { method: 'POST', headers: { 'X-Reference-Id': user, 'Ocp-Apim-Subscription-Key': subscriptionKey, 'content-type': 'application/json' }, body: JSON.stringify({ providerCallbackHost: callbackHost }) }, 'MoMo sandbox user');
+  if (a.status !== 201) throw new ProviderError(a.status === 401 ? 'MTN did not accept this subscription key. Copy the Primary key of your Collections subscription.' : `MTN answered ${a.status} when creating the API user.`);
+  const k = await call(`${baseUrl}/v1_0/apiuser/${user}/apikey`, { method: 'POST', headers: { 'Ocp-Apim-Subscription-Key': subscriptionKey } }, 'MoMo sandbox key');
+  if (k.status !== 201) throw new ProviderError(`MTN answered ${k.status} when creating the API key.`);
+  return { apiUser: user, apiKey: ((await k.json()) as { apiKey: string }).apiKey };
+}
+
+/** Checks MoMo keys by asking for an access token. */
+export async function testMomo(c: NonNullable<BillingConfig['momo']>) {
+  const res = await call(`${c.baseUrl}/collection/token/`, { method: 'POST', headers: { authorization: `Basic ${Buffer.from(`${c.apiUser}:${c.apiKey}`).toString('base64')}`, 'Ocp-Apim-Subscription-Key': c.subscriptionKey } }, 'MoMo');
+  if (!res.ok) throw new ProviderError(res.status === 401 ? 'MTN refused these keys (check the subscription key, API user and API key, and sandbox or live).' : `MTN answered ${res.status}.`);
+}
+
+/** Checks a Flutterwave secret key with a harmless read. */
+export async function testFlutterwave(c: NonNullable<BillingConfig['flutterwave']>) {
+  const res = await call(`${c.baseUrl}/v3/banks/NG`, { headers: { authorization: `Bearer ${c.secretKey}` } }, 'Flutterwave');
+  if (res.status === 401) throw new ProviderError('Flutterwave refused this secret key.');
+  if (!res.ok) throw new ProviderError(`Flutterwave answered ${res.status}.`);
 }

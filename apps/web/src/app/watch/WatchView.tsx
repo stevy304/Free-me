@@ -17,6 +17,7 @@ import { compactNumber, duration, followersLabel, fullDate, timeAgo, viewsLabel 
 import type { VideoCardData } from '@/lib/types';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
 import { useRealtime } from '@/lib/realtime';
+import { mediaOrigin, warmUp } from '@/lib/warmup';
 
 export interface WatchVideo extends VideoCardData {
   description: string | null; status: string; visibility: string; likeCount: number; commentCount: number; commentsOpen: boolean; playbackUrl: string | null; processingStage: string | null;
@@ -58,9 +59,11 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   };
   const progress = useCallback((seconds: number, ended: boolean) => {
     time.current = seconds;
+    // Two thirds in: load the start of the next video, so it plays at once when this one ends.
+    if (seconds > Math.min(v.durationSeconds * 0.66, v.durationSeconds - 20)) void warmUp(more[0]?.playbackUrl);
     if (!initialViewer.signedIn) return;
     fetch(`/api/videos/${v.id}/progress`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seconds, ended }), credentials: 'same-origin', keepalive: true }).catch(() => undefined);
-  }, [v.id, initialViewer.signedIn]);
+  }, [v.id, v.durationSeconds, more, initialViewer.signedIn]);
   const need = (what: 'save' | 'report') => { setMenu(false); if (!initialViewer.signedIn) router.push(login); else setDialog(what); };
   const [tab, setTab] = useState<'about' | 'conversation' | 'next'>('conversation');
 
@@ -120,6 +123,8 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
     return () => { live = false; };
   }, [v.id, v.commentsOpen, v.commentCount]);
 
+  // An early connection to the CDN (DNS, TLS) before the player asks for the first segment.
+  const cdn = mediaOrigin(v.playbackUrl);
   const player = v.playbackUrl
     ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} storyboard={v.storyboardUrl} captions={v.captions ?? []} withAds onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
     : <div className="grid aspect-video w-full place-items-center rounded-[24px] bg-[#0b1413] text-center text-[15px] text-[#9fb0ad]"><div><Icon.Spinner className="mx-auto mb-3 animate-spin" />{v.takenDownAt ? 'This video was removed. See Creator Hub for details.' : v.processingStage ?? 'This video is still being processed.'}</div></div>;
@@ -141,6 +146,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   return (
     // Phones: no floating dock here, so the dark page runs to the bottom over the space kept for it.
     <div className="max-sm:-mb-28">
+      {cdn && <link rel="preconnect" href={cdn} crossOrigin="" />}
       {/* Stage: the video on a dark band, lit softly by the brand colour. */}
       {/* Phones: the video sticks to the top, edge to edge, while the page scrolls under it. */}
       <div ref={top} />

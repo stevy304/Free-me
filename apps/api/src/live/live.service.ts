@@ -14,7 +14,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { endLive, finishLive, LIVE_PLAYLIST, LiveSync } from './sync';
 
 export class LiveError extends Error {}
-const isPremium = (u: Pick<User, 'premiumUntil'>) => !!u.premiumUntil && u.premiumUntil > new Date();
+import { hasPremiumAccess } from '../billing/billing';
 export const newStreamKey = () => `fm_${randomBytes(18).toString('base64url')}`;
 
 interface BrowserSession { ff: ChildProcess; sync: LiveSync; timer: NodeJS.Timeout; socketId: string; bytes: number; ended: Promise<void> }
@@ -81,7 +81,7 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
 
   /** Starts a browser broadcast or a Premium encoder broadcast. */
   async goLive(user: User, streamId: string, source: 'browser' | 'rtmp') {
-    if (source === 'rtmp' && !isPremium(user)) throw new LiveError('Live Studio is part of Premium.');
+    if (source === 'rtmp' && !hasPremiumAccess(user)) throw new LiveError('Live Studio is part of Premium.');
     const s = await this.prisma.liveStream.findUnique({ where: { id: streamId }, include: { channel: true } });
     if (!s || s.channel.userId !== user.id) throw new LiveError('Stream not found.');
     if (s.status === 'ENDED') throw new LiveError('This stream has ended. Start a new one.');
