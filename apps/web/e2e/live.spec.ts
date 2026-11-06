@@ -46,9 +46,9 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   const panels = host.getByRole('complementary', { name: 'Production panels' });
   await panels.getByRole('button', { name: 'Sources', exact: true }).click();
   await host.getByRole('button', { name: 'Camera' }).click();
-  await host.getByLabel('Title').fill(`Morning show ${run}`);
+  await host.getByLabel('Title', { exact: true }).fill(`Morning show ${run}`);
   await panels.getByRole('button', { name: 'Graphics', exact: true }).click();
-  await host.getByLabel('Lower third').fill('Kigali · Morning show');
+  await host.getByLabel('Lower third name').fill('Kigali · Morning show');
   const swatch = (index: number) => host.locator('canvas').nth(index).evaluate((canvas: HTMLCanvasElement) =>
     [...canvas.getContext('2d')!.getImageData(34, 582, 1, 1).data]);
   await expect.poll(() => swatch(0)).toEqual([8, 100, 95, 255]);
