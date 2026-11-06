@@ -8,7 +8,7 @@ import { AuditService } from '../common/audit.service';
 import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import type { AppRequest, AuthContext } from '../common/request';
 import { BillingService, paymentView, premiumView } from './billing.controller';
-import { EARNINGS_CURRENCY, isPremium, msisdn, PREMIUM_MONTHS, utcDay } from './billing';
+import { EARNINGS_CURRENCY, hasPremiumAccess, msisdn, PREMIUM_MONTHS, utcDay } from './billing';
 import { MAX_ADS_PER_VIDEO } from './ads.controller';
 
 class PayoutDto {
@@ -48,10 +48,10 @@ export class MonetisationController {
       this.prisma.payout.findMany({ where: { channelId: ch.id }, orderBy: { requestedAt: 'desc' }, take: 30 }),
       this.prisma.adImpression.count({ where: { video: { channelId: ch.id }, createdAt: { gte: since } } }),
     ]);
-    const b = this.billing.cfg.billing;
+    const b = await this.billing.settings();
     return {
       premium: premiumView(u), joined: !!ch.eligibility?.isEligible, joinedAt: ch.eligibility?.approvedAt ?? null,
-      earning: !!ch.eligibility?.isEligible && isPremium(u),
+      earning: !!ch.eligibility?.isEligible && hasPremiumAccess(u),
       balance: { currency: ch.balance?.currency ?? EARNINGS_CURRENCY, availableCents: Number(ch.balance?.confirmedBalanceCents ?? 0n), lifetimeCents: Number(ch.balance?.lifetimeEarningsCents ?? 0n), withdrawnCents: Number(ch.balance?.withdrawnCents ?? 0n) },
       adsShownLast28Days: impressions,
       earnings: ledger.map((l) => ({ id: l.id, kind: l.sourceType, amountCents: Number(l.creatorShareCents), day: l.referenceId, description: l.description, at: l.createdAt })),
@@ -66,7 +66,7 @@ export class MonetisationController {
   async join(@CurrentAuth() auth: AuthContext, @Req() req: AppRequest) {
     const ch = await this.channel(auth);
     const u = await this.prisma.user.findUniqueOrThrow({ where: { id: auth.user.id } });
-    if (!isPremium(u)) throw new ForbiddenException('Monetisation is part of Premium. Upgrade to start earning from ads on your videos.');
+    if (!hasPremiumAccess(u)) throw new ForbiddenException('Monetisation is part of Premium. Upgrade to start earning from ads on your videos.');
     const strikes = await this.prisma.video.count({ where: { channelId: ch.id, takenDownAt: { gt: new Date(Date.now() - 90 * 86_400_000) } } });
     if (strikes) throw new ForbiddenException('A video of yours was removed in the last 90 days. You can join once 90 days have passed since the last removal.');
     await this.prisma.creatorEligibility.upsert({
@@ -83,7 +83,7 @@ export class MonetisationController {
     const ch = await this.channel(auth);
     const phone = msisdn(body.phone, 'RWF');
     if (!phone) throw new BadRequestException('Enter a mobile money number, e.g. 0788 123 456 or +250 788 123 456.');
-    const min = BigInt(this.billing.cfg.billing.payoutMinUsdCents);
+    const min = BigInt((await this.billing.settings()).payoutMinUsdCents);
     const p = await this.prisma.$transaction(async (tx) => {
       const bal = await tx.creatorBalance.findUnique({ where: { channelId: ch.id } });
       const amount = bal?.confirmedBalanceCents ?? 0n;
@@ -123,7 +123,7 @@ export class AdminBillingController {
       premiumMembers: members, last30Days: { premiumUsdCents: sum('PREMIUM'), adsUsdCents: sum('AD_CAMPAIGN'), payments: income.reduce((a, i) => a + i._count, 0) },
       waiting: { adReviews: reviews, payouts },
       settlements: days.map((d) => ({ day: d.day.toISOString().slice(0, 10), grossCents: Number(d.grossCents), creatorPoolCents: Number(d.creatorPoolCents), paidToCreatorsCents: Number(d.allocatedCents), impressions: d.impressions, channels: d.channels })),
-      methods: this.billing.methods(),
+      methods: await this.billing.methods(),
     };
   }
 

@@ -7,6 +7,7 @@ import { api } from '@/lib/client-api';
 import { duration } from '@/lib/format';
 import { usd } from '@/lib/money';
 import { useShell } from '@/components/shell/ShellContext';
+import { ManualQueue, PaymentSettings } from './AdminPayments';
 
 interface Summary {
   premiumMembers: number; last30Days: { premiumUsdCents: number; adsUsdCents: number; payments: number }; waiting: { adReviews: number; payouts: number };
@@ -40,7 +41,8 @@ export function AdminMoney() {
     <div className="mt-5 space-y-6">
       {msg && <p role="status" className="rounded-xl bg-brand-soft px-4 py-3 text-[14px] text-brand">{msg}</p>}
       {error && <p role="alert" className="rounded-xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
-      {!s.methods.length && <p className="rounded-xl bg-accent-soft px-4 py-3 text-[14px] text-on-accent-soft">No payment method is set up: add MTN MoMo (MOMO_*) and/or Flutterwave (FLW_*) keys to the API environment.</p>}
+      {!s.methods.length && <p className="rounded-xl bg-accent-soft px-4 py-3 text-[14px] text-on-accent-soft">No way to pay is switched on yet. Start with <b>Send money (manual)</b> below: add your MoMo number and people can upgrade today.</p>}
+      <ManualQueue />
       <div className="grid gap-3 sm:grid-cols-4">
         {[['Premium members', s.premiumMembers.toLocaleString(locale)], ['Premium, 30 days', usd(s.last30Days.premiumUsdCents, locale)], ['Ads sold, 30 days', usd(s.last30Days.adsUsdCents, locale)], ['Payments, 30 days', s.last30Days.payments.toLocaleString(locale)]].map(([l, v]) => (
           <div key={l} className="rounded-2xl border border-line p-4"><p className="text-[13px] text-muted">{l}</p><p className="font-display text-[24px] font-extrabold tabular-nums">{v}</p></div>
@@ -102,6 +104,7 @@ export function AdminMoney() {
           <button type="button" disabled={!gift.email.includes('@')} onClick={() => void run(() => api('/admin/billing/premium', { body: gift }), `Premium given to ${gift.email}.`)} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Give Premium</button>
         </div>
       </section>
+      <PaymentSettings onSaved={() => void load()} />
     </div>
   );
 }

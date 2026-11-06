@@ -850,6 +850,8 @@ model Payment {
   campaignId            String?
   campaign              Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   phone                 String?
+  /// Manual payments: the transaction id the payer sent from their MoMo / bank message.
+  payerReference        String?
   checkoutUrl           String?
   failureReason         String?
   createdAt             DateTime          @default(now())
@@ -901,4 +903,12 @@ model LiveStream {
 
   @@index([status, startedAt])
   @@index([channelId, createdAt])
+}
+
+// Settings administrators change from the app (payment methods and prices). Secrets are encrypted.
+model AppSetting {
+  key                   String            @id
+  value                 Json
+  updatedBy             String?
+  updatedAt             DateTime          @updatedAt
 }

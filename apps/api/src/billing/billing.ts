@@ -4,6 +4,7 @@ import type { Payment, Prisma, PrismaClient, User } from '@prisma/client';
 import { PROPOSED_SPLIT, allocatePool, splitRevenue } from '@free-me/shared';
 import type { AppConfig } from '../config/config';
 import { createProviders, ProviderError, type PaymentProvider, type ProviderName } from './providers';
+import { effective, loadStored, type EffectiveBilling } from './settings';
 import { publish, room } from '../realtime/publish';
 
 export const PREMIUM_MONTHS = [1, 3, 6, 12] as const;
@@ -27,22 +28,41 @@ export function msisdn(raw: string, currency: string): string | null {
 }
 
 export const isPremium = (u: Pick<User, 'premiumUntil'>, now = new Date()) => !!u.premiumUntil && u.premiumUntil > now;
+/** Premium features (Live Studio, monetisation): members, and administrators, who can use everything. */
+export const hasPremiumAccess = (u: Pick<User, 'premiumUntil' | 'roles'>, now = new Date()) => isPremium(u, now) || u.roles.includes('ADMIN');
+/** Manual payments wait this long for the payer's proof and an administrator's check. */
+const MANUAL_WAIT = 7 * DAY;
 
 /**
  * Payments, Premium membership and ad revenue. Used by the API (checkout, status) and by the worker (checking
  * pending payments, ending memberships, settling each day's ad revenue). Every step is safe to run twice.
  */
 export class Billing {
-  readonly providers: Partial<Record<ProviderName, PaymentProvider>>;
   private readonly log = new Logger('Billing');
-  constructor(private readonly prisma: PrismaClient, private readonly config: AppConfig) { this.providers = createProviders(config.billing); }
+  private cache: { at: number; settings: EffectiveBilling; providers: Partial<Record<ProviderName, PaymentProvider>> } | null = null;
+  constructor(private readonly prisma: PrismaClient, private readonly config: AppConfig) {}
 
-  methods() { return (Object.keys(this.providers) as ProviderName[]).map((name) => ({ name, currency: this.providers[name]!.currency })); }
+  /** Prices and payment methods in force: the environment, overridden by what administrators saved in the app. */
+  async settings(): Promise<EffectiveBilling> { return (await this.load()).settings; }
+  async providers() { return (await this.load()).providers; }
+  /** After administrators change the settings (other servers pick them up within 15 seconds). */
+  invalidate() { this.cache = null; }
+  private async load() {
+    if (this.cache && Date.now() - this.cache.at < 15_000) return this.cache;
+    const settings = effective(this.config, await loadStored(this.prisma, this.config));
+    this.cache = { at: Date.now(), settings, providers: createProviders(settings) };
+    return this.cache;
+  }
+
+  async methods() {
+    const providers = await this.providers();
+    return (Object.keys(providers) as ProviderName[]).map((name) => ({ name, currency: providers[name]!.currency }));
+  }
 
   /** Creates a payment and asks the provider to collect it. */
   async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN'; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }) {
-    const provider = this.providers[p.method];
-    if (!provider) throw new BillingError(p.method === 'mtn_momo' ? 'MTN MoMo payments are not set up on this server yet.' : 'Card payments are not set up on this server yet.');
+    const provider = (await this.providers())[p.method];
+    if (!provider) throw new BillingError(p.method === 'mtn_momo' ? 'MTN MoMo payments are not set up on this server yet.' : p.method === 'flutterwave' ? 'Card payments are not set up on this server yet.' : 'This way of paying is not available.');
     let phone: string | undefined;
     if (p.method === 'mtn_momo') {
       phone = p.phone ? msisdn(p.phone, provider.currency) ?? undefined : undefined;
@@ -66,8 +86,13 @@ export class Billing {
   async refresh(id: string): Promise<Payment> {
     const p = await this.prisma.payment.findUniqueOrThrow({ where: { id } });
     if (p.status !== 'PENDING' || p.providerRef.startsWith('pending-')) return p;
-    const provider = this.providers[p.provider as ProviderName];
+    const provider = (await this.providers())[p.provider as ProviderName];
     if (!provider) return p;
+    if (p.provider === 'manual') {
+      // Decided by an administrator; only an old one that nobody confirmed lapses.
+      if (Date.now() - p.createdAt.getTime() > MANUAL_WAIT) return this.prisma.payment.update({ where: { id }, data: { status: 'FAILED', failureReason: 'The payment was not confirmed in time.' } });
+      return p;
+    }
     let r;
     try { r = await provider.check(p.providerRef, { amountMinor: p.amountMinor, currency: p.currency }); }
     catch (e) { this.log.warn(`payment ${p.id}: ${(e as Error).message}`); return p; }
@@ -100,6 +125,33 @@ export class Billing {
     }
   }
 
+  /** The payer gives the transaction id from their MoMo, Airtel or bank confirmation (manual payments). */
+  async submitProof(userId: string, id: string, reference: string) {
+    const p = await this.prisma.payment.findUnique({ where: { id } });
+    if (!p || p.userId !== userId) throw new BillingError('Payment not found.');
+    if (p.provider !== 'manual' || p.status !== 'PENDING') throw new BillingError('This payment does not need a transaction id.');
+    const ref = reference.replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (ref.length < 4) throw new BillingError('Enter the transaction id from your payment message.');
+    return this.prisma.payment.update({ where: { id }, data: { payerReference: ref } });
+  }
+
+  /** An administrator checked a manual payment arrived (or did not). */
+  async confirmManual(id: string, approve: boolean, reason?: string) {
+    const p = await this.prisma.payment.findUnique({ where: { id } });
+    if (!p || p.provider !== 'manual') throw new BillingError('Payment not found.');
+    if (p.status !== 'PENDING') throw new BillingError('This payment is already settled.');
+    if (approve) {
+      await this.prisma.$transaction(async (tx) => {
+        const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', paidAt: new Date() } });
+        if (flipped.count) await this.fulfil(tx, p);
+      });
+    } else {
+      await this.prisma.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'FAILED', failureReason: reason?.trim() || 'The payment could not be found.' } });
+    }
+    publish(room.user(p.userId), 'payment', { id });
+    return this.prisma.payment.findUniqueOrThrow({ where: { id } });
+  }
+
   /** Grants Premium without a payment (administrators: gifts, partners). */
   async grantPremium(userId: string, months: number) {
     await this.prisma.$transaction(async (tx) => {
@@ -112,9 +164,10 @@ export class Billing {
 
   /** Worker: checks pending payments (MoMo has no reliable callback; card payers may close the tab). */
   async reconcile() {
-    const pending = await this.prisma.payment.findMany({ where: { status: 'PENDING', createdAt: { gt: new Date(Date.now() - 2 * DAY) } }, select: { id: true }, take: 200, orderBy: { createdAt: 'asc' } });
+    const pending = await this.prisma.payment.findMany({ where: { status: 'PENDING', provider: { not: 'manual' }, createdAt: { gt: new Date(Date.now() - 2 * DAY) } }, select: { id: true }, take: 200, orderBy: { createdAt: 'asc' } });
     for (const p of pending) await this.refresh(p.id);
-    await this.prisma.payment.updateMany({ where: { status: 'PENDING', createdAt: { lte: new Date(Date.now() - 2 * DAY) } }, data: { status: 'FAILED', failureReason: 'The payment was not completed in time.' } });
+    await this.prisma.payment.updateMany({ where: { status: 'PENDING', provider: { not: 'manual' }, createdAt: { lte: new Date(Date.now() - 2 * DAY) } }, data: { status: 'FAILED', failureReason: 'The payment was not completed in time.' } });
+    await this.prisma.payment.updateMany({ where: { status: 'PENDING', provider: 'manual', createdAt: { lte: new Date(Date.now() - MANUAL_WAIT) } }, data: { status: 'FAILED', failureReason: 'The payment was not confirmed in time.' } });
   }
 
   /** Worker: memberships that ended lose the Premium badge (a badge given by administrators stays). */
