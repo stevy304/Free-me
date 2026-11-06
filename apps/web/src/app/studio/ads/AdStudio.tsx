@@ -106,6 +106,13 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
       setCreating(false); setPaying(r.campaign); await load();
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
+  const isAdmin = viewer.user.roles.includes('ADMIN');
+  /** Administrators can run an ad without payment (tests, partners, Free Me's own ads): it runs at $0 a day. */
+  const startFree = async (c: Campaign) => {
+    setError(null);
+    try { await api(`/admin/billing/campaigns/${c.id}/review`, { body: { approve: true, free: true } }); setNotice('Running now, without payment. It plays before videos of Spaces in the monetisation programme.'); await load(); }
+    catch (e) { setError((e as Error).message); }
+  };
   const act = async (c: Campaign, what: 'pause' | 'delete') => {
     setError(null);
     try { await api(`/ads/campaigns/${c.id}${what === 'pause' ? '/pause' : ''}`, { method: what === 'pause' ? 'POST' : 'DELETE', body: what === 'pause' ? {} : undefined }); await load(); } catch (e) { setError((e as Error).message); }
@@ -262,6 +269,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                       </dl>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
+                      {c.status === 'DRAFT' && isAdmin && <button type="button" onClick={() => void startFree(c)} className="h-9 rounded-xl border border-brand px-4 text-[13px] font-bold text-brand hover:bg-brand-soft">Start now without payment</button>}
                       {c.status === 'DRAFT' && <><button type="button" onClick={() => setPaying(c)} className="h-9 rounded-xl bg-brand px-4 text-[13px] font-bold text-on-brand">Pay {usd(c.totalCents, locale)}</button><button type="button" onClick={() => void act(c, 'delete')} className="h-9 rounded-xl px-3 text-[13px] font-semibold text-muted hover:bg-surface">Delete</button></>}
                       {(c.status === 'ACTIVE' || c.status === 'PAUSED') && <button type="button" onClick={() => void act(c, 'pause')} className="h-9 rounded-xl bg-surface px-4 text-[13px] font-semibold hover:bg-surface-hover">{c.status === 'ACTIVE' ? 'Pause' : 'Resume'}</button>}
                     </div>

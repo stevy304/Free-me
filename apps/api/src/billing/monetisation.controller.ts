@@ -15,7 +15,11 @@ class PayoutDto {
   @ApiProperty({ description: 'MTN Mobile Money number to receive the money' }) @IsString() @Length(6, 24) phone!: string;
   @ApiProperty() @IsString() @Length(2, 100) accountHolderName!: string;
 }
-class ReviewDto { @ApiProperty() @IsBoolean() approve!: boolean; @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) note?: string }
+class ReviewDto {
+  @ApiProperty() @IsBoolean() approve!: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) note?: string;
+  @ApiPropertyOptional({ description: 'Approve an unpaid ad without payment (a test, a partner or Free Me itself). It runs at $0 a day, so it adds nothing to the revenue shared with creators.' }) @IsOptional() @IsBoolean() free?: boolean;
+}
 class PayoutDecisionDto {
   @ApiProperty({ enum: ['paid', 'reject'] }) @IsIn(['paid', 'reject']) action!: 'paid' | 'reject';
   @ApiPropertyOptional({ description: 'Transfer reference (paid)' }) @IsOptional() @IsString() @MaxLength(120) reference?: string;
@@ -142,17 +146,20 @@ export class AdminBillingController {
 
   @Post('campaigns/:id/review')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Approve (it starts now and runs for the days bought) or reject a paid campaign' })
+  @ApiOperation({ summary: 'Approve (it starts now and runs for the days bought) or reject a paid campaign; or, with free, approve an unpaid one without payment' })
   async review(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: ReviewDto, @Req() req: AppRequest) {
     const c = await this.prisma.campaign.findUnique({ where: { id } });
     if (!c) throw new NotFoundException('Campaign not found.');
-    if (c.status !== 'PENDING_REVIEW') throw new BadRequestException('This campaign is not waiting for review.');
+    const free = body.free === true && body.approve;
+    if (free ? c.status !== 'DRAFT' && c.status !== 'PENDING_REVIEW' : c.status !== 'PENDING_REVIEW') throw new BadRequestException(free ? 'Only an ad that is not running yet can be approved without payment.' : 'This campaign is not waiting for review.');
     if (!body.approve && !body.note?.trim()) throw new BadRequestException('Say why it is rejected; the business will see it.');
     const now = new Date();
     await this.prisma.campaign.update({ where: { id }, data: body.approve
-      ? { status: 'ACTIVE', reviewedAt: now, startDate: now, endDate: new Date(now.getTime() + c.days * 86_400_000), reviewNote: body.note?.trim() || null }
+      ? { status: 'ACTIVE', reviewedAt: now, startDate: now, endDate: new Date(now.getTime() + c.days * 86_400_000), reviewNote: body.note?.trim() || (free ? 'Approved without payment by Free Me' : null),
+        // Unpaid: $0 a day, so no revenue (and nothing for creators) is counted for money that never came in.
+        ...(free && c.status === 'DRAFT' ? { dailyRateCents: 0 } : {}) }
       : { status: 'REJECTED', reviewedAt: now, reviewNote: body.note!.trim() } });
-    await this.audit.record({ userId: auth.user.id, action: body.approve ? 'AD_APPROVED' : 'AD_REJECTED', entityType: 'Campaign', entityId: id, req, details: { note: body.note ?? null } });
+    await this.audit.record({ userId: auth.user.id, action: free ? 'AD_APPROVED_FREE' : body.approve ? 'AD_APPROVED' : 'AD_REJECTED', entityType: 'Campaign', entityId: id, req, details: { note: body.note ?? null } });
     return { ok: true };
   }
 
