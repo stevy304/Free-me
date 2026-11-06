@@ -18,6 +18,8 @@ export async function generateMetadata(): Promise<Metadata> {
     title: { default: 'Free Me', template: '%s - Free Me' },
     description: DESCRIPTION,
     applicationName: 'Free Me',
+    // Added to an iPhone home screen: opens full screen with the Free Me name.
+    appleWebApp: { capable: true, title: 'Free Me', statusBarStyle: 'default' },
     openGraph: { siteName: 'Free Me', type: 'website', title: 'Free Me', description: DESCRIPTION, images: [{ url: '/apple-icon.png', width: 180, height: 180, alt: 'Free Me' }] },
     twitter: { card: 'summary', title: 'Free Me', description: DESCRIPTION },
   };

@@ -34,7 +34,7 @@ export class AuthController {
 
   @Get('providers')
   @ApiOperation({ summary: 'Sign-in methods this server offers' })
-  providers() { return { google: this.google.enabled, emailCode: true }; }
+  async providers() { await this.google.refresh?.(); return { google: this.google.enabled, emailCode: true }; }
 
   @Post('email/request')
   @HttpCode(200)
@@ -64,6 +64,7 @@ export class AuthController {
   async googleStart(@Query('returnTo') returnTo: string | undefined, @Req() req: Request, @Res() res: Response) {
     const ip = clientIp(req);
     if (ip) await this.limits.consume(`google:start:${ip}`, 30, 600);
+    await this.google.refresh?.();
     if (!this.google.enabled) return res.redirect(303, `/login?error=google_unavailable`);
     const { payload, value } = this.oauthCookie.issue(safeReturnPath(returnTo));
     res.cookie(OAuthStateCookie.name, value, { httpOnly: true, secure: this.secure, sameSite: 'lax', path: '/api/auth/google', maxAge: 10 * 60_000 });
@@ -80,6 +81,7 @@ export class AuthController {
     if (error) return fail(error === 'access_denied' ? 'google_cancelled' : 'google_failed');
     if (!saved || !code || !state || state !== saved.state) return fail('google_expired');
     let profile;
+    await this.google.refresh?.();
     try { profile = await this.google.exchange({ code, codeVerifier: saved.verifier, redirectUri: this.redirectUri }); } catch { return fail('google_failed'); }
     if (profile.nonce !== saved.nonce) return fail('google_failed');
     const email = normalizeEmail(profile.email);

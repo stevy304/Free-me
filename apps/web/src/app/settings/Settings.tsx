@@ -1,5 +1,7 @@
 'use client';
 
+import { DeviceSettings } from '@/components/DeviceSettings';
+
 import * as Icon from '@/components/icons';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -77,7 +79,7 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
   return (
     <div className="mx-auto flex max-w-5xl gap-10 px-4 py-6 sm:px-6">
       <nav aria-label="Settings" className="sticky top-20 hidden h-fit w-48 shrink-0 space-y-1 md:block">
-        {[['account', 'Account'], ['profile', 'Profile'], ...(c ? [['channel', 'Space']] : []), ['devices', 'Signed-in devices']].map(([id, t]) => (
+        {[['account', 'Account'], ['profile', 'Profile'], ...(c ? [['channel', 'Space']] : []), ['this-device', 'This device'], ['devices', 'Signed-in devices']].map(([id, t]) => (
           <a key={id} href={`#${id}`} className="block rounded-lg px-3 py-2 text-[14px] hover:bg-surface">{t}</a>
         ))}
       </nav>
@@ -122,6 +124,10 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
             </form>
           </Section>
         )}
+
+        <Section id="this-device" title="This device" intro="Notifications and data use on this phone or computer.">
+          <DeviceSettings />
+        </Section>
 
         <Section id="devices" title="Signed-in devices" intro="Sign out of a device you do not recognise.">
           <ul className="divide-y divide-line rounded-2xl border border-line">

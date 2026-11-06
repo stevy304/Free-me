@@ -129,6 +129,7 @@ model User {
   reportsFiled          Report[]          @relation("UserReportsFiled")
   notifications         Notification[]    @relation("NotificationsReceived")
   notificationsCaused   Notification[]    @relation("NotificationsCaused")
+  pushSubscriptions     PushSubscription[]
   moderatorActions      ModerationAction[]
   auditLogs             AuditLog[]
 
@@ -785,6 +786,22 @@ enum NotificationType {
   REPLY
   SPARK
   LIVE
+}
+
+/// A phone or computer that asked for notifications (Web Push). Removed when the push service says it is gone.
+model PushSubscription {
+  id                    String            @id @default(uuid())
+  userId                String
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint              String            @unique
+  p256dh                String
+  auth                  String
+  userAgent             String?
+  failures              Int               @default(0)
+  createdAt             DateTime          @default(now())
+  lastSentAt            DateTime?
+
+  @@index([userId])
 }
 
 /// What appears under the bell. Sparks on one video are grouped into one unread entry (count, latest actor).

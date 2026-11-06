@@ -228,6 +228,12 @@ Connect to path `/api/socket` (WebSocket transport, no trailing slash). Signed-i
 | --- | --- | --- |
 | GET | `/me/notifications?cursor=` | Newest first, 50 a page: `{ id, type (NEW_VIDEO, COMMENT, REPLY, SPARK, LIVE), count, read, at, text, href, actor, video }` and `unread`. Sparks on one video are one unread entry with a count. Removed videos drop out |
 | GET | `/me/notifications/unread` | `{ unread }`, for the bell |
+| GET | `/push/key` | `{ publicKey }`: the server's Web Push (VAPID) key, made the first time it is asked for |
+| POST | `/push/subscriptions` 🔒 | `{ endpoint (https), keys: { p256dh, auth } }` from the browser's PushSubscription: notifications on this device (new videos and lives from followed Spaces, replies, comments on your videos) |
+| DELETE | `/push/subscriptions` 🔒 | `{ endpoint }`: turn them off on this device |
+| POST | `/push/test` 🔒 | Send a test notification to my devices → `{ devices }` |
+| GET / PUT | `/admin/auth/google` 🔒 admin | Google sign-in keys set in the app: `{ enabled, clientId, clientSecret? }` (secret masked in answers; leave it out to keep it), plus the origin and redirect URI to give Google |
+| GET | `/admin/system/launch` 🔒 admin | Launch checklist: `{ ready, checks: [{ id, required, ok, label, detail, fix }] }` |
 | POST | `/me/notifications/read` | `{ ids? }`: mark these, or all, as read |
 
 Raised when: a Space you tune into publishes a video (once, the first time it is public and ready); someone joins the conversation on your video; someone replies to your comment; someone sparks your video. Never for your own actions.

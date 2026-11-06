@@ -7,10 +7,12 @@ import { Avatar } from '../Avatar';
 import { api } from '@/lib/client-api';
 import { currentTheme, setTheme, type ThemeChoice } from './theme';
 import type { Viewer } from '@/lib/types';
+import { useInstall } from '@/lib/pwa';
 
 export function AccountMenu({ viewer }: { viewer: Viewer }) {
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<'main' | 'theme'>('main');
+  const [view, setView] = useState<'main' | 'theme' | 'install'>('main');
+  const installer = useInstall();
   const [theme, setThemeState] = useState<ThemeChoice>('system');
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => { setThemeState(currentTheme()); }, [open]);
@@ -64,6 +66,12 @@ export function AccountMenu({ viewer }: { viewer: Viewer }) {
                 <button role="menuitem" type="button" onClick={() => setView('theme')} className={item}>
                   <Icon.Moon size={20} /><span className="flex-1">Appearance: {themes.find((t) => t[0] === theme)![1].replace(' theme', '').replace('Use device', 'Device')}</span><Icon.ChevronRight size={18} />
                 </button>
+                {installer.mode && (
+                  <button role="menuitem" type="button" onClick={() => { if (installer.mode === 'ios') setView('install'); else void installer.install().then(close); }} className={item}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/free-me.svg" alt="" width={20} height={20} /><span className="flex-1">Install the app</span>
+                  </button>
+                )}
                 <Link role="menuitem" href="/settings" onClick={close} className={item}><Icon.Settings size={20} />Settings</Link>
                 <button role="menuitem" type="button" onClick={signOut} className={item}><Icon.SignOut size={20} />Sign out</button>
               </div>
@@ -71,6 +79,17 @@ export function AccountMenu({ viewer }: { viewer: Viewer }) {
                 <Link href="/legal/terms" onClick={close} className="hover:text-ink">Terms</Link><Link href="/legal/privacy" onClick={close} className="hover:text-ink">Privacy</Link><Link href="/legal/guidelines" onClick={close} className="hover:text-ink">Guidelines</Link><Link href="/legal/copyright" onClick={close} className="hover:text-ink">Copyright</Link>
               </div>
             </>
+          ) : view === 'install' ? (
+            <div className="px-4 pb-3 pt-1">
+              <button type="button" onClick={() => setView('main')} className="-mx-4 mb-3 flex w-[calc(100%+2rem)] items-center gap-3 border-b border-line px-4 pb-3 text-[16px]"><Icon.ChevronLeft size={20} />Install the app</button>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/icons/icon-192.png" alt="" width={56} height={56} className="rounded-2xl border border-line" />
+              <ol className="mt-3 list-decimal space-y-2 pl-5 text-[14px]">
+                <li>Tap the <b>Share</b> button at the bottom of Safari (a square with an arrow).</li>
+                <li>Choose <b>Add to Home Screen</b>.</li>
+                <li>Tap <b>Add</b>. Free Me opens full screen from its icon.</li>
+              </ol>
+            </div>
           ) : (
             <>
               <button type="button" onClick={() => setView('main')} className="flex w-full items-center gap-3 border-b border-line px-4 pb-3 pt-1 text-[16px]"><Icon.ChevronRight size={20} className="rotate-180" />Appearance</button>

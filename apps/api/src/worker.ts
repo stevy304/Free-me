@@ -13,6 +13,7 @@ import { createStorage } from './media/storage';
 import { Billing } from './billing/billing';
 import { Emitter } from '@socket.io/redis-emitter';
 import { setRealtimeSink } from './realtime/publish';
+import { createPushSender, setPushSender } from './push/push';
 import { finishLive, LiveSync } from './live/sync';
 import { join } from 'node:path';
 
@@ -31,6 +32,8 @@ async function main() {
   // Instant updates from the worker (processing progress, notifications, payments) reach browsers through Redis.
   const emitter = new Emitter(new Redis(config.redisUrl));
   setRealtimeSink((r, event, data) => emitter.to(r).emit(event, data));
+  // Phone notifications for videos the worker finishes (followers hear about a new video when it is ready).
+  setPushSender(createPushSender(prisma, config));
   // Follow-up jobs (higher qualities) go back on the queue, behind every waiting upload's first job.
   // Long videos are encoded in pieces: every worker (this one included) takes pieces from the chunk queue.
   const storage = createStorage(config);

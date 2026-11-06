@@ -24,7 +24,7 @@ export class FakeGoogle implements GoogleOAuth {
   }
 }
 
-export async function makeApp(opts: { adminEmails?: string[]; google?: GoogleOAuth; redis?: boolean; storageDir?: string; env?: Record<string, string> } = {}) {
+export async function makeApp(opts: { adminEmails?: string[]; google?: GoogleOAuth | 'real'; redis?: boolean; storageDir?: string; env?: Record<string, string> } = {}) {
   const config = loadConfig({
     NODE_ENV: 'test', DATABASE_URL: process.env.DATABASE_URL, REDIS_URL: opts.redis === false ? undefined : process.env.REDIS_URL, APP_URL: WEB, MAIL_TRANSPORT: 'memory',
     STORAGE_DRIVER: 'local', LOCAL_STORAGE_DIR: opts.storageDir ?? `${require('node:os').tmpdir()}/freeme-test-storage`, SCRATCH_DIR: `${require('node:os').tmpdir()}/freeme-test-scratch`, QUEUE_PREFIX: 'fmtest', UPLOAD_PART_MB: '5',
@@ -32,7 +32,9 @@ export async function makeApp(opts: { adminEmails?: string[]; google?: GoogleOAu
     ...opts.env,
   });
   const google = opts.google ?? Object.assign(new FakeGoogle(), { enabled: false });
-  const mod = await Test.createTestingModule({ imports: [AppModule.forRoot(config)] }).overrideProvider(GOOGLE_OAUTH).useValue(google).compile();
+  const builder = Test.createTestingModule({ imports: [AppModule.forRoot(config)] });
+  // 'real': the real Google client (keys from Administration), for settings tests; nothing is sent to Google.
+  const mod = await (google === 'real' ? builder : builder.overrideProvider(GOOGLE_OAUTH).useValue(google)).compile();
   const app = mod.createNestApplication<NestExpressApplication>({ logger: ['error'] });
   configureApp(app, config);
   await app.init();
