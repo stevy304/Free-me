@@ -32,6 +32,9 @@ async function main() {
   const jobs = new MediaJobs(prisma, createStorage(config), config, new Redis(config.redisUrl));
 
   const worker = new Worker<MediaJob>(MEDIA_QUEUE, async (job, _token, signal) => {
+    if (job.data.name === 'transcode') {
+      log.log({ event: 'transcode_started', videoId: job.data.videoId, attempt: job.attemptsMade + 1, queueWaitMs: Math.max(0, (job.processedOn ?? Date.now()) - job.timestamp) });
+    }
     try { await jobs.run(job.data, job.attemptsMade + 1 >= (job.opts.attempts ?? 1), signal); }
     catch (e) {
       if (e instanceof MediaError) throw new UnrecoverableError(e.message); // a bad file: retrying will not help
@@ -45,7 +48,7 @@ async function main() {
   const maintenance = new Queue('maintenance', { connection: connection(), prefix: config.media.queuePrefix });
   await maintenance.upsertJobScheduler('flush-views', { every: 15_000 }, { name: 'flush-views' });
   await maintenance.upsertJobScheduler('stale-uploads', { every: 3600_000 }, { name: 'stale-uploads' });
-  await maintenance.upsertJobScheduler('recover-stuck', { every: 15 * 60_000 }, { name: 'recover-stuck' });
+  await maintenance.upsertJobScheduler('recover-stuck', { every: 5 * 60_000 }, { name: 'recover-stuck' });
   // Money: check pending payments every minute; end memberships and share yesterday's ad revenue every 15 minutes.
   const billing = new Billing(prisma, config);
   await maintenance.upsertJobScheduler('billing-payments', { every: 60_000 }, { name: 'billing-payments' });
@@ -56,8 +59,10 @@ async function main() {
     else if (job.name === 'billing-payments') await billing.reconcile();
     else if (job.name === 'billing-daily') { await billing.expirePremium(); const n = await billing.settleAds(); if (n) log.log(`Settled ${n} day(s) of ad revenue`); }
     else if (job.name === 'recover-stuck') {
-      // One recovery job per video per hour at most (job ids are unique while the job exists).
-      for (const id of await jobs.stuckVideos()) await media.add('transcode', { name: 'transcode', videoId: id }, { ...jobOptions('transcode'), jobId: `recover-${id}-${Math.floor(Date.now() / 3600_000)}` });
+      for (const videoId of await jobs.stuckVideos()) {
+        const transcode = { name: 'transcode', videoId } as const;
+        await media.add(transcode.name, transcode, jobOptions(transcode));
+      }
     } else await jobs.views.flush();
   }, { connection: connection(), prefix: config.media.queuePrefix, concurrency: 1 });
 
@@ -75,7 +80,10 @@ async function main() {
         let sync = syncs.get(s.id);
         if (!sync) { sync = new LiveSync(liveStorage, s.id, join(liveDir, s.id)); syncs.set(s.id, sync); }
         if (s.status === 'LIVE') await sync.tick().catch((e) => log.warn(`live ${s.id}: ${(e as Error).message}`));
-        else { syncs.delete(s.id); await finishLive(prisma, liveStorage, sync, (videoId) => media.add('transcode', { name: 'transcode', videoId }, jobOptions('transcode')).then(() => undefined), log, config.media.ffmpegPath); }
+        else { syncs.delete(s.id); await finishLive(prisma, liveStorage, sync, async (videoId) => {
+          const transcode = { name: 'transcode', videoId } as const;
+          await media.add(transcode.name, transcode, jobOptions(transcode));
+        }, log, config.media.ffmpegPath); }
       }
     } catch (e) { log.warn(`live: ${(e as Error).message}`); } finally { liveBusy = false; }
   }, 1500) : null;

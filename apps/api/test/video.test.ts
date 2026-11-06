@@ -89,7 +89,8 @@ test('upload in parts, resume, process to adaptive HLS, play privately, publish 
   const parts = [...state.parts.map((p: any) => ({ partNumber: p.partNumber, etag: p.etag }))];
   for (const n of rest) parts.push({ partNumber: n, etag: (await agent.put(path(urls[n])).set('Origin', WEB).send(data.subarray((n - 1) * state.partSize, n * state.partSize)).expect(200)).headers.etag });
   await agent.post(`/api/uploads/${first.videoId}/complete`).set('Origin', WEB).send({ parts: parts.slice(0, -1) }).expect(400);
-  await agent.post(`/api/uploads/${first.videoId}/complete`).set('Origin', WEB).send({ parts }).expect(200);
+  await agent.post(`/api/uploads/${first.videoId}/complete`).set('Origin', WEB)
+    .send({ transfer: { bytes: data.length - state.partSize, durationMs: 500, retries: 0, peakParallel: 2 } }).expect(200);
   const id = first.videoId;
 
   const v = await until(agent, id, (x) => x.status === 'READY' && x.processingStage === 'Ready');

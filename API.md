@@ -67,7 +67,7 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 | POST | `/uploads` | `{ fileName, sizeBytes }`: creates a private draft video and a multipart upload; `{ videoId, partSize, partCount }`. Video formats only; up to `MAX_UPLOAD_MB` |
 | POST | `/uploads/:id/parts` | `{ partNumbers }` (up to 100): signed addresses to `PUT` each part to (valid 1 hour). Each response's `ETag` header is the part's tag |
 | GET | `/uploads/:id` | Parts already stored, for resuming |
-| POST | `/uploads/:id/complete` | `{ parts: [{ partNumber, etag }] }`: assembles the file, checks its size and queues processing |
+| POST | `/uploads/:id/complete` | `{}`: reads the parts from storage, assembles the file, checks its size and queues processing. Optional `transfer: { bytes, durationMs, retries, peakParallel }` reports browser transfer timing. The legacy `parts` manifest is also accepted |
 | DELETE | `/uploads/:id` | Cancels an unfinished upload |
 
 ## Creator Hub (creators) 🔒

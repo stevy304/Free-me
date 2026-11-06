@@ -27,13 +27,33 @@ export class MediaJobs {
     this.views = new ViewCounter(prisma, redis);
   }
 
-  private async withLock<T>(videoId: string, fn: () => Promise<T>): Promise<T> {
+  private async withLock<T>(videoId: string, fn: (lease?: AbortSignal) => Promise<T>): Promise<T> {
     const key = `fm:lock:video:${videoId}`;
     const token = randomUUID();
     if (this.redis) {
-      if ((await this.redis.set(key, token, 'PX', 4 * 3600_000, 'NX')) !== 'OK') throw new VideoBusy(`Video ${videoId} is busy.`);
-      try { return await fn(); } finally {
-        await this.redis.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end", 1, key, token);
+      const redis = this.redis;
+      const leaseMs = 60_000;
+      if ((await redis.set(key, token, 'PX', leaseMs, 'NX')) !== 'OK') throw new VideoBusy(`Video ${videoId} is busy.`);
+      const lease = new AbortController();
+      let renewedAt = performance.now();
+      let pending = false;
+      const heartbeat = setInterval(async () => {
+        if (performance.now() - renewedAt >= leaseMs * 0.75) lease.abort(new VideoBusy(`Video ${videoId} lost its lock.`));
+        if (pending || lease.signal.aborted) return;
+        pending = true;
+        try {
+          const renewalStarted = performance.now();
+          const ok = await redis.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end", 1, key, token, leaseMs);
+          if (ok === 1) renewedAt = renewalStarted;
+          else lease.abort(new VideoBusy(`Video ${videoId} lost its lock.`));
+        } catch (e) {
+          this.log.warn(`Could not renew video ${videoId} lock: ${(e as Error).message}`);
+        } finally { pending = false; }
+      }, leaseMs / 4);
+      heartbeat.unref();
+      try { return await fn(lease.signal); } finally {
+        clearInterval(heartbeat);
+        await redis.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end", 1, key, token);
       }
     }
     if (this.localLocks.has(videoId)) throw new VideoBusy(`Video ${videoId} is busy.`);
@@ -43,10 +63,12 @@ export class MediaJobs {
 
   /** `final` = no retries left: a failure becomes visible to the creator. */
   async transcode(videoId: string, final: boolean, signal?: AbortSignal) {
-    const done = await this.withLock(videoId, async () => {
+    const done = await this.withLock(videoId, async (lease) => {
+      const processingSignal = lease && signal ? AbortSignal.any([lease, signal]) : lease ?? signal;
       try {
-        return await this.processor.process(videoId, signal);
+        return await this.processor.process(videoId, processingSignal);
       } catch (e) {
+        if (processingSignal?.aborted) throw processingSignal.reason;
         const known = e instanceof MediaError;
         this.log.error(`${videoId}: ${(e as Error).message}`);
         if (known || final) {
@@ -121,12 +143,16 @@ export class MediaJobs {
 
   /**
    * Videos whose processing stopped without finishing (server restart, lost queue): still PROCESSING, or SD ready
-   * without HD, and untouched for 30 minutes. The caller queues them again; the per-video lock prevents overlap.
+   * with more qualities pending. Unqueued uploads become eligible in five minutes, active stages in thirty.
    */
   async stuckVideos(): Promise<string[]> {
     const before = new Date(Date.now() - 30 * 60_000);
     const rows = await this.prisma.video.findMany({
-      where: { updatedAt: { lt: before }, OR: [{ status: 'PROCESSING' }, { status: 'READY', processingStage: { not: 'Ready' } }] },
+      where: { OR: [
+        { status: 'PROCESSING', sourceFileS3Key: { not: null }, processingStage: 'Waiting to process', updatedAt: { lt: new Date(Date.now() - 5 * 60_000) } },
+        { status: 'PROCESSING', updatedAt: { lt: before } },
+        { status: 'READY', processingStage: { not: 'Ready' }, updatedAt: { lt: before } },
+      ] },
       select: { id: true }, take: 200,
     });
     return rows.map((r) => r.id);

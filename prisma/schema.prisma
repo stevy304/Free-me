@@ -266,6 +266,7 @@ model Video {
   processingStage       String?           // "Uploading", "SD ready", "HD processing", ...
   processingError       String?
   mediaLocation         MediaLocation     @default(PRIVATE)
+  uploadPartBytes       BigInt?           // negotiated size for resumable uploads
   uploadId              String?           // multipart upload in progress
   sourceSizeBytes       BigInt?
   monetizationEnabled   Boolean           @default(false)

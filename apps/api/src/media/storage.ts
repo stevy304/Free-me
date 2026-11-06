@@ -5,7 +5,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, normalize, relative, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { Readable } from 'node:stream';
@@ -28,7 +28,7 @@ export interface Storage {
   completeMultipart(key: string, uploadId: string, parts: Array<{ partNumber: number; etag: string }>): Promise<void>;
   abortMultipart(key: string, uploadId: string): Promise<void>;
   head(key: string): Promise<{ size: number } | null>;
-  download(key: string, toPath: string): Promise<void>;
+  download(key: string, toPath: string, signal?: AbortSignal): Promise<void>;
   putFile(key: string, fromPath: string, opts: PutOptions): Promise<void>;
   putBuffer(key: string, body: Buffer, opts: PutOptions): Promise<void>;
   getText(key: string): Promise<string | null>;
@@ -81,10 +81,10 @@ export class S3Storage implements Storage {
     try { const r = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key })); return { size: r.ContentLength ?? 0 }; }
     catch (e) { if ((e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) return null; throw e; }
   }
-  async download(key: string, toPath: string) {
+  async download(key: string, toPath: string, signal?: AbortSignal) {
     await mkdir(dirname(toPath), { recursive: true });
-    const r = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
-    await pipeline(r.Body as Readable, createWriteStream(toPath));
+    const r = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }), { abortSignal: signal });
+    await pipeline(r.Body as Readable, createWriteStream(toPath), { signal });
   }
   async putFile(key: string, fromPath: string, opts: PutOptions) {
     const { size } = await stat(fromPath);
@@ -181,25 +181,52 @@ export class LocalStorage implements Storage {
   async listParts(_key: string, uploadId: string) {
     const dir = this.partsDir(uploadId);
     const names = (await readdir(dir).catch(() => [] as string[])).filter((n) => /^\d+$/.test(n)).map(Number).sort((a, b) => a - b);
-    return Promise.all(names.map(async (n) => {
-      const buf = await readFile(join(dir, String(n)));
-      return { partNumber: n, size: buf.length, etag: `"${createHash('md5').update(buf).digest('hex')}"` };
-    }));
+    const parts: UploadedPart[] = [];
+    await mapLimit(names, 4, async (partNumber) => {
+      const hash = createHash('md5');
+      let size = 0;
+      for await (const chunk of createReadStream(join(dir, String(partNumber)))) {
+        hash.update(chunk);
+        size += chunk.length;
+      }
+      parts.push({ partNumber, size, etag: `"${hash.digest('hex')}"` });
+    });
+    return parts.sort((a, b) => a.partNumber - b.partNumber);
   }
   async completeMultipart(key: string, uploadId: string, parts: Array<{ partNumber: number; etag: string }>) {
-    const have = new Map((await this.listParts(key, uploadId)).map((p) => [p.partNumber, p.etag]));
+    const dir = this.partsDir(uploadId);
     const sorted = [...parts].sort((a, b) => a.partNumber - b.partNumber);
-    for (const p of sorted) if (have.get(p.partNumber) !== p.etag) throw new Error(`Part ${p.partNumber} is missing or different.`);
     const target = this.path(key);
+    const temporary = join(dir, `assembling-${randomUUID()}`);
     await mkdir(dirname(target), { recursive: true });
-    const out = createWriteStream(target);
-    for (const p of sorted) await pipeline(createReadStream(join(this.partsDir(uploadId), String(p.partNumber))), out, { end: false });
-    await new Promise<void>((res, rej) => out.end((e?: Error | null) => (e ? rej(e) : res())));
-    await rm(this.partsDir(uploadId), { recursive: true, force: true });
+
+    async function* checkedParts() {
+      for (const part of sorted) {
+        const hash = createHash('md5');
+        for await (const chunk of createReadStream(join(dir, String(part.partNumber)))) {
+          hash.update(chunk);
+          yield chunk;
+        }
+        if (`"${hash.digest('hex')}"` !== part.etag) throw new Error(`Part ${part.partNumber} is different.`);
+      }
+    }
+
+    try {
+      await pipeline(checkedParts(), createWriteStream(temporary));
+      await rename(temporary, target);
+    } finally {
+      await rm(temporary, { force: true });
+    }
+    await rm(dir, { recursive: true, force: true });
   }
+
   async abortMultipart(_key: string, uploadId: string) { await rm(this.partsDir(uploadId), { recursive: true, force: true }); }
   async head(key: string) { try { return { size: (await stat(this.path(key))).size }; } catch { return null; } }
-  async download(key: string, toPath: string) { await mkdir(dirname(toPath), { recursive: true }); await copyFile(this.path(key), toPath); }
+  async download(key: string, toPath: string, signal?: AbortSignal) {
+    await mkdir(dirname(toPath), { recursive: true });
+    if (signal) await pipeline(createReadStream(this.path(key)), createWriteStream(toPath), { signal });
+    else await copyFile(this.path(key), toPath);
+  }
   async putFile(key: string, fromPath: string) { const p = this.path(key); await mkdir(dirname(p), { recursive: true }); await copyFile(fromPath, p); }
   async putBuffer(key: string, body: Buffer) { const p = this.path(key); await mkdir(dirname(p), { recursive: true }); await writeFile(p, body); }
   async getText(key: string) { try { return await readFile(this.path(key), 'utf8'); } catch { return null; } }

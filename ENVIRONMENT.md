@@ -38,7 +38,7 @@ Values for local development are in [.env.example](.env.example). In production 
 | `MEDIA_PUBLIC_BASE_URL` | with s3 | local: `${APP_URL}/api/storage/local/pub` | CDN address of the bucket's `pub/` prefix, e.g. `https://media.freeme.example/pub` |
 | `LOCAL_STORAGE_DIR` | | `./.data/storage` | Folder for the local driver |
 | `MAX_UPLOAD_MB` | | `20480` (20 GB) | Largest upload |
-| `UPLOAD_PART_MB` | | `16` | Size of each upload part (5 or more; at most 10,000 parts per file) |
+| `UPLOAD_PART_MB` | | `16` | Base upload part size in MiB (5 or more). New S3 uploads of at least 4 GiB use at least 64 MiB per part. |
 | `SCRATCH_DIR` | | `/tmp/freeme-scratch` | Worker's working folder (source and renditions while processing): put it on a fast local disk with room for the largest uploads |
 | `WORKER_CONCURRENCY` | | `2` | Videos one worker instance processes at once |
 | `TRANSCODE_PRESET` | | `veryfast` | x264 preset: faster = quicker processing, slightly larger files |

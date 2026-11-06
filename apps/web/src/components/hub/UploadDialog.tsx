@@ -168,7 +168,7 @@ export function UploadDialog() {
               <span className="flex gap-2">
                 {snap.state === 'uploading' && <button type="button" onClick={() => item!.upload.pause()} className="flex items-center gap-1 rounded-full px-3 py-1 hover:bg-surface"><Icon.Pause size={14} />Pause</button>}
                 {(snap.state === 'paused' || snap.state === 'error') && <button type="button" onClick={() => item!.upload.resume()} className="flex items-center gap-1 rounded-full px-3 py-1 text-brand hover:bg-surface"><Icon.Play size={14} />Resume</button>}
-                {snap.state !== 'done' && snap.state !== 'cancelled' && <button type="button" onClick={() => void item!.upload.cancel()} className="rounded-full px-3 py-1 hover:bg-surface">Cancel upload</button>}
+                {snap.state !== 'done' && snap.state !== 'cancelled' && snap.state !== 'finishing' && <button type="button" onClick={() => void item!.upload.cancel()} className="rounded-full px-3 py-1 hover:bg-surface">Cancel upload</button>}
               </span>
             </div>
           </footer>
