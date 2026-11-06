@@ -84,7 +84,15 @@ export class MediaJobs {
         const known = e instanceof MediaError;
         this.log.error(`${videoId}: ${(e as Error).message}`);
         if (known || final) {
-          await this.prisma.video.updateMany({ where: { id: videoId }, data: { status: 'FAILED', processingStage: 'Failed', processingError: known ? (e as Error).message : 'Processing failed. Try uploading the video again.' } });
+          const message = known ? (e as Error).message : 'Processing failed. Try uploading the video again.';
+          await this.prisma.video.updateMany({
+            where: { id: videoId, status: 'PROCESSING', hlsMasterKey: null },
+            data: { status: 'FAILED', processingStage: 'Failed', processingError: message },
+          });
+          if (part === 'rest') await this.prisma.video.updateMany({
+            where: { id: videoId, status: 'READY', hlsMasterKey: { not: null } },
+            data: { processingStage: 'Ready', processingError: 'Some higher qualities could not be generated.' },
+          });
         }
         throw e;
       }
@@ -188,13 +196,18 @@ export class MediaJobs {
 
   /** Cancels uploads nobody finished within 3 days (their parts would otherwise use storage forever). */
   async cleanupStaleUploads(): Promise<number> {
-    const stale = await this.prisma.video.findMany({ where: { status: 'UPLOADING', createdAt: { lt: new Date(Date.now() - 3 * 86_400_000) } }, take: 500 });
+    const before = new Date(Date.now() - 3 * 86_400_000);
+    const stale = await this.prisma.video.findMany({ where: { status: 'UPLOADING', updatedAt: { lt: before } }, take: 500 });
+    let removed = 0;
     for (const v of stale) {
+      const deleted = await this.prisma.video.deleteMany({ where: { id: v.id, status: 'UPLOADING', updatedAt: { lt: before } } });
+      if (!deleted.count) continue;
       if (v.uploadId && v.sourceFileS3Key) await this.storage.abortMultipart(v.sourceFileS3Key, v.uploadId);
-      await this.prisma.video.delete({ where: { id: v.id } }).catch(() => undefined);
+      await this.storage.deletePrefix(`src/${v.id}/`);
+      removed++;
     }
-    if (stale.length) this.log.log(`Removed ${stale.length} abandoned uploads`);
-    return stale.length;
+    if (removed) this.log.log(`Removed ${removed} abandoned uploads`);
+    return removed;
   }
 
   /**

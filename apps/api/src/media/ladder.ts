@@ -65,7 +65,7 @@ export function masterPlaylist(entries: MasterEntry[], audio = false): string {
   if (audio) lines.push(`#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="${AUDIO.group}",NAME="Original",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="2",URI="${AUDIO.playlist}"`);
   for (const e of [...entries].sort((a, b) => a.bandwidth - b.bandwidth)) {
     const bandwidth = e.bandwidth + (audio ? AUDIO.kbps * 1000 : 0);
-    const codecs = audio ? `${e.codecs},${AUDIO.codecs}` : e.codecs;
+    const codecs = audio ? [...new Set([...e.codecs.split(','), AUDIO.codecs])].join(',') : e.codecs;
     lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},AVERAGE-BANDWIDTH=${Math.round(bandwidth * 0.75)},RESOLUTION=${e.width}x${e.height},CODECS="${codecs}",FRAME-RATE=${e.frameRate.toFixed(3)},NAME="${e.name}"${audio ? `,AUDIO="${AUDIO.group}"` : ''}`);
     lines.push(e.playlist);
   }

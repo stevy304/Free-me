@@ -94,14 +94,14 @@ export class UploadsController {
   @ApiOperation({ summary: 'Upload state, for resuming: the parts already stored' })
   async state(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     const v = await this.mine(auth, id);
-    if (v.status !== 'UPLOADING' || !v.uploadId) return { videoId: v.id, status: v.status, parts: [] };
+    if (v.status !== 'UPLOADING' || !v.uploadId) return { videoId: v.id, status: v.status, isAd: v.isAd, parts: [] };
     const key = v.sourceFileS3Key!;
     const parts = await this.storage.listParts(key, v.uploadId).catch(async (error: unknown) => {
       if (await this.storage.head(key)) return [];
       throw error;
     });
     const assembled = parts.length === 0 && (await this.storage.head(key))?.size === Number(v.sourceSizeBytes);
-    return { videoId: v.id, status: v.status, assembled, sizeBytes: Number(v.sourceSizeBytes), partSize: Number(v.uploadPartBytes ?? this.config.media.partBytes), parts };
+    return { videoId: v.id, status: v.status, isAd: v.isAd, assembled, sizeBytes: Number(v.sourceSizeBytes), partSize: Number(v.uploadPartBytes ?? this.config.media.partBytes), parts };
   }
 
   @Post(':id/parts')
@@ -112,6 +112,13 @@ export class UploadsController {
     if (v.status !== 'UPLOADING' || !v.uploadId) throw new ConflictException('This upload is already finished.');
     const max = Math.ceil(Number(v.sourceSizeBytes) / Number(v.uploadPartBytes ?? this.config.media.partBytes));
     if (body.partNumbers.some((n) => n > max)) throw new BadRequestException('Part number out of range.');
+    // An upload can span days on a slow connection. Keep its cleanup clock tied to recent activity.
+    if (Date.now() - v.updatedAt.getTime() >= 60 * 60_000) {
+      await this.prisma.video.updateMany({
+        where: { id: v.id, status: 'UPLOADING', updatedAt: v.updatedAt },
+        data: { updatedAt: new Date() },
+      });
+    }
     const entries = await Promise.all([...new Set(body.partNumbers)].map(async (n) =>
       [n, await this.storage.partUrl(v.sourceFileS3Key!, v.uploadId!, n, 3600)] as const,
     ));
@@ -124,19 +131,29 @@ export class UploadsController {
   async complete(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: CompleteDto, @Req() req: AppRequest) {
     const started = performance.now();
     const v = await this.mine(auth, id);
-    if (v.status === 'PROCESSING' || v.status === 'READY') return { videoId: v.id, status: v.status };
+    if (v.status === 'PROCESSING' || v.status === 'READY') {
+      if (this.queue.queue && v.status === 'PROCESSING' && v.processingStage === 'Waiting to process') {
+        await this.queue.add({ name: 'transcode', videoId: v.id });
+      }
+      return { videoId: v.id, status: v.status };
+    }
     if (v.status !== 'UPLOADING' || !v.uploadId) throw new ConflictException('This upload is already finished.');
-    const expected = Math.ceil(Number(v.sourceSizeBytes) / Number(v.uploadPartBytes ?? this.config.media.partBytes));
+    const partSize = Number(v.uploadPartBytes ?? this.config.media.partBytes);
+    const sourceSize = Number(v.sourceSizeBytes);
+    const expected = Math.ceil(sourceSize / partSize);
     const key = v.sourceFileS3Key!;
     let stored = await this.storage.head(key);
     if (!stored) {
-      const parts = body.parts ?? await this.storage.listParts(key, v.uploadId).catch(async (error: unknown) => {
+      const storedParts = await this.storage.listParts(key, v.uploadId).catch(async (error: unknown) => {
         stored = await this.storage.head(key);
         if (stored) return [];
         throw error;
       });
+      const valid = storedParts.filter(({ partNumber, size }) =>
+        partNumber >= 1 && partNumber <= expected && size === (partNumber === expected ? sourceSize - partSize * (expected - 1) : partSize));
+      const parts = body.parts ?? valid;
       const numbers = new Set(parts.map((p) => p.partNumber));
-      if (!stored && (parts.length !== expected || numbers.size !== expected || [...numbers].some((n) => n > expected))) throw new BadRequestException(`Upload all ${expected} parts first.`);
+      if (!stored && (valid.length !== expected || parts.length !== expected || numbers.size !== expected || [...numbers].some((n) => n > expected))) throw new BadRequestException(`Upload all ${expected} parts first.`);
       try { if (!stored) await this.storage.completeMultipart(key, v.uploadId, parts); }
       catch {
         // The object may already exist if storage completed the upload before the response was lost.
@@ -147,7 +164,7 @@ export class UploadsController {
     }
     if (!stored || stored.size !== Number(v.sourceSizeBytes)) {
       await this.storage.deletePrefix(`src/${v.id}/`);
-      await this.prisma.video.update({ where: { id: v.id }, data: { status: 'FAILED', uploadId: null, processingStage: 'Failed', processingError: 'The uploaded file is incomplete. Upload it again.' } });
+      await this.prisma.video.updateMany({ where: { id: v.id, status: 'UPLOADING' }, data: { status: 'FAILED', uploadId: null, processingStage: 'Failed', processingError: 'The uploaded file is incomplete. Upload it again.' } });
       throw new BadRequestException('The uploaded file is incomplete. Upload it again.');
     }
     const size = stored.size;
@@ -161,7 +178,11 @@ export class UploadsController {
       return true;
     });
     if (!transitioned) {
-      const latest = await this.mine(auth, id);
+      const latest = await this.prisma.video.findUnique({ where: { id } });
+      if (!latest) {
+        await this.storage.deletePrefix(`src/${id}/`);
+        throw new NotFoundException('Upload not found.');
+      }
       if (latest.status === 'PROCESSING' || latest.status === 'READY') return { videoId: v.id, status: latest.status };
       throw new ConflictException('This upload is already finished.');
     }
@@ -184,8 +205,10 @@ export class UploadsController {
   async cancel(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     const v = await this.mine(auth, id);
     if (v.status !== 'UPLOADING') throw new ConflictException('This upload is finished; delete the video in Studio instead.');
+    const deleted = await this.prisma.video.deleteMany({ where: { id: v.id, status: 'UPLOADING' } });
+    if (!deleted.count) throw new ConflictException('This upload is finished; delete the video in Studio instead.');
     if (v.uploadId) await this.storage.abortMultipart(v.sourceFileS3Key!, v.uploadId);
-    await this.prisma.video.delete({ where: { id: v.id } });
+    await this.storage.deletePrefix(`src/${v.id}/`);
     return { cancelled: true };
   }
 }

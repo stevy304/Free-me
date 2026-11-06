@@ -284,7 +284,7 @@ test('uploads abandoned for more than three days are removed', async () => {
   const agent = await creator();
   const fresh = (await agent.post('/api/uploads').set('Origin', WEB).send({ fileName: 'new.mp4', sizeBytes: 1000 }).expect(201)).body.videoId;
   const old = (await agent.post('/api/uploads').set('Origin', WEB).send({ fileName: 'old.mp4', sizeBytes: 1000 }).expect(201)).body.videoId;
-  await ctx.prisma.video.update({ where: { id: old }, data: { createdAt: new Date(Date.now() - 4 * 86_400_000) } });
+  await ctx.prisma.video.update({ where: { id: old }, data: { createdAt: new Date(Date.now() - 4 * 86_400_000), updatedAt: new Date(Date.now() - 4 * 86_400_000) } });
   const { MediaJobs } = await import('../src/media/jobs');
   const { STORAGE } = await import('../src/media/queue');
   const jobs = new MediaJobs(ctx.prisma, ctx.app.get(STORAGE), ctx.config, null);
