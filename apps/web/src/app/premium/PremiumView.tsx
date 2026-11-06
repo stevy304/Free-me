@@ -120,7 +120,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
               { href: '/hub?tab=money', icon: Icon.Wallet, title: 'Monetisation', text: 'Earnings and withdrawals' },
               { href: '/studio/live', icon: Icon.Live, title: 'Live Studio', text: 'Go live now' },
               { href: '/hub', icon: Icon.Hub, title: 'Creator Hub', text: 'Videos, Moments, podcasts' },
-              { href: '/ads', icon: Icon.Megaphone, title: 'Ads Manager', text: 'Promote with video ads' },
+              { href: '/studio/ads', icon: Icon.Megaphone, title: 'Ad Studio', text: 'Upload and run video ads' },
             ].map((t) => (
               <Link key={t.href} href={t.href} className="group rounded-3xl border border-line bg-elevated p-5 hover:border-brand">
                 <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-soft text-brand"><t.icon size={22} /></span>

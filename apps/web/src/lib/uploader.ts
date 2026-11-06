@@ -40,7 +40,7 @@ export class VideoUpload {
   private retryWaiters = new Set<() => void>();
   private samples: Array<[number, number]> = [];
 
-  constructor(readonly file: File, private readonly onChange: (s: UploadSnapshot) => void) {
+  constructor(readonly file: File, private readonly onChange: (s: UploadSnapshot) => void, private readonly options: { ad?: boolean } = {}) {
     this.snap = { state: 'starting', videoId: null, title: file.name.replace(/\.[^.]+$/, ''), sent: 0, total: file.size, bytesPerSecond: 0, secondsLeft: null, error: null };
   }
   get snapshot() { return this.snap; }
@@ -70,7 +70,7 @@ export class VideoUpload {
         }
       }
       if (!this.snap.videoId) {
-        const r = await api<{ videoId: string; title: string; partSize: number; partCount: number }>('/uploads', { body: { fileName: this.file.name, sizeBytes: this.file.size } });
+        const r = await api<{ videoId: string; title: string; partSize: number; partCount: number }>('/uploads', { body: { fileName: this.file.name, sizeBytes: this.file.size, ...(this.options.ad ? { ad: true } : {}) } });
         if (this.snap.state === 'cancelled') {
           await api(`/uploads/${r.videoId}`, { method: 'DELETE', body: {} });
           return;

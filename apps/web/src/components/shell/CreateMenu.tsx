@@ -34,6 +34,7 @@ export function CreateMenu() {
           <button role="menuitem" type="button" onClick={() => { setOpen(false); openDialog(null, 'moment'); }} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Moments size={20} />Post a Moment</button>
           <button role="menuitem" type="button" onClick={() => { setOpen(false); openDialog(null, 'podcast'); }} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Mic size={20} />Upload podcast</button>
           <Link role="menuitem" href="/studio/live" onClick={() => setOpen(false)} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Live size={20} />Go live</Link>
+          <Link role="menuitem" href="/studio/ads" onClick={() => setOpen(false)} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Megaphone size={20} />Create an ad</Link>
           <Link role="menuitem" href="/hub" onClick={() => setOpen(false)} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Hub size={20} />Creator Hub</Link>
         </div>
       )}

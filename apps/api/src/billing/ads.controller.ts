@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, IsUUID, IsUrl, Length, Max, Min } from 'class-validator';
 import type { Advertiser, Campaign, Video } from '@prisma/client';
@@ -65,6 +65,7 @@ export class AdsController {
   @ApiOperation({ summary: 'Create an ad campaign (a draft until it is paid)' })
   async create(@CurrentAuth() auth: AuthContext, @Body() body: CampaignDto) {
     await this.limits.consume(`ads:create:${auth.user.id}`, 30, 3600);
+    if (!hasPremiumAccess(auth.user)) throw new ForbiddenException('Ad Studio is part of Premium.');
     if (!isCountryCode(body.country)) throw new BadRequestException('Choose your business country from the list.');
     const targets = [...new Set((body.targetCountries ?? []).map((c) => c.toUpperCase()))];
     if (targets.some((c) => !isCountryCode(c))) throw new BadRequestException('Choose target countries from the list.');
@@ -102,7 +103,7 @@ export class AdsController {
     await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
     const c = await this.own(auth, id);
     if (c.status !== 'DRAFT') throw new BadRequestException('This campaign is already paid.');
-    const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'AD_CAMPAIGN', method: body.method, phone: body.phone, campaignId: c.id, usdCents: c.days * c.dailyRateCents, description: `Free Me ad, ${c.days} ${c.days === 1 ? 'day' : 'days'}`, returnPath: '/ads' }));
+    const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'AD_CAMPAIGN', method: body.method, phone: body.phone, campaignId: c.id, usdCents: c.days * c.dailyRateCents, description: `Free Me ad, ${c.days} ${c.days === 1 ? 'day' : 'days'}`, returnPath: '/studio/ads' }));
     return { payment: paymentView(p) };
   }
 

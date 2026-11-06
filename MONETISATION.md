@@ -5,7 +5,7 @@ Free Me has two sources of income, both paid up front with MTN MoMo or a card. P
 | Income | Price | Who pays | What they get |
 | --- | --- | --- | --- |
 | **Premium** | $10 a month (3, 6 and 12 months too) | Viewers and creators | The verified badge next to their name, monetisation (earning from ads), Live Studio, the Premium dashboard |
-| **Video ads** | $3 a day | Businesses | A 5–90 second video ad playing before videos of monetised creators, in the countries they choose, with a "Visit" button; results (shown, visits, rate) in Ads Manager. Each campaign is reviewed by an administrator before it runs |
+| **Video ads** | $3 a day | Businesses | A 5–90 second video ad playing before videos of monetised creators, in the countries they choose, with a "Visit" button; uploaded and run from **Ad Studio** (`/studio/ads`, part of Premium), with results (shown, visits, rate) there. Ad videos are kept apart from the Space's videos and never appear in feeds or search. Viewers see the ad full-frame before the video starts, with a small *Sponsored* label, the business card with *Visit*, and *Skip* after 5 seconds; the video does not start until the ad is known (at most 1.5 seconds). Each campaign is reviewed by an administrator before it runs |
 
 ## The rules for ads
 

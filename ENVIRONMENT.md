@@ -74,7 +74,7 @@ Values for local development are in [.env.example](.env.example). In production 
 
 Premium, ad campaigns and creator earnings are priced in US dollars. **The easiest way: Administration → Money → Payment settings**, in the app. There, administrators set the prices, switch on *Send money (manual)* (people pay to your MoMo, Airtel Money or bank account with a reference code, and you confirm each payment; no provider account needed), create MTN MoMo sandbox keys from a Collections subscription key in one click, or paste live MoMo and Flutterwave keys. Keys are stored encrypted with SESSION_SECRET. Settings saved in the app win over the variables below, which remain for servers configured from files. MONETISATION.md explains the numbers.
 
-To make someone an administrator (everything, including every Premium feature such as Live Studio): `npm run make-admin -- someone@example.com`, or list the address in `ADMIN_EMAILS`.
+To make someone an administrator (everything, including every Premium feature such as Live Studio): `npm run make-admin -- someone@example.com`, or list the address in `ADMIN_EMAILS`. To make that account the platform's official Space too (verified badge): `npm run make-admin -- someone@example.com --space "Free Me" --handle freeme` (the person must have signed in once).
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
