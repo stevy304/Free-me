@@ -42,6 +42,8 @@ Values for local development are in [.env.example](.env.example). In production 
 | `SCRATCH_DIR` | | `/tmp/freeme-scratch` | Worker's working folder (source and renditions while processing): put it on a fast local disk with room for the largest uploads |
 | `WORKER_CONCURRENCY` | | `2` | Videos one worker instance processes at once |
 | `TRANSCODE_PRESET` | | `veryfast` | x264 preset: faster = quicker processing, slightly larger files |
+| `TRANSCODE_PRESET_HIGH` | | `superfast` | x264 preset for 1080p and above (the rungs that cost the most CPU); `veryfast` for slightly smaller files, slower |
+| `VIDEO_ENCODER` | | `libx264` | `nvenc` (NVIDIA GPU) or `qsv` (Intel Quick Sync) for a media server with a GPU: several times faster. Falls back to `libx264` by itself if the GPU encoder fails |
 | `FFMPEG_PATH`, `FFPROBE_PATH` | | `ffmpeg`, `ffprobe` | Binaries |
 | `QUEUE_PREFIX` | | `fm` | Redis key prefix for the job queue |
 | `WHISPER_CPP_PATH`, `WHISPER_MODEL` | | off | Automatic captions on the media server: the whisper.cpp program (e.g. `/opt/whisper.cpp/build/bin/whisper-cli`) and a model file (e.g. `ggml-small.bin`). Set both or neither. See DEPLOYMENT.md → Automatic captions |

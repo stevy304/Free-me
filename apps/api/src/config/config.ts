@@ -94,6 +94,10 @@ export interface MediaConfig {
   ffprobePath: string;
   /** x264 preset: faster presets transcode quicker at a slightly larger size. */
   preset: string;
+  /** x264 preset for 1080p and above, the rungs that cost the most CPU. */
+  presetHigh: string;
+  /** libx264 (CPU), or a GPU encoder: nvenc (NVIDIA) or qsv (Intel Quick Sync). Falls back to libx264 if it fails. */
+  encoder: 'libx264' | 'nvenc' | 'qsv';
   workerConcurrency: number;
   /** BullMQ key prefix (lets tests run beside a real queue). */
   queuePrefix: string;
@@ -146,10 +150,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (Math.ceil(maxUploadBytes / partBytes) > 10_000) problems.push('MAX_UPLOAD_MB / UPLOAD_PART_MB must not exceed 10,000 parts.');
   const publicBaseUrl = (env.MEDIA_PUBLIC_BASE_URL?.trim() || (driver === 'local' ? `${appUrl}/api/storage/local/pub` : '')).replace(/\/+$/, '');
   if (driver === 's3' && !publicBaseUrl) problems.push('MEDIA_PUBLIC_BASE_URL is required (the CDN address of the pub/ prefix).');
+  const presets = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow'];
+  for (const k of ['TRANSCODE_PRESET', 'TRANSCODE_PRESET_HIGH']) if (env[k]?.trim() && !presets.includes(env[k]!.trim())) problems.push(`${k} must be one of ${presets.join(', ')}.`);
+  if (env.VIDEO_ENCODER?.trim() && !['libx264', 'nvenc', 'qsv'].includes(env.VIDEO_ENCODER.trim())) problems.push('VIDEO_ENCODER must be libx264, nvenc or qsv.');
   const media: MediaConfig = {
     driver, s3, localDir: env.LOCAL_STORAGE_DIR?.trim() || './.data/storage', publicBaseUrl, maxUploadBytes, partBytes,
     scratchDir: env.SCRATCH_DIR?.trim() || '/tmp/freeme-scratch', ffmpegPath: env.FFMPEG_PATH?.trim() || 'ffmpeg', ffprobePath: env.FFPROBE_PATH?.trim() || 'ffprobe',
-    preset: env.TRANSCODE_PRESET?.trim() || 'veryfast', workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
+    preset: env.TRANSCODE_PRESET?.trim() || 'veryfast', presetHigh: env.TRANSCODE_PRESET_HIGH?.trim() || 'superfast',
+    encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
     whisper: env.WHISPER_CPP_PATH?.trim() && env.WHISPER_MODEL?.trim()
       ? { bin: env.WHISPER_CPP_PATH.trim(), model: env.WHISPER_MODEL.trim(), threads: Math.max(1, Number(env.WHISPER_THREADS) || 4) } : null,
   };

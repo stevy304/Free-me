@@ -42,7 +42,7 @@ export class SystemController {
       this.redis.ping(),
       this.media.queue ? this.media.queue.getJobCounts('waiting', 'active', 'delayed', 'failed').catch(() => null) : Promise.resolve(null),
       this.prisma.video.groupBy({ by: ['status'], _count: { _all: true } }),
-      this.prisma.video.count({ where: { OR: [{ status: 'PROCESSING' }, { status: 'READY', processingStage: 'SD ready · processing HD' }], updatedAt: { lt: new Date(now - 2 * HOUR) } } }),
+      this.prisma.video.count({ where: { OR: [{ status: 'PROCESSING' }, { status: 'READY', processingStage: { not: 'Ready' } }], updatedAt: { lt: new Date(now - 2 * HOUR) } } }),
       this.prisma.video.count({ where: { status: 'FAILED', updatedAt: { gte: new Date(now - 24 * HOUR) } } }),
       this.prisma.video.aggregate({ _sum: { sourceSizeBytes: true } }),
       this.prisma.videoRendition.aggregate({ _sum: { fileSizeBytes: true } }),
