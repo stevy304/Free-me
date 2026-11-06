@@ -32,6 +32,9 @@ async function main() {
   const jobs = new MediaJobs(prisma, createStorage(config), config, new Redis(config.redisUrl));
 
   const worker = new Worker<MediaJob>(MEDIA_QUEUE, async (job, _token, signal) => {
+    if (job.data.name === 'transcode') {
+      log.log({ event: 'transcode_started', videoId: job.data.videoId, attempt: job.attemptsMade + 1, queueWaitMs: Math.max(0, (job.processedOn ?? Date.now()) - job.timestamp) });
+    }
     try { await jobs.run(job.data, job.attemptsMade + 1 >= (job.opts.attempts ?? 1), signal); }
     catch (e) {
       if (e instanceof MediaError) throw new UnrecoverableError(e.message); // a bad file: retrying will not help

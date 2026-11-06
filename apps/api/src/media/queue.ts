@@ -42,6 +42,7 @@ export class MediaQueue implements OnModuleDestroy {
 
   async add(job: MediaJob) {
     if (this.queue) { await this.queue.add(job.name, job, jobOptions(job.name)); return; }
+    if (job.name === 'transcode') this.log.log({ event: 'transcode_started', videoId: job.videoId, attempt: 1, queueWaitMs: 0 });
     void this.inline!.run(job, true).catch((e) => this.log.error(`${job.name} ${job.videoId}: ${(e as Error).message}`));
   }
 

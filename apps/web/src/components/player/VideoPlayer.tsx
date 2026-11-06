@@ -37,6 +37,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const box = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const hls = useRef<Hls | null>(null);
+  const firstPlay = useRef<{ started: number | null; measured: boolean }>({ started: null, measured: false });
   const [playing, setPlaying] = useState(false);
   const [waiting, setWaiting] = useState(true);
   const [time, setTime] = useState(0);
@@ -110,6 +111,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   // Source: native HLS on Safari/iOS, hls.js elsewhere.
   useEffect(() => {
     const el = video.current!;
+    firstPlay.current = { started: null, measured: false };
     setError(null); setLevels([]); setLevel(-1); reported.current = false; watched.current = 0;
     const v = Number(store.get('fm_volume') ?? '1'); const m = store.get('fm_muted') === '1';
     el.volume = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1; el.muted = m; setVolume(el.volume); setMuted(m);
@@ -234,7 +236,20 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     <div ref={box} onMouseMove={poke} onMouseLeave={() => playing && setIdle(true)}
       className={`group relative aspect-video w-full select-none overflow-hidden bg-black ${full ? '' : 'sm:rounded-[24px]'} ${showUi ? '' : 'cursor-none'}`}>
       <video ref={video} playsInline poster={poster ?? undefined} className="h-full w-full" onPointerUp={onTap} onClick={(e) => { if ((e.nativeEvent as PointerEvent).pointerType === 'touch') return; toggle(); }} onDoubleClick={(e) => { if ((e.nativeEvent as PointerEvent).pointerType === 'touch') return; fullscreen(); }}
-        onPlay={() => setPlaying(true)} onPause={() => { setPlaying(false); save(); }} onWaiting={() => setWaiting(true)} onPlaying={() => setWaiting(false)} onCanPlay={() => setWaiting(false)}
+        onPlay={() => {
+          firstPlay.current.started ??= performance.now();
+          setPlaying(true);
+        }} onPause={() => {
+          if (!firstPlay.current.measured) firstPlay.current.started = null;
+          setPlaying(false); save();
+        }} onWaiting={() => setWaiting(true)} onPlaying={() => {
+          setWaiting(false);
+          const { started, measured } = firstPlay.current;
+          if (started !== null && !measured) {
+            performance.measure('free-me:play-to-playing', { start: started });
+            firstPlay.current.measured = true;
+          }
+        }} onCanPlay={() => setWaiting(false)}
         onTimeUpdate={onTime} onDurationChange={(e) => setDuration(e.currentTarget.duration)} onEnded={() => { setPlaying(false); save(true); onEnded?.(); }}
         onVolumeChange={(e) => { setMuted(e.currentTarget.muted); setVolume(e.currentTarget.volume); }}>
         {captions.map((c) => <track key={c.language} kind="subtitles" src={c.url} srcLang={c.language} label={captionLabel(c)} />)}

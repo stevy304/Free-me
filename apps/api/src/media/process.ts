@@ -51,22 +51,30 @@ export class VideoProcessor {
   async process(videoId: string, signal?: AbortSignal): Promise<{ speech: string | null }> {
     const video = await this.prisma.video.findUnique({ where: { id: videoId } });
     if (!video?.sourceFileS3Key) return { speech: null }; // deleted, or never uploaded
+    const started = performance.now();
+    const timings: Record<string, number> = {};
+    const timed = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
+      const start = performance.now();
+      try { return await operation(); }
+      finally { timings[name] = Math.round(performance.now() - start); }
+    };
     const work = join(this.config.media.scratchDir, videoId);
     await rm(work, { recursive: true, force: true });
     await mkdir(work, { recursive: true });
     try {
       const source = join(work, `source${extname(video.sourceFileS3Key) || '.bin'}`);
       await this.setProgress(videoId, 1, 'Preparing');
-      await this.storage.download(video.sourceFileS3Key, source);
+      await timed('downloadMs', () => this.storage.download(video.sourceFileS3Key!, source));
       let source2 = source;
       let podcast = false;
       let info: ProbeResult;
-      try { info = await probe(this.config.media.ffprobePath, source); }
+      try { info = await timed('probeMs', () => probe(this.config.media.ffprobePath, source)); }
       catch (e) {
         if (!(e instanceof AudioOnly)) throw e;
         // A podcast: the cover (if the creator gave one) with a moving waveform, 1280x720.
         await this.setProgress(videoId, 2, 'Making the podcast video');
-        source2 = await this.podcastVideo(video, source, work, e.durationSeconds, signal);
+        const seconds = e.durationSeconds;
+        source2 = await timed('podcastMs', () => this.podcastVideo(video, source, work, seconds, signal));
         podcast = true;
         info = await probe(this.config.media.ffprobePath, source2);
       }
@@ -82,20 +90,36 @@ export class VideoProcessor {
       if (info.hdr && !hdr) this.log.warn(`${videoId}: HDR source2 but this ffmpeg lacks zscale/tonemap; colours will look flat`);
       // Nothing is published before the safety check: a match holds the video for a moderator.
       // The uploaded file itself is fingerprinted (for a podcast, the sound file).
-      const held = await screen(this.prisma, this.config, video, source, info, work);
+      const held = await timed('screeningMs', () => screen(this.prisma, this.config, video, source, info, work));
       if (held) { await hold(this.prisma, videoId, held); this.log.warn(`${videoId}: held for review: ${held}`); return { speech: null }; }
-      const thumbs = await this.thumbnails(source2, work, info, hdr);
-      const board = await this.storyboard(source2, work, info, hdr).catch((e) => { this.log.warn(`${videoId}: no seek previews: ${(e as Error).message.slice(0, 200)}`); return null; });
-      // Audio once, at the same loudness as every other video (measured first, then one linear gain).
-      const loud = info.hasAudio ? await measureLoudness(this.config.media.ffmpegPath, source2, signal) : null;
+      // These steps use independent video and audio streams. Keep the two-pass loudness target.
+      const [thumbs, loud] = await Promise.all([
+        timed('thumbnailsMs', () => this.thumbnails(source2, work, info, hdr, signal)),
+        info.hasAudio ? timed('loudnessMs', () => measureLoudness(this.config.media.ffmpegPath, source2, signal)) : null,
+      ]);
+      signal?.throwIfAborted();
       const done: MasterEntry[] = [];
       const fastWeight = full.length ? 40 : 90;
-      await this.encode(source2, work, fast, info, hdr, info.hasAudio ? { loudness: loud } : null, (f) => this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined), signal);
-      await this.publish(videoId, work, fast, info, done, { thumbs, board }, full.length ? 'SD ready · processing HD' : 'Ready', 5 + fastWeight);
+      await timed('sdEncodeMs', () => this.encode(source2, work, fast, info, hdr, info.hasAudio ? { loudness: loud } : null, (f) => this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined), signal));
+      const playable = await timed('sdPublishMs', () => this.publish(videoId, work, fast, info, done, thumbs, full.length ? 'SD ready · processing HD' : 'Playable · preparing seek previews', 5 + fastWeight));
+      if (playable !== null && !video.hlsMasterKey) this.log.log({ event: 'video_first_playable', videoId, processingToPlayableMs: Math.round(playable - started), ...timings });
       if (full.length) {
         await this.encode(source2, work, full, info, hdr, null, (f) => this.setProgress(videoId, 50 + f * 45, 'SD ready · processing HD').catch(() => undefined), signal);
-        await this.publish(videoId, work, full, info, done, null, 'Ready', 100);
+        await this.publish(videoId, work, full, info, done, null, 'Playable · preparing seek previews', 95);
       }
+
+      // Seek previews are optional and can be expensive on long or HDR sources.
+      try {
+        signal?.throwIfAborted();
+        const board = await timed('storyboardMs', () => this.storyboard(source2, work, info, hdr, signal));
+        const current = await this.prisma.video.findUniqueOrThrow({ where: { id: videoId }, select: { mediaLocation: true } });
+        await this.storage.putFile(mediaPrefix(videoId, current.mediaLocation) + board.meta.key, board.file, { contentType: TYPES['.jpg'], cacheControl: IMMUTABLE });
+        await this.prisma.video.update({ where: { id: videoId }, data: { storyboard: board.meta as unknown as Prisma.InputJsonValue } });
+        this.log.log({ event: 'video_storyboard_ready', videoId, storyboardMs: timings.storyboardMs });
+      } catch (e) {
+        this.log.warn(`${videoId}: no seek previews: ${(e as Error).message.slice(0, 200)}`);
+      }
+      await this.setProgress(videoId, 100, 'Ready');
       this.log.log(`${videoId}: ${ladder.map((r) => r.name).join(', ')} from ${info.width}x${info.height} ${info.durationSeconds.toFixed(1)}s`);
       if (!this.config.media.whisper || !info.hasAudio) return { speech: null };
       // The speech track for automatic captions, kept after the work folder goes; captioning runs after the lock.
@@ -125,16 +149,17 @@ export class VideoProcessor {
   }
 
   /** Three frames (25%, 50%, 75%) the creator can choose from; the middle one is the default. */
-  private async thumbnails(source: string, work: string, info: ProbeResult, hdr: Hdr): Promise<string[]> {
+  private async thumbnails(source: string, work: string, info: ProbeResult, hdr: Hdr, signal?: AbortSignal): Promise<string[]> {
     const dir = join(work, 'out', 'thumbs');
     await mkdir(dir, { recursive: true });
     const k = 1280 / Math.max(info.width, info.height);
     const scale = hdr ? toneMap(hdr, even(info.width * k), even(info.height * k)) : info.height > info.width ? 'scale=-2:1280' : 'scale=1280:-2';
     const files: string[] = [];
     for (const [i, at] of [0.25, 0.5, 0.75].entries()) {
+      if (signal?.aborted) break;
       const out = join(dir, `${i + 1}.jpg`);
       try {
-        await run(this.config.media.ffmpegPath, ['-hide_banner', '-y', '-ss', (info.durationSeconds * at).toFixed(2), '-i', source, '-frames:v', '1', '-vf', `${scale},format=yuvj420p`, '-q:v', '3', out]);
+        await run(this.config.media.ffmpegPath, ['-hide_banner', '-y', '-ss', (info.durationSeconds * at).toFixed(2), '-i', source, '-frames:v', '1', '-vf', `${scale},format=yuvj420p`, '-q:v', '3', out], undefined, signal);
         files.push(out);
       } catch { /* a frame that cannot be read near the end is skipped */ }
     }
@@ -145,7 +170,7 @@ export class VideoProcessor {
    * Seek-bar previews: up to 100 small frames (long side 160 px) on one JPEG sheet; videos over 10 minutes use
    * keyframes only, so it stays quick. The API turns the layout into a WebVTT track for the player.
    */
-  private async storyboard(source: string, work: string, info: ProbeResult, hdr: Hdr): Promise<{ file: string; meta: Storyboard }> {
+  private async storyboard(source: string, work: string, info: ProbeResult, hdr: Hdr, signal?: AbortSignal): Promise<{ file: string; meta: Storyboard }> {
     const interval = Math.max(2, Math.ceil(info.durationSeconds / 100));
     const count = Math.max(1, Math.min(100, Math.ceil(info.durationSeconds / interval)));
     const cols = Math.min(10, count);
@@ -157,9 +182,10 @@ export class VideoProcessor {
     await mkdir(dir, { recursive: true });
     const file = join(dir, 'storyboard.jpg');
     const look = hdr ? toneMap(hdr, width, height) : `scale=${width}:${height}`;
-    const sheet = (keyframesOnly: boolean) => run(this.config.media.ffmpegPath, ['-hide_banner', '-y', ...(keyframesOnly ? ['-skip_frame', 'nokey'] : []), '-i', source, '-an', '-vf', `fps=1/${interval},${look},format=yuvj420p,tile=${cols}x${rows}`, '-frames:v', '1', '-q:v', '5', file]);
+    const sheet = (keyframesOnly: boolean) => run(this.config.media.ffmpegPath, ['-hide_banner', '-y', ...(keyframesOnly ? ['-skip_frame', 'nokey'] : []), '-i', source, '-an', '-vf', `fps=1/${interval},${look},format=yuvj420p,tile=${cols}x${rows}`, '-frames:v', '1', '-q:v', '5', file], undefined, signal);
     // Long videos: keyframes only (fast). If the source has too few keyframes that yields nothing: decode it all.
     if (info.durationSeconds > 600) await sheet(true).catch(() => undefined);
+    signal?.throwIfAborted();
     if (!(await stat(file).catch(() => null))) await sheet(false);
     return { file, meta: { key: 'thumbs/storyboard.jpg', interval, count, cols, rows, width, height } };
   }
@@ -206,8 +232,7 @@ export class VideoProcessor {
   }
 
   /** Uploads a pass's files, records the renditions and rewrites the master playlist so players see the new rungs. */
-  private async publish(videoId: string, work: string, rungs: PlannedRung[], info: ProbeResult, done: MasterEntry[], first: { thumbs: string[]; board: { file: string; meta: Storyboard } | null } | null, stage: string, progress: number) {
-    const thumbs = first?.thumbs ?? null;
+  private async publish(videoId: string, work: string, rungs: PlannedRung[], info: ProbeResult, done: MasterEntry[], thumbs: string[] | null, stage: string, progress: number) {
     const video = await this.prisma.video.findUniqueOrThrow({ where: { id: videoId } });
     const location = wantedLocation(video);
     const prefix = mediaPrefix(videoId, location);
@@ -217,8 +242,8 @@ export class VideoProcessor {
     if (moveFrom) await this.storage.copyPrefix(moveFrom, prefix);
     const out = join(work, 'out');
     // The shared audio is encoded with the first pass and uploaded with it.
-    const audioFiles = first && info.hasAudio ? await walk(join(out, 'hls', 'audio')) : [];
-    const files = [...(await Promise.all(rungs.map((r) => walk(join(out, 'hls', r.name))))).flat(), ...audioFiles, ...(thumbs ?? []), ...(first?.board ? [first.board.file] : [])];
+    const audioFiles = thumbs && info.hasAudio ? await walk(join(out, 'hls', 'audio')) : [];
+    const files = [...(await Promise.all(rungs.map((r) => walk(join(out, 'hls', r.name))))).flat(), ...audioFiles, ...(thumbs ?? [])];
     let i = 0;
     await Promise.all(Array.from({ length: 16 }, async () => {
       while (i < files.length) {
@@ -243,15 +268,16 @@ export class VideoProcessor {
     const now = await this.prisma.video.findUnique({ where: { id: videoId }, select: { takenDownAt: true, thumbnailKey: true } });
     await this.prisma.video.update({ where: { id: videoId }, data: {
       status: now?.takenDownAt ? 'SUSPENDED' : 'READY', mediaLocation: location, hlsMasterKey: 'hls/master.m3u8', processingProgress: progress, processingStage: stage, processingError: null,
-      ...(first?.board ? { storyboard: first.board.meta as unknown as Prisma.InputJsonValue } : {}),
       ...(thumbKeys?.length ? { thumbnailCandidates: thumbKeys, ...(now?.thumbnailKey ? {} : { thumbnailKey: thumbKeys[Math.min(1, thumbKeys.length - 1)] }) } : {}),
     } });
+    const playable = now?.takenDownAt ? null : performance.now();
     await announceVideo(this.prisma, videoId);
     if (moveFrom) {
       // A custom thumbnail saved to the old place while this pass ran is picked up here (see the thumbnail upload).
       for (const dir of LATE_FOLDERS) await this.storage.copyPrefix(moveFrom + dir, prefix + dir);
       await this.storage.deletePrefix(moveFrom);
     }
+    return playable;
   }
 }
 

@@ -5,7 +5,9 @@ import { api, ApiError } from './client-api';
 export type UploadState = 'starting' | 'uploading' | 'paused' | 'finishing' | 'done' | 'error' | 'cancelled';
 export interface UploadSnapshot { state: UploadState; videoId: string | null; title: string; sent: number; total: number; bytesPerSecond: number; secondsLeft: number | null; error: string | null }
 
-const PARALLEL = 4;
+const INITIAL_PARALLEL = 4;
+const MAX_PARALLEL = 6;
+const SAMPLE_PARTS = 12;
 const URL_BATCH = 20;
 const STORE = 'fm_uploads';
 const fileKey = (f: File) => `${f.name}|${f.size}|${f.lastModified}`;
@@ -15,7 +17,7 @@ function remember(f: File, id: string | null) {
 }
 
 /**
- * Uploads one file straight to storage in parts: four at a time, each retried with backoff, with progress, speed and
+ * Uploads one file straight to storage in parts with adaptive concurrency, each retried with backoff, with progress, speed and
  * time left. Choosing the same file again after a closed tab or a lost connection resumes from the parts already stored.
  */
 export class VideoUpload {
@@ -24,6 +26,12 @@ export class VideoUpload {
   private partSize = 0;
   private partCount = 0;
   private done = new Set<number>();
+  private completedBytes = 0;
+  private transferBytes = 0;
+  private transferMs = 0;
+  private retries = 0;
+  private peakParallel = 0;
+  private lastTick = -Infinity;
   private inflight = new Map<number, XMLHttpRequest>();
   private progress = new Map<number, number>();
   private urls = new Map<number, string>();
@@ -50,7 +58,10 @@ export class VideoUpload {
         if (s?.status === 'UPLOADING') {
           this.assembled = s.assembled === true;
           this.partSize = s.partSize; this.partCount = Math.ceil(this.file.size / s.partSize);
-          for (const p of s.parts) this.done.add(p.partNumber);
+          for (const p of s.parts) {
+            this.done.add(p.partNumber);
+            this.completedBytes += this.size(p.partNumber);
+          }
           this.set({ videoId: previous });
         } else if (s?.status === 'PROCESSING' || s?.status === 'READY') {
           remember(this.file, null);
@@ -73,20 +84,21 @@ export class VideoUpload {
   }
 
   private sentBytes() {
-    let n = 0;
-    for (const p of this.done.keys()) n += this.size(p);
+    let n = this.completedBytes;
     for (const v of this.progress.values()) n += v;
     return n;
   }
   private size(p: number) { return p < this.partCount ? this.partSize : this.file.size - this.partSize * (this.partCount - 1); }
 
-  private tick() {
-    const sent = this.sentBytes();
+  private tick(force = false) {
     const now = performance.now();
+    if (!force && now - this.lastTick < 100) return;
+    this.lastTick = now;
+    const sent = this.sentBytes();
     this.samples.push([now, sent]);
     this.samples = this.samples.filter(([t]) => now - t < 8000);
     const [t0, s0] = this.samples[0];
-    const bps = now - t0 > 500 ? ((sent - s0) * 1000) / (now - t0) : this.snap.bytesPerSecond;
+    const bps = now - t0 > 500 ? Math.max(0, ((sent - s0) * 1000) / (now - t0)) : this.snap.bytesPerSecond;
     this.set({ sent, bytesPerSecond: bps, secondsLeft: bps > 0 ? Math.round((this.file.size - sent) / bps) : null });
   }
 
@@ -99,23 +111,69 @@ export class VideoUpload {
     if (this.snap.state === 'paused' || this.snap.state === 'cancelled') return;
     this.samples = [];
     this.set({ state: 'uploading', error: null, bytesPerSecond: 0, secondsLeft: null });
-    this.tick();
+    this.tick(true);
     const todo = this.assembled ? [] : Array.from({ length: this.partCount }, (_, i) => i + 1).filter((n) => !this.done.has(n));
-    let next = 0;
-    const worker = async () => {
-      try {
-        while (next < todo.length && this.snap.state === 'uploading') {
-          await this.sendPart(todo[next++]);
-        }
-      } catch (e) { this.fail(e); }
-    };
-    await Promise.all(Array.from({ length: PARALLEL }, worker));
+    if (todo.length) await this.transfer(todo);
     if (this.snap.state !== 'uploading') return;
     if (!this.assembled && this.done.size !== this.partCount) return this.fail(new Error('Some parts could not be uploaded.'));
     this.set({ state: 'finishing', sent: this.file.size, secondsLeft: 0 });
-    await api(`/uploads/${this.snap.videoId}/complete`, { body: {} });
+    await api(`/uploads/${this.snap.videoId}/complete`, { body: {
+      transfer: {
+        bytes: this.transferBytes,
+        durationMs: Math.round(this.transferMs),
+        retries: this.retries,
+        peakParallel: this.peakParallel,
+      },
+    } });
     remember(this.file, null);
     this.set({ state: 'done' });
+  }
+
+  private async transfer(todo: number[]) {
+    const started = performance.now();
+    const active = new Set<Promise<void>>();
+    let next = 0;
+    let parallel = INITIAL_PARALLEL;
+    let baseline = 0;
+    let settled = false;
+    let sampleStart = started;
+    let sampleBytes = this.transferBytes;
+    let sampleParts = this.done.size;
+    let sampleRetries = this.retries;
+
+    while (this.snap.state === 'uploading' && (next < todo.length || active.size)) {
+      while (next < todo.length && active.size < parallel) {
+        const part = todo[next++];
+        const task = this.sendPart(part).catch((e) => this.fail(e)).finally(() => active.delete(task));
+        active.add(task);
+        this.peakParallel = Math.max(this.peakParallel, active.size);
+      }
+      await Promise.race(active);
+      if (this.retries > sampleRetries) {
+        parallel = Math.max(2, parallel - 1);
+        sampleRetries = this.retries;
+        settled = true;
+      }
+      if (settled || todo.length - next < SAMPLE_PARTS) continue;
+      if (this.done.size - sampleParts < SAMPLE_PARTS) continue;
+
+      const now = performance.now();
+      const rate = (this.transferBytes - sampleBytes) / Math.max(1, now - sampleStart);
+      if (baseline && rate < baseline * 1.1) {
+        parallel--;
+        settled = true;
+      } else if (parallel < MAX_PARALLEL) {
+        parallel++;
+        baseline = rate;
+      } else {
+        settled = true;
+      }
+      sampleStart = now;
+      sampleBytes = this.transferBytes;
+      sampleParts = this.done.size;
+    }
+    await Promise.all(active);
+    this.transferMs += performance.now() - started;
   }
 
   private async urlFor(n: number) {
@@ -156,6 +214,8 @@ export class VideoUpload {
         });
         this.inflight.delete(n); this.progress.delete(n);
         this.done.add(n);
+        this.completedBytes += this.size(n);
+        this.transferBytes += this.size(n);
         this.urls.delete(n);
         this.tick();
         return;
@@ -163,6 +223,7 @@ export class VideoUpload {
         this.inflight.delete(n); this.progress.delete(n);
         if (this.snap.state !== 'uploading') return;
         if ((e as { status?: number }).status === 403) this.urls.delete(n); // link expired: get a new one
+        this.retries++;
         if (attempt >= 6) throw e;
         await new Promise<void>((resolve) => {
           const wake = () => {

@@ -161,3 +161,18 @@ above (thousands of simultaneous viewers), load test, then grow server by server
 ## Not yet covered (phase 6)
 
 Monitoring and alerts (Prometheus, Grafana) and a central log store (logs are already JSON lines with request ids, and `/api/admin/system` reports health, queue and failures), staged load tests at 100, 500 and 1,000 concurrent viewers, and a recorded restore drill.
+
+## Upload and playback timing
+
+With JSON logging enabled, match the API and worker events by `videoId`.
+
+| Event | What it measures |
+| --- | --- |
+| `upload_completed` | Browser bytes acknowledged and average bytes per second during active transfer runs, including signing and retry delays. Pauses, bytes resumed from an earlier tab, and server finalization are separate. `finalizeMs` measures server-side assembly and verification. |
+| `transcode_started` | `queueWaitMs` measures time since enqueue. Use attempt 1 for initial queue wait. On later attempts the value includes earlier attempts and backoff. The inline development worker reports zero. |
+| `video_first_playable` | `processingToPlayableMs` runs from worker processing start through publication of the first playable HLS renditions. The event also records download, probe, screening, thumbnail, loudness, SD encode, and SD publish timings. Thumbnail and loudness timings overlap. |
+| `video_storyboard_ready` | `storyboardMs` measures generating seek previews after playback is available. |
+
+The browser records the separate `free-me:play-to-playing` User Timing measure from the first play event to the first playing event for a source. Inspect it in the browser Performance panel. It measures viewer startup and stays in that browser.
+
+Uploads start with four concurrent parts. On sufficiently large files, the browser samples acknowledged throughput, tries up to six, and returns to the previous setting if the gain is under 10%. Retries reduce concurrency to a minimum of two. Use the API's transfer rate, retries, and peak concurrency to compare similar file sizes and network conditions.

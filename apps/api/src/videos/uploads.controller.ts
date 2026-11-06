@@ -1,7 +1,7 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, Logger, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsInt, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { extname } from 'node:path';
 import { APP_CONFIG, type AppConfig } from '../config/config';
 import { PrismaService } from '../database/prisma.service';
@@ -19,7 +19,16 @@ class StartUploadDto {
 }
 class PartNumbersDto { @ApiProperty({ example: [1, 2, 3] }) @IsArray() @ArrayMaxSize(100) @IsInt({ each: true }) @Min(1, { each: true }) @Max(10_000, { each: true }) partNumbers!: number[] }
 class PartDto { @IsInt() @Min(1) @Max(10_000) partNumber!: number; @IsString() @MaxLength(200) etag!: string }
-class CompleteDto { @ApiProperty({ type: [PartDto], required: false }) @IsOptional() @IsArray() @ArrayMaxSize(10_000) @ValidateNested({ each: true }) @Type(() => PartDto) parts?: PartDto[] }
+class TransferDto {
+  @IsInt() @Min(0) @Max(Number.MAX_SAFE_INTEGER) bytes!: number;
+  @IsInt() @Min(0) @Max(Number.MAX_SAFE_INTEGER) durationMs!: number;
+  @IsInt() @Min(0) @Max(100_000) retries!: number;
+  @IsInt() @Min(0) @Max(32) peakParallel!: number;
+}
+class CompleteDto {
+  @ApiProperty({ type: [PartDto], required: false }) @IsOptional() @IsArray() @ArrayMaxSize(10_000) @ValidateNested({ each: true }) @Type(() => PartDto) parts?: PartDto[];
+  @IsOptional() @IsObject() @ValidateNested() @Type(() => TransferDto) transfer?: TransferDto;
+}
 
 /**
  * Resumable uploads straight to object storage: the API hands out a signed address per part, the browser sends the
@@ -30,6 +39,7 @@ class CompleteDto { @ApiProperty({ type: [PartDto], required: false }) @IsOption
 @Controller('uploads')
 @RequireAuth('CREATOR')
 export class UploadsController {
+  private readonly log = new Logger(UploadsController.name);
   constructor(
     private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly limits: RateLimitService,
     private readonly queue: MediaQueue, @Inject(STORAGE) private readonly storage: Storage, @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -106,6 +116,7 @@ export class UploadsController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Finish the upload and start processing' })
   async complete(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: CompleteDto, @Req() req: AppRequest) {
+    const started = performance.now();
     const v = await this.mine(auth, id);
     if (v.status === 'PROCESSING' || v.status === 'READY') return { videoId: v.id, status: v.status };
     if (v.status !== 'UPLOADING' || !v.uploadId) throw new ConflictException('This upload is already finished.');
@@ -148,6 +159,14 @@ export class UploadsController {
       if (latest.status === 'PROCESSING' || latest.status === 'READY') return { videoId: v.id, status: latest.status };
       throw new ConflictException('This upload is already finished.');
     }
+    const transfer = body.transfer;
+    this.log.log({
+      event: 'upload_completed', videoId: v.id, sourceBytes: size,
+      transferBytes: transfer?.bytes, transferMs: transfer?.durationMs,
+      transferBytesPerSecond: transfer?.durationMs ? Math.round(transfer.bytes * 1000 / transfer.durationMs) : undefined,
+      retries: transfer?.retries, peakParallel: transfer?.peakParallel,
+      finalizeMs: Math.round(performance.now() - started),
+    });
     await this.queue.add({ name: 'transcode', videoId: v.id });
     await this.audit.record({ userId: auth.user.id, action: 'UPLOAD_COMPLETED', entityType: 'Video', entityId: v.id, req });
     return { videoId: v.id, status: 'PROCESSING' };
