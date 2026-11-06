@@ -32,6 +32,9 @@ export interface Storage {
   putFile(key: string, fromPath: string, opts: PutOptions): Promise<void>;
   putBuffer(key: string, body: Buffer, opts: PutOptions): Promise<void>;
   getText(key: string): Promise<string | null>;
+  /** Every key under a prefix. */
+  list(prefix: string): Promise<string[]>;
+  copyObject(from: string, to: string): Promise<void>;
   copyPrefix(from: string, to: string): Promise<number>;
   deletePrefix(prefix: string): Promise<number>;
   signedGetUrl(key: string, ttlSec: number): Promise<string>;
@@ -94,7 +97,7 @@ export class S3Storage implements Storage {
     try { const r = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key })); return await r.Body!.transformToString(); }
     catch (e) { if ((e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) return null; throw e; }
   }
-  private async list(prefix: string) {
+  async list(prefix: string) {
     const keys: string[] = [];
     let token: string | undefined;
     do {
@@ -103,6 +106,9 @@ export class S3Storage implements Storage {
       token = r.IsTruncated ? r.NextContinuationToken : undefined;
     } while (token);
     return keys;
+  }
+  async copyObject(from: string, to: string) {
+    await this.s3.send(new CopyObjectCommand({ Bucket: this.bucket, Key: to, CopySource: `${this.bucket}/${encodeURI(from)}` }));
   }
   async copyPrefix(from: string, to: string) {
     const keys = await this.list(from);
@@ -197,7 +203,7 @@ export class LocalStorage implements Storage {
   async putFile(key: string, fromPath: string) { const p = this.path(key); await mkdir(dirname(p), { recursive: true }); await copyFile(fromPath, p); }
   async putBuffer(key: string, body: Buffer) { const p = this.path(key); await mkdir(dirname(p), { recursive: true }); await writeFile(p, body); }
   async getText(key: string) { try { return await readFile(this.path(key), 'utf8'); } catch { return null; } }
-  private async list(prefix: string): Promise<string[]> {
+  async list(prefix: string): Promise<string[]> {
     const base = this.path(prefix);
     const out: string[] = [];
     const walk = async (dir: string) => {
@@ -209,6 +215,7 @@ export class LocalStorage implements Storage {
     await walk(base);
     return out;
   }
+  async copyObject(from: string, to: string) { const dst = this.path(to); await mkdir(dirname(dst), { recursive: true }); await copyFile(this.path(from), dst); }
   async copyPrefix(from: string, to: string) {
     const keys = await this.list(from);
     for (const k of keys) { const dst = this.path(to + k.slice(from.length)); await mkdir(dirname(dst), { recursive: true }); await copyFile(this.path(k), dst); }

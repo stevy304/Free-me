@@ -8,6 +8,7 @@ import { Logo } from '../Logo';
 import { AccountMenu } from './AccountMenu';
 import { CreateMenu } from './CreateMenu';
 import { FindPanel } from './FindPanel';
+import { NotificationBell } from './NotificationBell';
 import { useShell } from './ShellContext';
 
 export const TABS = [
@@ -65,6 +66,7 @@ export function Header() {
               <span className="hidden sm:block">{viewer.channel ? <CreateMenu /> : (
                 <Link href="/channel/create" className="flex h-10 items-center gap-2 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand hover:bg-brand-strong"><Icon.Plus size={20} />Create</Link>
               )}</span>
+              <NotificationBell />
               <AccountMenu viewer={viewer} />
             </>
           ) : path === '/login' ? null : (

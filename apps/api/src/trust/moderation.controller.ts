@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
+import { AUTOMATED_MATCH } from '../media/screening';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { Equals, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import type { Prisma, Report } from '@prisma/client';
@@ -58,7 +59,7 @@ export class ModerationController {
       include: { video: { include: { channel: true } }, reporter: { select: { email: true } } },
     });
     const items = await Promise.all(rows.slice(0, 50).map(async (r) => ({
-      ...this.view(r), reporterEmail: r.reporter.email,
+      ...this.view(r), reporterEmail: r.reporter?.email ?? null, automatic: !r.reporterId,
       video: { id: r.video.id, title: r.video.title, status: r.video.status, visibility: r.video.visibility, takenDownAt: r.video.takenDownAt, takedownReason: r.video.takedownReason, thumbnailUrl: await this.urls.thumb(r.video), durationSeconds: r.video.durationSeconds },
       channel: { handle: r.video.channel.handle, name: r.video.channel.name, strikes: await strikes(this.prisma, r.video.channelId) },
       openReportsOnVideo: await this.prisma.report.count({ where: { videoId: r.videoId, ...OPEN } }),
@@ -68,7 +69,7 @@ export class ModerationController {
 
   private view(r: Report) {
     return {
-      id: r.id, reason: r.reason, reasonLabel: reportReasonLabel(r.reason), details: r.details, timestampSeconds: r.timestampSeconds, status: r.status,
+      id: r.id, reason: r.reason, reasonLabel: r.reason === AUTOMATED_MATCH ? 'Automatic upload check' : reportReasonLabel(r.reason), details: r.details, timestampSeconds: r.timestampSeconds, status: r.status,
       createdAt: r.createdAt, resolvedAt: r.resolvedAt, resolution: r.resolution,
       notice: r.reason === 'COPYRIGHT' ? { claimantName: r.claimantName, claimantEmail: r.claimantEmail, claimantAddress: r.claimantAddress, originalWork: r.originalWork, signature: r.signature } : null,
       counter: r.counterAt ? { name: r.counterName, address: r.counterAddress, statement: r.counterStatement, submittedAt: r.counterAt } : null,
@@ -97,10 +98,15 @@ export class ModerationController {
         this.prisma.moderationAction.create({ data: { reportId: r.id, videoId: v.id, moderatorId: auth.user.id, action: 'VIDEO_TAKEDOWN', notes } }),
       ]);
       if (v.hlsMasterKey) await this.queue.add({ name: 'relocate', videoId: v.id });
+      // The same file uploaded again is held for review instead of going live.
+      const note = `Removed: ${r.reason === AUTOMATED_MATCH ? 'automatic check' : reportReasonLabel(r.reason)}`;
+      for (const [algorithm, value] of [['SHA256', v.sourceSha256], ['MD5', v.sourceMd5]] as const) {
+        if (value) await this.prisma.blockedHash.upsert({ where: { algorithm_value: { algorithm, value } }, create: { algorithm, value, source: 'TAKEDOWN', note, videoId: v.id }, update: {} });
+      }
       const copyright = r.reason === 'COPYRIGHT';
       await this.mail.send(noticeMail(creatorEmail, `Your video "${v.title}" was removed`, [
         `Your video "${v.title}" was removed from Free Me.`,
-        copyright ? `Reason: a copyright notice from ${r.claimantName}, about this work: ${r.originalWork}` : `Reason: ${reportReasonLabel(r.reason)} (Community Guidelines).`,
+        copyright ? `Reason: a copyright notice from ${r.claimantName}, about this work: ${r.originalWork}` : `Reason: ${r.reason === AUTOMATED_MATCH ? 'it matched content that is not allowed on Free Me' : reportReasonLabel(r.reason)} (Community Guidelines).`,
         `Moderator's note: ${notes}`,
         copyright
           ? 'If you believe the video was removed by mistake or misidentification, you can send a counter-notice from Creator Hub. We forward it to the person who sent the notice; unless they tell us within 10 to 14 business days that they have started court action, the video can be restored.'
@@ -109,6 +115,20 @@ export class ModerationController {
       if (copyright && r.claimantEmail) await this.mail.send(noticeMail(r.claimantEmail, 'The video in your copyright notice was removed', [`Hello ${r.claimantName},`, `After reviewing your notice (reference ${r.id}), we removed the video "${v.title}".`, 'If the creator sends a counter-notice, we will forward it to you.'])).catch(() => undefined);
       await this.audit.record({ userId: auth.user.id, action: 'VIDEO_TAKEN_DOWN', entityType: 'Video', entityId: v.id, req, details: { reportId: r.id, reason: r.reason } });
       return { video: { id: v.id, takenDown: true }, report: { id: r.id, status: 'RESOLVED' } };
+    }
+
+    if (body.action === 'dismiss' && v.status === 'FLAGGED' && !v.takenDownAt) {
+      // Release a video the automatic check held: it is processed and published as its creator chose.
+      if (r.status === 'RESOLVED' || r.status === 'DISMISSED') throw new BadRequestException('This report is already closed.');
+      const resolution = notes ? `Released after review: ${notes}` : 'Released after review.';
+      await this.prisma.$transaction([
+        this.prisma.video.update({ where: { id: v.id }, data: { status: 'PROCESSING', processingStage: 'Queued', screeningClearedAt: now } }),
+        this.prisma.report.updateMany({ where: { videoId: v.id, ...OPEN }, data: { status: 'DISMISSED', resolution, resolvedAt: now } }),
+        this.prisma.moderationAction.create({ data: { reportId: r.id, videoId: v.id, moderatorId: auth.user.id, action: 'DISMISSED', notes } }),
+      ]);
+      await this.queue.add({ name: 'transcode', videoId: v.id });
+      await this.audit.record({ userId: auth.user.id, action: 'VIDEO_RELEASED', entityType: 'Video', entityId: v.id, req, details: { reportId: r.id } });
+      return { video: { id: v.id, released: true }, report: { id: r.id, status: 'DISMISSED' } };
     }
 
     if (body.action === 'dismiss') {

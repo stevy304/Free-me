@@ -10,7 +10,7 @@ import { api } from '@/lib/client-api';
 import { duration, timeAgo } from '@/lib/format';
 
 interface Item {
-  id: string; reason: string; reasonLabel: string; details: string | null; timestampSeconds: number | null; status: string; createdAt: string; resolvedAt: string | null; resolution: string | null; reporterEmail: string;
+  id: string; reason: string; reasonLabel: string; details: string | null; timestampSeconds: number | null; status: string; createdAt: string; resolvedAt: string | null; resolution: string | null; reporterEmail: string | null; automatic?: boolean;
   notice: { claimantName: string; claimantEmail: string; claimantAddress: string; originalWork: string; signature: string } | null;
   counter: { name: string; address: string; statement: string; submittedAt: string } | null;
   video: { id: string; title: string; status: string; visibility: string; takenDownAt: string | null; takedownReason: string | null; thumbnailUrl: string | null; durationSeconds: number };
@@ -94,18 +94,19 @@ export function ModerationQueue() {
                     <p className="mt-1 text-[12px] text-muted">Restore 10 to 14 business days after the counter-notice unless the claimant shows that a court action was filed.</p>
                   </div>
                 )}
-                <p className="mt-1 text-[12px] text-muted">Reported by {r.reporterEmail}</p>
+                <p className="mt-1 text-[12px] text-muted">{r.automatic ? 'Raised by the automatic upload check' : `Reported by ${r.reporterEmail}`}</p>
+                {r.video.status === 'FLAGGED' && !r.video.takenDownAt && <p className="mt-1 text-[12px] font-semibold text-accent">Held: not processed or public until you decide. Release lets it go live as its creator chose.</p>}
                 {r.resolution && <p className="mt-2 rounded-lg bg-surface px-3 py-2"><span className="text-muted">Decision:</span> {r.resolution}</p>}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {!r.video.takenDownAt && state !== 'closed' && <button type="button" className={`${buttonClass.primary} bg-danger hover:bg-danger`} onClick={() => setDeciding({ item: r, action: 'remove' })}><Icon.Trash size={16} />Remove video</button>}
-                  {state === 'open' && <button type="button" className={buttonClass.soft} onClick={() => setDeciding({ item: r, action: 'dismiss' })}>Dismiss</button>}
+                  {state === 'open' && <button type="button" className={buttonClass.soft} onClick={() => setDeciding({ item: r, action: 'dismiss' })}>{r.video.status === 'FLAGGED' && !r.video.takenDownAt ? 'Release' : 'Dismiss'}</button>}
                   {r.video.takenDownAt && <button type="button" className={buttonClass.soft} onClick={() => setDeciding({ item: r, action: 'restore' })}><Icon.Check size={16} />Restore video</button>}
                 </div>
               </div>
             </div>
           </article>
         ))}</div>}
-      <Dialog open={!!deciding} onClose={() => setDeciding(null)} title={deciding?.action === 'remove' ? 'Remove video' : deciding?.action === 'restore' ? 'Restore video' : 'Dismiss report'}
+      <Dialog open={!!deciding} onClose={() => setDeciding(null)} title={deciding?.action === 'remove' ? 'Remove video' : deciding?.action === 'restore' ? 'Restore video' : deciding?.item.video.status === 'FLAGGED' ? 'Release held video' : 'Dismiss report'}
         footer={<><button type="button" className={buttonClass.quiet} onClick={() => setDeciding(null)}>Cancel</button><button type="button" className={buttonClass.primary} disabled={busy || (deciding?.action === 'remove' && !notes.trim())} onClick={decide}>{busy && <Icon.Spinner size={14} className="animate-spin" />}Confirm</button></>}>
         <p className="text-[14px] text-muted">{deciding?.action === 'remove' ? 'The video disappears everywhere, its media moves behind signed links, every open report on it is closed and the creator gets a strike.' : deciding?.action === 'restore' ? 'The video becomes watchable again and the strike is lifted.' : 'Nothing changes for the video.'}</p>
         <label className="mt-3 block text-[13px] font-medium">{deciding?.action === 'remove' ? 'Reason the creator will read (required)' : 'Note (optional)'}

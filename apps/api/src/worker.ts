@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { Logger } from '@nestjs/common';
+import { ConsoleLogger, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { Queue, UnrecoverableError, Worker } from 'bullmq';
 import Redis from 'ioredis';
@@ -17,6 +17,7 @@ async function main() {
   let config;
   try { config = loadConfig(); } catch (e) { if (e instanceof ConfigError) { console.error(e.message); process.exit(1); } throw e; }
   if (!config.redisUrl) { console.error('The worker needs REDIS_URL.'); process.exit(1); }
+  if (config.logFormat === 'json') Logger.overrideLogger(new ConsoleLogger({ json: true }));
   const log = new Logger('Worker');
   const prisma = new PrismaClient();
   const connection = () => new Redis(config.redisUrl!, { maxRetriesPerRequest: null });

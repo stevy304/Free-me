@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { notifySpark } from '../notifications/notify';
 import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsIn, IsNumber, IsOptional, Max, Min } from 'class-validator';
 import { PrismaService } from '../database/prisma.service';
@@ -37,8 +38,9 @@ export class ReactionsController {
       const delta = (rows: Array<{ isLike: boolean }>, like: boolean) => rows.filter((r) => r.isLike === like).length;
       const likes = delta(inserted, true) - delta(removed, true);
       const dislikes = delta(inserted, false) - delta(removed, false);
-      return tx.video.update({ where: { id }, data: { likeCount: { increment: likes }, dislikeCount: { increment: dislikes } }, select: { likeCount: true } });
+      return { ...(await tx.video.update({ where: { id }, data: { likeCount: { increment: likes }, dislikeCount: { increment: dislikes } }, select: { likeCount: true } })), sparked: likes > 0 };
     });
+    if (counts.sparked) await notifySpark(this.prisma, id, userId);
     return { reaction: body.value, likeCount: counts.likeCount };
   }
 

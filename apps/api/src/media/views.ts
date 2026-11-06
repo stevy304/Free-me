@@ -5,6 +5,16 @@ const PENDING_VIEWS = 'fm:views:pending';
 const PENDING_WATCH = 'fm:watch:pending';
 /** The same viewer counts once per video in this window. */
 const DEDUPE_SECONDS = 6 * 3600;
+const today = () => new Date().toISOString().slice(0, 10);
+
+/** Adds views and watch time to one video's row for one day (UTC). */
+async function addDaily(prisma: PrismaClient, videoId: string, day: string, views: number, seconds: number) {
+  if (!views && !seconds) return;
+  await prisma.$executeRaw`
+    INSERT INTO "VideoDailyStat" ("videoId", "day", "views", "watchSeconds") SELECT ${videoId}, ${day}::date, ${views}, ${seconds}
+    WHERE EXISTS (SELECT 1 FROM "Video" WHERE "id" = ${videoId})
+    ON CONFLICT ("videoId", "day") DO UPDATE SET "views" = "VideoDailyStat"."views" + EXCLUDED."views", "watchSeconds" = "VideoDailyStat"."watchSeconds" + EXCLUDED."watchSeconds"`;
+}
 
 /**
  * View and watch-time counting without a database write per view: views are de-duplicated and added up in Redis,
@@ -18,12 +28,15 @@ export class ViewCounter {
     const seconds = Math.max(0, Math.min(6 * 3600, Math.round(watchedSeconds)));
     if (!this.redis) {
       await this.prisma.video.update({ where: { id: videoId }, data: { viewCount: { increment: 1 }, watchTimeSeconds: { increment: seconds } } });
+      await addDaily(this.prisma, videoId, today(), 1, seconds);
       return true;
     }
     const fresh = await this.redis.set(`fm:view:${videoId}:${viewerKey}`, '1', 'EX', DEDUPE_SECONDS, 'NX');
     const m = this.redis.multi();
-    if (fresh) m.hincrby(PENDING_VIEWS, videoId, 1);
-    if (seconds) m.hincrby(PENDING_WATCH, videoId, seconds);
+    // Fields are "<video>|<day>", so a batch also knows which day each view belongs to.
+    const field = `${videoId}|${today()}`;
+    if (fresh) m.hincrby(PENDING_VIEWS, field, 1);
+    if (seconds) m.hincrby(PENDING_WATCH, field, seconds);
     await m.exec();
     return fresh === 'OK';
   }
@@ -40,9 +53,19 @@ export class ViewCounter {
     };
     const views = await take(PENDING_VIEWS);
     const watch = await take(PENDING_WATCH);
-    const ids = new Set([...Object.keys(views), ...Object.keys(watch)].filter((k) => k !== '__tmp'));
+    const fields = new Set([...Object.keys(views), ...Object.keys(watch)].filter((k) => k !== '__tmp'));
+    // Per day for the charts; per video for the totals. (Fields from before days were recorded count as today.)
+    const totals = new Map<string, { v: number; w: number }>();
+    for (const f of fields) {
+      const [id, day = today()] = f.split('|');
+      const v = Number(views[f] ?? 0); const w = Number(watch[f] ?? 0);
+      await addDaily(this.prisma, id, day, v, w);
+      const t = totals.get(id) ?? { v: 0, w: 0 };
+      totals.set(id, { v: t.v + v, w: t.w + w });
+    }
+    const ids = new Set(totals.keys());
     for (const id of ids) {
-      const v = Number(views[id] ?? 0); const w = Number(watch[id] ?? 0);
+      const { v, w } = totals.get(id)!;
       const video = await this.prisma.video.updateMany({ where: { id }, data: { viewCount: { increment: v }, monetizedViewCount: { increment: 0 }, watchTimeSeconds: { increment: w } } });
       if (video.count && v) {
         const row = await this.prisma.video.findUnique({ where: { id }, select: { channelId: true } });

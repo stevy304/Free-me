@@ -75,6 +75,7 @@ CI runs all of these on every pull request ([.github/workflows/verify.yml](.gith
 | [API.md](API.md) | Endpoints and conventions |
 | [SECURITY.md](SECURITY.md) | Authentication, sessions, CSRF, rate limits, audit |
 | [ENVIRONMENT.md](ENVIRONMENT.md) | Every environment variable |
+| [LAUNCH.md](LAUNCH.md) | Go-live checklist: accounts, email DNS, Google, checks, monitoring, legal |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Hetzner servers, firewall rules, release steps |
 | [BACKUP-AND-RECOVERY.md](BACKUP-AND-RECOVERY.md) | Backups, restore drill, recovery targets |
 | [ROADMAP.md](ROADMAP.md) | Phases and their exit criteria |

@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Put, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Put, Query, Req } from '@nestjs/common';
+import { announceVideo } from '../notifications/notify';
 import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import type { Video, Visibility } from '@prisma/client';
@@ -11,6 +12,7 @@ import { mediaPrefix, wantedLocation } from '../media/keys';
 import { MediaQueue, STORAGE } from '../media/queue';
 import type { Storage } from '../media/storage';
 import { MediaUrls } from './media-urls';
+import { CAPTION_MAX_BYTES, CaptionError, putMediaFile, toWebVtt } from '../media/captions';
 
 class UpdateVideoDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(100) title?: string;
@@ -53,6 +55,8 @@ export class HubController {
       thumbnailCandidates: await Promise.all(v.thumbnailCandidates.map((k) => this.urls.file(v, k))),
       renditions: (v.renditions ?? []).sort((a, b) => a.height * a.width - b.height * b.width).map((r) => r.resolution),
       playbackUrl: this.urls.playback(v), sourceSizeBytes: v.sourceSizeBytes?.toString() ?? null,
+      captions: (await this.prisma.caption.findMany({ where: { videoId: v.id }, orderBy: { language: 'asc' } }))
+        .map((c) => ({ language: c.language, source: c.source, cues: c.cueCount, updatedAt: c.updatedAt, url: `/api/videos/${v.id}/captions/${c.language}.vtt` })),
     };
   }
 
@@ -107,6 +111,7 @@ export class HubController {
     // Media follows visibility: public/unlisted to the CDN prefix, private (and removed) behind signed links.
     const want = wantedLocation({ visibility: (data.visibility as string | undefined) ?? v.visibility, takenDownAt: v.takenDownAt });
     if (v.hlsMasterKey && want !== v.mediaLocation) await this.queue.add({ name: 'relocate', videoId: id });
+    await announceVideo(this.prisma, id);
     await this.audit.record({ userId: auth.user.id, action: 'VIDEO_UPDATED', entityType: 'Video', entityId: id, req, details: { fields: Object.keys(data).concat(body.tags ? ['tags'] : []) } });
     return { video: await this.view(await this.mine(auth, id)) };
   }
@@ -122,8 +127,49 @@ export class HubController {
     const kind = IMAGE.find(([, magic]) => magic.every((b, i) => buf[i] === b));
     if (!kind || (kind[0] === 'image/webp' && buf.subarray(8, 12).toString() !== 'WEBP')) throw new BadRequestException('Use a JPEG, PNG or WebP image.');
     const rel = `thumbs/custom-${Date.now()}${kind[2]}`;
-    await this.storage.putBuffer(mediaPrefix(id, v.mediaLocation) + rel, buf, { contentType: kind[0], cacheControl: 'public, max-age=31536000, immutable' });
-    await this.prisma.video.update({ where: { id }, data: { thumbnailKey: rel, customThumbnail: true } });
+    // The media may be moving between public and private storage right now (a visibility change). Save the image
+    // where the files are, then record it only if they are still there; otherwise try again in the new place.
+    // A move copies thumbs/ once more after switching places, so an image recorded before the switch is never lost.
+    for (let attempt = 0; ; attempt++) {
+      const cur = await this.mine(auth, id);
+      await this.storage.putBuffer(mediaPrefix(id, cur.mediaLocation) + rel, buf, { contentType: kind[0], cacheControl: 'public, max-age=31536000, immutable' });
+      const r = await this.prisma.video.updateMany({ where: { id, mediaLocation: cur.mediaLocation }, data: { thumbnailKey: rel, customThumbnail: true } });
+      if (r.count) break;
+      if (attempt >= 2) throw new ConflictException('The video is being moved. Try again in a moment.');
+    }
+    return { video: await this.view(await this.mine(auth, id)) };
+  }
+
+  @Put(':id/captions/:lang')
+  @ApiOperation({ summary: 'Add or replace captions in one language: a WebVTT or SubRip (.srt) file as the request body, up to 1 MB' })
+  async putCaptions(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Param('lang') lang: string, @Req() req: AppRequest) {
+    const language = lang.toLowerCase();
+    if (!isLanguageCode(language)) throw new BadRequestException('Choose a language from the list.');
+    const v = await this.mine(auth, id);
+    const chunks: Buffer[] = []; let size = 0;
+    for await (const c of req as AsyncIterable<Buffer>) { size += c.length; if (size > CAPTION_MAX_BYTES) throw new BadRequestException('A caption file must be 1 MB or smaller.'); chunks.push(c); }
+    let parsed: { vtt: string; cues: number };
+    try { parsed = toWebVtt(Buffer.concat(chunks).toString('utf8')); } catch (e) { if (e instanceof CaptionError) throw new BadRequestException(e.message); throw e; }
+    const key = `captions/${language}.vtt`;
+    await putMediaFile(this.prisma, this.storage, id, key, Buffer.from(parsed.vtt), { contentType: 'text/vtt; charset=utf-8', cacheControl: 'public, max-age=300' })
+      .catch((e: Error) => { throw new ConflictException(e.message); });
+    // An upload in a language replaces automatic captions in that language (their file goes too).
+    const before = await this.prisma.caption.findUnique({ where: { videoId_language: { videoId: id, language } } });
+    await this.prisma.caption.upsert({ where: { videoId_language: { videoId: id, language } }, create: { videoId: id, language, source: 'UPLOADED', key, cueCount: parsed.cues }, update: { source: 'UPLOADED', key, cueCount: parsed.cues } });
+    if (before && before.key !== key) await this.storage.deletePrefix(mediaPrefix(id, v.mediaLocation) + before.key).catch(() => undefined);
+    await this.audit.record({ userId: auth.user.id, action: 'CAPTIONS_UPLOADED', entityType: 'Video', entityId: id, req, details: { language, cues: parsed.cues } });
+    return { video: await this.view(await this.mine(auth, v.id)) };
+  }
+
+  @Delete(':id/captions/:lang')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Remove captions in one language' })
+  async deleteCaptions(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Param('lang') lang: string) {
+    const v = await this.mine(auth, id);
+    const c = await this.prisma.caption.findUnique({ where: { videoId_language: { videoId: id, language: lang.toLowerCase() } } });
+    if (!c) throw new NotFoundException('No captions in that language.');
+    await this.prisma.caption.delete({ where: { id: c.id } });
+    await this.storage.deletePrefix(mediaPrefix(id, v.mediaLocation) + c.key);
     return { video: await this.view(await this.mine(auth, id)) };
   }
 

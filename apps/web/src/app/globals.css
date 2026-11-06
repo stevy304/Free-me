@@ -16,6 +16,8 @@
   --faint: #8a9693;
   --line: #e2e8e6;
   --brand: #0c827e;
+  /* Chart marks (validated: chroma and contrast on light surfaces) */
+  --chart-1: #009188;
   --brand-strong: #0a6b67;
   --brand-soft: #ddf1ee;
   --on-brand: #ffffff;
@@ -39,6 +41,7 @@
   --faint: #6b7d7a;
   --line: #243231;
   --brand: #2bb5ab;
+  --chart-1: #22a79d;
   --brand-strong: #5fd6cb;
   --brand-soft: #0f2e2c;
   --on-brand: #04201e;

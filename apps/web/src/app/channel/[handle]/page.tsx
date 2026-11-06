@@ -17,7 +17,15 @@ const load = (handle: string) => apiGet<ChannelPage>(`/channels/${encodeURICompo
 
 export async function generateMetadata({ params }: { params: Promise<{ handle: string }> }): Promise<Metadata> {
   const data = await load((await params).handle);
-  return data ? { title: data.channel.name, description: data.channel.description ?? `${data.channel.name} on Free Me` } : { title: 'Channel not found' };
+  if (!data) return { title: 'Channel not found', robots: { index: false } };
+  const c = data.channel;
+  const description = (c.description?.replace(/\s+/g, ' ').trim() || `Videos from ${c.name} on Free Me.`).slice(0, 200);
+  const image = c.avatarUrl ? [{ url: c.avatarUrl, alt: c.name }] : undefined;
+  return {
+    title: c.name, description, alternates: { canonical: `/@${c.handle}` },
+    openGraph: { type: 'profile', url: `/@${c.handle}`, title: c.name, description, siteName: 'Free Me', images: image },
+    twitter: { card: 'summary', title: c.name, description, images: image?.map((i) => i.url) },
+  };
 }
 
 export default async function Channel({ params, searchParams }: { params: Promise<{ handle: string }>; searchParams: Promise<{ tab?: string }> }) {

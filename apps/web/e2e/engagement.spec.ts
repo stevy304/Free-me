@@ -34,7 +34,7 @@ test('like, save, comment, history, report; a moderator removes the video; the c
   const title = `Lake at dawn ${run}`;
   const dir = mkdtempSync(join(tmpdir(), 'fm-e2e-'));
   const clip = join(dir, `${title}.mp4`);
-  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25:duration=5', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=5', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-shortest', clip]);
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25:duration=5', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=5', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-shortest', '-metadata', `comment=e2e ${run}`, clip]);
 
   // Creator publishes a video.
   const creator = await signedIn(browser, `lake.${run}@example.com`, '/channel/create');

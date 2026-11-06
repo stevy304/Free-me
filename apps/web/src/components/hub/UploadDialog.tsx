@@ -30,7 +30,7 @@ export function UploadDialog() {
     const tick = async () => {
       const r = await api<{ video: HubVideo }>(`/hub/videos/${snap.videoId}`).catch(() => null);
       if (stop) return;
-      if (r) setVideo((cur) => (cur && cur.status === r.video.status && cur.processingProgress === r.video.processingProgress && cur.thumbnailCandidates.length === r.video.thumbnailCandidates.length && cur.thumbnailUrl === r.video.thumbnailUrl ? cur : r.video));
+      if (r) setVideo((cur) => (cur && cur.status === r.video.status && cur.processingProgress === r.video.processingProgress && cur.thumbnailCandidates.length === r.video.thumbnailCandidates.length && cur.thumbnailUrl === r.video.thumbnailUrl && (cur.captions?.length ?? 0) === (r.video.captions?.length ?? 0) ? cur : r.video));
       if (!r || r.video.processingStage !== 'Ready' && r.video.status !== 'FAILED') setTimeout(tick, 2500);
     };
     void tick();

@@ -4,9 +4,22 @@ import { normalizeEmail } from '@free-me/shared';
  * Configuration from environment variables, checked once at start-up. A missing or unsafe setting stops the API
  * with a message that names it, instead of failing later on a user's request.
  */
+export interface SafetyConfig {
+  /** Optional outside matching service: POST { videoId, sha256, md5, durationSeconds, frames: [base64 JPEG] } → { match, label? }. */
+  scanUrl: string | null;
+  scanToken: string | null;
+  timeoutMs: number;
+  /** When the scanner cannot be reached: hold the upload (true) or let it through (false, default). */
+  failClosed: boolean;
+  /** Uploads a day for accounts in their first week. */
+  newAccountDailyUploads: number;
+}
+
 export interface AppConfig {
   nodeEnv: 'development' | 'test' | 'production';
   port: number;
+  /** json: one JSON object per line (production default, for log collectors); text: readable lines. */
+  logFormat: 'json' | 'text';
   /** Public origin of the web app (https://freeme.example). Cookies, redirects and the CSRF check use it. */
   appUrl: string;
   /** Extra origins allowed to send state-changing requests (comma-separated), e.g. a staging web app. */
@@ -24,6 +37,7 @@ export interface AppConfig {
   trustProxy: number;
   docsEnabled: boolean;
   media: MediaConfig;
+  safety: SafetyConfig;
   /** Who runs the service, shown on the legal pages and in notices (see ENVIRONMENT.md). */
   legal: LegalConfig;
 }
@@ -47,6 +61,8 @@ export interface MediaConfig {
   /** Public base address of the pub/ prefix (the CDN). Local driver: served by the API under /api/storage/local/pub. */
   publicBaseUrl: string;
   maxUploadBytes: number;
+  /** Automatic captions with whisper.cpp on the media server; null turns them off. */
+  whisper: { bin: string; model: string; threads: number } | null;
   /** Size of each upload part (S3 needs 5 MiB+, at most 10,000 parts). */
   partBytes: number;
   scratchDir: string;
@@ -110,7 +126,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     driver, s3, localDir: env.LOCAL_STORAGE_DIR?.trim() || './.data/storage', publicBaseUrl, maxUploadBytes, partBytes,
     scratchDir: env.SCRATCH_DIR?.trim() || '/tmp/freeme-scratch', ffmpegPath: env.FFMPEG_PATH?.trim() || 'ffmpeg', ffprobePath: env.FFPROBE_PATH?.trim() || 'ffprobe',
     preset: env.TRANSCODE_PRESET?.trim() || 'veryfast', workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
+    whisper: env.WHISPER_CPP_PATH?.trim() && env.WHISPER_MODEL?.trim()
+      ? { bin: env.WHISPER_CPP_PATH.trim(), model: env.WHISPER_MODEL.trim(), threads: Math.max(1, Number(env.WHISPER_THREADS) || 4) } : null,
   };
+  if (!!env.WHISPER_CPP_PATH?.trim() !== !!env.WHISPER_MODEL?.trim()) problems.push('Set both WHISPER_CPP_PATH and WHISPER_MODEL for automatic captions, or neither.');
   if (prod && !env.REDIS_URL) problems.push('REDIS_URL is required in production (rate limits, video jobs and view counts).');
 
   const email = (k: string) => { const v = env[k]?.trim(); if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) problems.push(`${k} must be an email address.`); return v || null; };
@@ -121,12 +140,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   if (problems.length) throw new ConfigError(`Free Me API configuration:\n- ${problems.join('\n- ')}`);
   return {
-    nodeEnv, port: Number(env.PORT || 4000), appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
+    nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
     sessionTtlDays: Math.min(90, Math.max(1, Number(env.SESSION_TTL_DAYS || 30))),
     google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,
     mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)),
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
     media, legal,
+    safety: {
+      scanUrl: env.SAFETY_SCAN_URL?.trim() || null, scanToken: env.SAFETY_SCAN_TOKEN?.trim() || null,
+      timeoutMs: Math.max(1000, Number(env.SAFETY_SCAN_TIMEOUT_MS) || 60_000), failClosed: env.SAFETY_SCAN_FAIL_CLOSED === 'true',
+      newAccountDailyUploads: Math.max(1, Number(env.NEW_ACCOUNT_DAILY_UPLOADS) || 5),
+    },
   };
 }
 

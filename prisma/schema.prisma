@@ -1,10 +1,13 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  // pg_trgm: typo-tolerant search on titles and Space names (ships with PostgreSQL).
+  extensions = [pg_trgm]
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 enum Role {
@@ -121,6 +124,8 @@ model User {
   watchHistories        WatchHistory[]
   interests             UserInterest[]
   reportsFiled          Report[]          @relation("UserReportsFiled")
+  notifications         Notification[]    @relation("NotificationsReceived")
+  notificationsCaused   Notification[]    @relation("NotificationsCaused")
   moderatorActions      ModerationAction[]
   auditLogs             AuditLog[]
 
@@ -218,6 +223,7 @@ model Channel {
 
   @@index([handle])
   @@index([isVerified])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Channel_name_trgm_idx")
 }
 
 model Video {
@@ -236,6 +242,13 @@ model Video {
   height                Int?
   thumbnailKey          String?           // storage key of the chosen thumbnail
   thumbnailCandidates   String[]          // storage keys of generated frames the creator can choose from
+  /// Seek-bar previews: { key, interval, count, cols, rows, width, height } of one sprite sheet under thumbs/.
+  storyboard            Json?
+  /// Fingerprints of the uploaded file, for matching against blocked content (removed videos, imported lists).
+  sourceSha256          String?
+  sourceMd5             String?
+  /// A moderator released this video after the automatic check held it; it is not checked again.
+  screeningClearedAt    DateTime?
   customThumbnail       Boolean           @default(false)
   isShort               Boolean           @default(false)
   madeForKids           Boolean           @default(false)
@@ -264,6 +277,11 @@ model Video {
   renditions            VideoRendition[]
   videoFiles            VideoFile[]
   tags                  VideoTag[]
+  captions              Caption[]
+  dailyStats            VideoDailyStat[]
+  notifications         Notification[]
+  /// When followers were told about this video (once, the first time it is public and ready).
+  announcedAt           DateTime?
   likes                 Like[]
   comments              Comment[]
   playlistItems         PlaylistItem[]
@@ -278,6 +296,8 @@ model Video {
   @@index([createdAt])
   @@index([channelId, createdAt])
   @@index([status, visibility, isShort, publishedAt])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "Video_title_trgm_idx")
+  @@index([sourceSha256])
 }
 
 model VideoRendition {
@@ -628,8 +648,8 @@ model Payout {
 
 model Report {
   id                    String            @id @default(uuid())
-  reporterId            String
-  reporter              User              @relation("UserReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  reporterId            String?           // null: raised by the automatic upload check
+  reporter              User?             @relation("UserReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
   videoId               String
   video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
   reason                String            // see REPORT_REASONS in packages/shared
@@ -689,4 +709,87 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+}
+
+enum CaptionSource {
+  UPLOADED
+  AUTO
+}
+
+/// Subtitles for one video in one language (WebVTT stored under the video's media prefix: captions/<language>.vtt).
+model Caption {
+  id                    String            @id @default(uuid())
+  videoId               String
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  language              String            // BCP 47, e.g. "en", "rw"
+  source                CaptionSource
+  key                   String            // relative to the video's media prefix
+  cueCount              Int
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@unique([videoId, language])
+}
+
+enum HashAlgorithm {
+  SHA256
+  MD5
+}
+
+enum BlockedHashSource {
+  TAKEDOWN
+  LIST
+}
+
+/// Content that must not come back: fingerprints of removed videos, and of known abusive material from imported lists.
+/// An upload that matches is held for a moderator before anyone can see it.
+model BlockedHash {
+  id                    String            @id @default(uuid())
+  algorithm             HashAlgorithm
+  value                 String            // lowercase hex
+  source                BlockedHashSource
+  note                  String?           // list name, or why the video was removed
+  videoId               String?           // the removed video it came from
+  createdAt             DateTime          @default(now())
+
+  @@unique([algorithm, value])
+}
+
+enum NotificationType {
+  NEW_VIDEO
+  COMMENT
+  REPLY
+  SPARK
+}
+
+/// What appears under the bell. Sparks on one video are grouped into one unread entry (count, latest actor).
+model Notification {
+  id                    String            @id @default(uuid())
+  userId                String
+  user                  User              @relation("NotificationsReceived", fields: [userId], references: [id], onDelete: Cascade)
+  type                  NotificationType
+  actorId               String?
+  actor                 User?             @relation("NotificationsCaused", fields: [actorId], references: [id], onDelete: SetNull)
+  videoId               String?
+  video                 Video?            @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  commentId             String?           // the comment or reply, to open it
+  count                 Int               @default(1)
+  readAt                DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([userId, updatedAt])
+  @@index([userId, readAt])
+}
+
+/// Views and watch time of one video on one day (UTC), written by the view counter's batches. Creator Hub's charts read it.
+model VideoDailyStat {
+  videoId               String
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  day                   DateTime          @db.Date
+  views                 Int               @default(0)
+  watchSeconds          BigInt            @default(0)
+
+  @@id([videoId, day])
+  @@index([day])
 }

@@ -57,7 +57,7 @@ export class CatalogController {
   @Get('videos/:id')
   @ApiOperation({ summary: 'One video for its watch page (public and unlisted when ready; private only for its owner), with the viewer\'s own state' })
   async video(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null) {
-    const v = await this.prisma.video.findUnique({ where: { id }, include: { channel: true, category: true } });
+    const v = await this.prisma.video.findUnique({ where: { id }, include: { channel: true, category: true, captions: { select: { language: true, source: true }, orderBy: { language: 'asc' } } } });
     const owner = !!auth && v?.channel.userId === auth.user.id;
     if (v?.takenDownAt && !owner) {
       throw new GoneException(v.takedownReason === 'COPYRIGHT' ? 'This video is no longer available because of a copyright notice.' : 'This video was removed for breaking the Community Guidelines.');
@@ -75,6 +75,8 @@ export class CatalogController {
         commentsOpen: v.commentsEnabled && !v.madeForKids, takenDownAt: v.takenDownAt,
         category: v.category ? { name: v.category.name, slug: v.category.slug } : null, playbackUrl: this.urls.playback(v),
         processingStage: v.processingStage, width: v.width, height: v.height, madeForKids: v.madeForKids,
+        storyboardUrl: v.storyboard && v.status === 'READY' ? `/api/videos/${v.id}/storyboard.vtt` : null,
+        captions: v.captions.map((c) => ({ language: c.language, auto: c.source === 'AUTO', url: `/api/videos/${v.id}/captions/${c.language}.vtt` })),
         channel: { ...card.channel, followerCount: v.channel.subscriberCount } },
       viewer: {
         signedIn: !!auth, isOwner: owner, following: !!following, saved: saved > 0,
@@ -86,17 +88,47 @@ export class CatalogController {
   }
 
   @Get('search')
-  @ApiOperation({ summary: 'Search public videos and channels' })
+  @ApiOperation({ summary: 'Search public videos (ranked by how well they match, typos forgiven) and channels' })
   async search(@Query('q') q = '', @Query('cursor') cursor?: string) {
-    const term = q.trim().slice(0, 100);
+    const term = q.trim().replace(/\s+/g, ' ').slice(0, 100);
     if (!term) return { query: '', channels: [], videos: [], nextCursor: null };
-    const words = term.split(/\s+/).filter(Boolean).slice(0, 6);
-    const channels = cursor ? [] : await this.prisma.channel.findMany({
-      where: { OR: [{ name: { contains: term, mode: 'insensitive' } }, { handle: { contains: term.replace(/^@/, '').toLowerCase() } }] },
-      orderBy: { subscriberCount: 'desc' }, take: 5,
-    });
-    const page = await this.page({ AND: words.map((w) => ({ OR: [{ title: { contains: w, mode: 'insensitive' as const } }, { description: { contains: w, mode: 'insensitive' as const } }, { tags: { some: { tag: { name: { equals: w.toLowerCase() } } } } }] })) }, cursor);
-    return { query: term, channels: channels.map(publicChannel), ...page };
+    const offset = cursor && /^o:\d{1,5}$/.test(cursor) ? Number(cursor.slice(2)) : 0;
+    const take = 24;
+    const words = term.toLowerCase().replace(/^@/, '').split(' ').filter(Boolean).slice(0, 8);
+    const handle = term.replace(/^@/, '').toLowerCase();
+    // One ranked query: whole words in the title count most, then the description, tags, the Space's name and a
+    // close spelling of the title (pg_trgm, so "gorrilas" finds "Gorillas"); views only break ties.
+    const [, rows, channels] = await this.prisma.$transaction([
+      this.prisma.$executeRaw`SET LOCAL pg_trgm.word_similarity_threshold = 0.4`,
+      this.prisma.$queryRaw<{ id: string }[]>`
+        WITH q AS (SELECT plainto_tsquery('simple', ${term}) AS tsq)
+        SELECT v.id FROM "Video" v JOIN "Channel" c ON c.id = v."channelId", q
+        WHERE v.status = 'READY' AND v.visibility = 'PUBLIC' AND v."mediaLocation" = 'PUBLIC' AND v."publishedAt" IS NOT NULL AND v."takenDownAt" IS NULL
+          AND (
+            to_tsvector('simple', v.title || ' ' || coalesce(v.description, '')) @@ q.tsq
+            OR ${term} <% v.title
+            OR ${term} <% c.name
+            OR EXISTS (SELECT 1 FROM "VideoTag" vt JOIN "Tag" t ON t.id = vt."tagId" WHERE vt."videoId" = v.id AND t.name = ANY(${words}))
+          )
+        ORDER BY (
+            ts_rank(to_tsvector('simple', v.title), q.tsq) * 4
+          + ts_rank(to_tsvector('simple', coalesce(v.description, '')), q.tsq)
+          + word_similarity(${term}, v.title) * 2
+          + CASE WHEN EXISTS (SELECT 1 FROM "VideoTag" vt JOIN "Tag" t ON t.id = vt."tagId" WHERE vt."videoId" = v.id AND t.name = ANY(${words})) THEN 1.5 ELSE 0 END
+          + CASE WHEN ${term} <% c.name THEN 1 ELSE 0 END
+          + ln(v."viewCount"::float8 + 1) * 0.05
+        ) DESC, v."publishedAt" DESC, v.id
+        LIMIT ${take + 1} OFFSET ${offset}`,
+      this.prisma.channel.findMany({
+        where: { OR: [{ name: { contains: term, mode: 'insensitive' } }, { handle: { contains: handle } }] },
+        orderBy: { subscriberCount: 'desc' }, take: offset ? 0 : 5, // Spaces only on the first page
+      }),
+    ]);
+    const ids = rows.slice(0, take).map((r) => r.id);
+    const found = await this.prisma.video.findMany({ where: { id: { in: ids } }, include: { channel: true } });
+    const byId = new Map(found.map((v) => [v.id, v]));
+    const videos = ids.map((id) => byId.get(id)).filter((v) => !!v).map((v) => videoCard(v, this.urls));
+    return { query: term, channels: channels.map(publicChannel), videos, nextCursor: rows.length > take ? `o:${offset + take}` : null };
   }
 
   @Get('search/suggest')

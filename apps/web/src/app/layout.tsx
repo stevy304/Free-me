@@ -3,17 +3,25 @@ import { Inter, Plus_Jakarta_Sans } from 'next/font/google';
 import { cookies } from 'next/headers';
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
-import { getLocale, getViewer } from '@/lib/server-api';
+import { getLocale, getViewer, siteOrigin } from '@/lib/server-api';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin', 'latin-ext'], variable: '--font-inter', display: 'swap' });
 const jakarta = Plus_Jakarta_Sans({ subsets: ['latin', 'latin-ext'], weight: ['600', '700', '800'], variable: '--font-jakarta', display: 'swap' });
 
-export const metadata: Metadata = {
-  title: { default: 'Free Me', template: '%s - Free Me' },
-  description: 'Watch and share videos from creators everywhere. Your content. Your freedom. Your opportunity.',
-  applicationName: 'Free Me',
-};
+const DESCRIPTION = 'Watch and share videos from creators everywhere. Your content. Your freedom. Your opportunity.';
+
+/** Absolute addresses for link previews (WhatsApp, X, Facebook...) come from the site's public origin. */
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    metadataBase: new URL(await siteOrigin()),
+    title: { default: 'Free Me', template: '%s - Free Me' },
+    description: DESCRIPTION,
+    applicationName: 'Free Me',
+    openGraph: { siteName: 'Free Me', type: 'website', title: 'Free Me', description: DESCRIPTION, images: [{ url: '/apple-icon.png', width: 180, height: 180, alt: 'Free Me' }] },
+    twitter: { card: 'summary', title: 'Free Me', description: DESCRIPTION },
+  };
+}
 export const viewport: Viewport = {
   themeColor: [{ media: '(prefers-color-scheme: light)', color: '#f7f5ef' }, { media: '(prefers-color-scheme: dark)', color: '#0a1110' }],
   width: 'device-width', initialScale: 1,

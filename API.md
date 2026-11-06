@@ -10,6 +10,7 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 - **Rate limits:** 429 with `retryAfterSeconds`.
 - **Pagination:** `?cursor=` with `nextCursor` in the response (`null` at the end).
 - **Big numbers** (views, totals) are strings.
+- **Request id:** every answer has an `X-Request-Id` header (the edge's, or a new one). Unexpected errors (500) also return it as `requestId`, so a report can be matched with the server log.
 
 ## Sign-in
 
@@ -49,12 +50,14 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 | GET | `/categories` | Video categories |
 | GET | `/videos?category=&moments=&cursor=&limit=` | Latest public videos; `moments=true` only Moments (vertical, up to 3 minutes), `false` none |
 | GET | `/videos/:id` | One video for its watch page: `playbackUrl` (CDN for public and unlisted, API route for private), processing stage, size, `commentsOpen`; and `viewer`: `reaction`, `saved`, `following`, `isOwner`, `resumeAt` (seconds). `410` with the reason when moderators removed it |
-| GET | `/search?q=&cursor=` | Matching channels (first page) and videos |
+| GET | `/videos/:id/next?limit=` | What to watch after this video (default 20, up to 40): same Space, shared tags and topic first, then the viewer's picked topics, then popularity and freshness; videos the viewer finished come last; at most two from one Space in any four in a row. Unknown video: the latest videos |
+| GET | `/search?q=&cursor=` | Matching channels (first page) and videos, ranked: title words first, then description, tags and Space name; close spellings match too ("gorrilas" finds "Gorillas"). Pages of 24 |
 | GET | `/search/suggest?q=` | Up to ten suggestions while typing |
 | GET | `/feed/following` 🔒 | Channels I follow and their latest videos |
 | GET | `/feed/home` | For you: `spotlight`, `interests` (with `picked`), `shelves` (one per picked topic, then the busiest topics this month), `fromCreators`, `moments`, `latest`. Built only from picked topics, followed creators and recency |
 | GET | `/feed/rising` | The most watched public videos published in the last 7 days |
 | GET / PUT | `/me/interests` 🔒 | My topics for For you: `{ categories: [slug] }` (up to 12) |
+| GET | `/site/sitemap` | Public videos (newest 20,000) and Spaces with public videos, for `/sitemap.xml` |
 | GET | `/site` | Operator name and contact details (from `LEGAL_*` settings) and the report reasons |
 
 ## Uploads (creators) 🔒
@@ -75,6 +78,10 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 | GET | `/hub/videos/:id` | One of my videos |
 | PATCH | `/hub/videos/:id` | `title`, `description`, `visibility` (PUBLIC, UNLISTED, PRIVATE), `category` (slug), `tags`, `language`, `madeForKids`, `commentsEnabled`, `thumbnail` (0–2: a generated frame). Publishing sets the publish date; visibility changes move the media |
 | PUT | `/hub/videos/:id/thumbnail` | Body: a JPEG, PNG or WebP image (up to 2 MB), checked by its bytes |
+| PUT | `/hub/videos/:id/captions/:lang` | Body: a WebVTT or SubRip (.srt) file, up to 1 MB. Cleaned to WebVTT (times normalised; markup other than `<b>`, `<i>`, `<u>` removed). Replaces captions in that language, automatic ones included. `:lang` from the language list |
+| DELETE | `/hub/videos/:id/captions/:lang` | Removes captions in one language |
+| GET | `/hub/stats?days=` | My Space over 7, 28, 90 or 365 days: `series` (per day: views, watchSeconds, newFollowers), `totals` with the `previous` period, `topVideos` (views, watch time, average view) |
+| GET | `/hub/videos/:id/stats?days=` | One video: daily series, `lifetime` and `period` totals, and `retention` (share of signed-in viewers still watching at each 5%; shown from 5 viewers) |
 | DELETE | `/hub/videos/:id` | Deletes the video and every file |
 | GET | `/hub/notices` | My removed videos, why, the copyright notice (claimant name and work, never their email), and strikes in the last 90 days |
 | POST | `/hub/notices/:reportId/counter` | Counter-notice for a copyright removal: `{ statement, name, address, goodFaith: true, consent: true, signature }` (signature = name); forwarded to the claimant |
@@ -84,7 +91,9 @@ REST over JSON, all routes under `/api`. Interactive documentation (OpenAPI) is 
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/videos/:id/hls/master.m3u8` | Master playlist for private media (owner only) or while media is moving |
-| GET | `/videos/:id/hls/:rendition/index.m3u8` | Variant playlist whose segment links are signed for 4 hours |
+| GET | `/videos/:id/hls/:rendition/index.m3u8` | Variant playlist whose segment links are signed for 4 hours (`144p`…`2160p`, and `audio` for the shared audio rendition) |
+| GET | `/videos/:id/captions/:lang.vtt` | Captions as WebVTT, with the video's own access rules (private: owner only). `captions` in `/videos/:id` lists them: `{ language, auto, url }` |
+| GET | `/videos/:id/storyboard.vtt` | Seek-bar previews as WebVTT: each cue is a time range and a tile of the sprite sheet (`#xywh=x,y,w,h`). `storyboardUrl` in `/videos/:id` points here when the video has them |
 | POST | `/videos/:id/views` | `{ watchedSeconds }`: counts a view after at least 30 s (or half of a short video); once per viewer per 6 hours; the owner's views do not count |
 
 Public and unlisted videos play from the CDN: `playbackUrl` in `/videos/:id` and feed items points at `MEDIA_PUBLIC_BASE_URL/<id>/hls/master.m3u8`.
@@ -138,6 +147,18 @@ Public and unlisted videos play from the CDN: `playbackUrl` in `/videos/:id` and
 | PATCH | `/admin/users/:id/roles` | `{ roles }`; you cannot remove your own administrator role |
 | PATCH | `/admin/users/:id/status` | `{ status: ACTIVE or SUSPENDED }`; suspension signs the account out everywhere |
 | GET | `/admin/audit?cursor=` | Latest audit entries |
+| POST | `/admin/system/reprocess` | `{ limit?: 1–500 (50), dryRun? }`: queue older videos (processed before seek previews existed) for the current pipeline, oldest first; they stay watchable. Answers `{ queued, wouldQueue, remaining }` |
+| GET | `/admin/system` | `ok`, `warnings` (database or Redis down, email not really sent, Google sign-in missing, videos waiting, stuck over 2 hours or failed in 24 hours), `services`, `processing` (queue counts), `videos` by status, `storage` bytes, `accounts`, `moderation.openReports` |
+
+## Notifications 🔒
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/me/notifications?cursor=` | Newest first, 50 a page: `{ id, type (NEW_VIDEO, COMMENT, REPLY, SPARK), count, read, at, text, href, actor, video }` and `unread`. Sparks on one video are one unread entry with a count. Removed videos drop out |
+| GET | `/me/notifications/unread` | `{ unread }`, for the bell |
+| POST | `/me/notifications/read` | `{ ids? }`: mark these, or all, as read |
+
+Raised when: a Space you tune into publishes a video (once, the first time it is public and ready); someone joins the conversation on your video; someone replies to your comment; someone sparks your video. Never for your own actions.
 
 ## Health
 

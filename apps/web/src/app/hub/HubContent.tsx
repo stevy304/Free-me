@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { HubNotices } from './HubNotices';
+import { HubStats } from './HubStats';
 import { useShell } from '@/components/shell/ShellContext';
 import { useUploads } from '@/components/hub/UploadsContext';
 import { VideoDetailsForm } from '@/components/hub/VideoDetailsForm';
@@ -18,7 +19,7 @@ const VIS = { PUBLIC: ['Public', Icon.Globe], UNLISTED: ['Unlisted', Icon.Link],
 export function HubContent({ handle }: { handle: string }) {
   const { locale } = useShell();
   const params = useSearchParams();
-  const [tab, setTab] = useState<'videos' | 'notices'>(params.get('tab') === 'notices' ? 'notices' : 'videos');
+  const [tab, setTab] = useState<'videos' | 'stats' | 'notices'>(params.get('tab') === 'notices' ? 'notices' : params.get('tab') === 'stats' ? 'stats' : 'videos');
   // The Create button on phones opens the upload straight away.
   useEffect(() => { if (params.get('upload') === '1') openDialog(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const { openDialog, items } = useUploads();
@@ -48,6 +49,7 @@ export function HubContent({ handle }: { handle: string }) {
     if (v.takenDownAt) return <button type="button" onClick={() => setTab('notices')} className="flex items-start gap-1.5 text-left text-danger hover:underline"><Icon.Warning size={15} className="mt-0.5 shrink-0" />Removed: {v.takedownReason === 'COPYRIGHT' ? 'copyright notice' : 'Community Guidelines'}</button>;
     if (v.status === 'FAILED') return <span className="flex items-start gap-1.5 text-danger"><Icon.Warning size={15} className="mt-0.5 shrink-0" />{v.processingError ?? 'Processing failed'}</span>;
     if (v.status === 'UPLOADING') return <span className="text-muted">Upload not finished</span>;
+    if (v.status === 'FLAGGED') return <span className="flex items-start gap-1.5 text-accent" title="Our automatic check asked a moderator to look at this video before it goes live."><Icon.Clock size={15} className="mt-0.5 shrink-0" />Being reviewed before it goes live</span>;
     if (v.status === 'PROCESSING' || v.processingStage !== 'Ready') return <span className="flex items-center gap-1.5 text-muted"><Icon.Spinner size={14} className="animate-spin" />{v.processingStage} {v.processingProgress}%</span>;
     return <span className="text-muted">{[v.renditions.at(-1), v.isShort ? 'Moment' : null].filter(Boolean).join(' · ')}</span>;
   };
@@ -59,11 +61,11 @@ export function HubContent({ handle }: { handle: string }) {
         <button type="button" onClick={() => openDialog()} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand hover:bg-brand-strong"><Icon.Upload size={18} />Upload video</button>
       </div>
       <div role="tablist" className="mt-5 flex gap-1 border-b border-line">
-        {([['videos', 'Videos', Icon.Videos], ['notices', 'Removals and notices', Icon.Shield]] as const).map(([k, l, I]) => (
+        {([['videos', 'Videos', Icon.Videos], ['stats', 'Stats', Icon.Trail], ['notices', 'Removals and notices', Icon.Shield]] as const).map(([k, l, I]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-[14px] font-medium ${tab === k ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'}`}><I size={18} filled={tab === k} />{l}</button>
         ))}
       </div>
-      {tab === 'notices' ? <HubNotices /> : <>
+      {tab === 'stats' ? <HubStats /> : tab === 'notices' ? <HubNotices /> : <>
       {error && <p role="alert" className="mt-4 rounded-xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
       {!videos ? <Icon.Spinner className="mx-auto mt-16 animate-spin text-muted" /> : !videos.length ? (
         <div className="mx-auto mt-16 max-w-sm text-center">
