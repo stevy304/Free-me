@@ -8,6 +8,7 @@ import { LATE_FOLDERS } from './captions';
 import { autoCaptions } from './autocaptions';
 import { MediaError, VideoProcessor } from './process';
 import type { Storage } from './storage';
+import type { ChunkRunner } from './chunks';
 import { ViewCounter } from './views';
 
 /**
@@ -28,8 +29,10 @@ export class MediaJobs {
 
   constructor(private readonly prisma: PrismaClient, private readonly storage: Storage, private readonly config: AppConfig, private readonly redis: Redis | null,
     /** Queues a follow-up job (the higher qualities after a video becomes playable). */
-    private readonly enqueue: ((job: MediaJob) => Promise<void>) | null = null) {
-    this.processor = new VideoProcessor(prisma, storage, config);
+    private readonly enqueue: ((job: MediaJob) => Promise<void>) | null = null,
+    /** Where long videos' pieces are encoded (every worker through the queue, or this process). */
+    chunks: ChunkRunner | null = null) {
+    this.processor = new VideoProcessor(prisma, storage, config, chunks);
     this.views = new ViewCounter(prisma, redis);
   }
 

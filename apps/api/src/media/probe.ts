@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { setPriority } from 'node:os';
 import { hdrOf, type Hdr } from './filters';
 
 export interface ProbeResult {
@@ -12,9 +13,11 @@ export class MediaError extends Error {
   constructor(message: string) { super(message); }
 }
 
-export function run(cmd: string, args: string[], onStdout?: (chunk: string) => void, signal?: AbortSignal): Promise<{ stdout: string; stderr: string }> {
+export function run(cmd: string, args: string[], onStdout?: (chunk: string) => void, signal?: AbortSignal, niceness = 0): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], signal });
+    // Background work (higher qualities) yields the CPU to work a viewer is waiting for.
+    if (niceness && p.pid) { try { setPriority(p.pid, niceness); } catch { /* not allowed here: run at normal priority */ } }
     let stdout = ''; let stderr = '';
     p.stdout.on('data', (d: Buffer) => { const s = d.toString(); if (onStdout) onStdout(s); else stdout += s; });
     p.stderr.on('data', (d: Buffer) => { stderr = (stderr + d.toString()).slice(-20_000); });

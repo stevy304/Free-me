@@ -101,6 +101,14 @@ export interface MediaConfig {
   /** Use the upload's own H.264 for the top rung when it is already suitable (no re-encoding). */
   copyTopRung: boolean;
   workerConcurrency: number;
+  /** Long videos are encoded in pieces any worker server can take (see media/chunks.ts). */
+  chunked: boolean;
+  /** Videos at least this long (seconds) are encoded in pieces. */
+  chunkMinSeconds: number;
+  /** Length of one piece in seconds (even, so keyframes stay on the 2-second grid). */
+  chunkSeconds: number;
+  /** Pieces one worker process encodes at the same time. */
+  chunkConcurrency: number;
   /** BullMQ key prefix (lets tests run beside a real queue). */
   queuePrefix: string;
 }
@@ -160,6 +168,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     scratchDir: env.SCRATCH_DIR?.trim() || '/tmp/freeme-scratch', ffmpegPath: env.FFMPEG_PATH?.trim() || 'ffmpeg', ffprobePath: env.FFPROBE_PATH?.trim() || 'ffprobe',
     preset: env.TRANSCODE_PRESET?.trim() || 'veryfast', presetHigh: env.TRANSCODE_PRESET_HIGH?.trim() || 'superfast',
     copyTopRung: env.COPY_TOP_RUNG !== 'false',
+    chunked: env.CHUNKED_ENCODING !== 'false', chunkMinSeconds: Math.max(10, Number(env.CHUNK_MIN_SECONDS) || 120),
+    chunkSeconds: Math.max(4, Math.round((Number(env.CHUNK_SECONDS) || 30) / 2) * 2), chunkConcurrency: Math.max(1, Number(env.CHUNK_CONCURRENCY) || 1),
     encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
     whisper: env.WHISPER_CPP_PATH?.trim() && env.WHISPER_MODEL?.trim()
       ? { bin: env.WHISPER_CPP_PATH.trim(), model: env.WHISPER_MODEL.trim(), threads: Math.max(1, Number(env.WHISPER_THREADS) || 4) } : null,

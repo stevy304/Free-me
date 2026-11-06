@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { Prisma, PrismaClient, Video } from '@prisma/client';
-import { mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { extname, join, relative, sep } from 'node:path';
 import type { AppConfig } from '../config/config';
 import { AUDIO, HD_RUNGS, codecsFor, isHighRung, masterPlaylist, planLadder, type MasterEntry, type PlannedRung } from './ladder';
@@ -13,6 +14,7 @@ import { hold, screen } from './screening';
 import { announceVideo } from '../notifications/notify';
 import type { Storage } from './storage';
 import { publish, room } from '../realtime/publish';
+import { FIRST_KEYFRAMES, NEXT_KEYFRAMES, nodeName, chunkFile, chunkKey, videoChunksPrefix, type ChunkRunner, type ChunkTask } from './chunks';
 
 const TYPES: Record<string, string> = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg' };
 const IMMUTABLE = 'public, max-age=31536000, immutable';
@@ -22,6 +24,11 @@ const SHORT = 'public, max-age=30';
 /** Where seek-bar previews are: one sprite sheet of small frames, `interval` seconds apart, in rows of `cols`. */
 export interface Storyboard { key: string; interval: number; count: number; cols: number; rows: number; width: number; height: number }
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+/** HLS output: 4 s fMP4 segments, the first 1 s so playback starts sooner (keyframes at 0, 1, 2, 4, 6 … s). */
+const hlsArgs = (dir: string) => ['-f', 'hls', '-hls_time', '4', '-hls_init_time', '1', '-hls_playlist_type', 'vod', '-hls_segment_type', 'fmp4', '-hls_flags', 'independent_segments',
+  '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', join(dir, 'seg_%05d.m4s'), join(dir, 'index.m3u8')];
+/** Which video a pass belongs to, for encoding in pieces (no source key: a podcast, made here, stays in one run). */
+interface EncodeContext { videoId: string; sourceKey: string | null; background: boolean }
 
 async function walk(dir: string): Promise<string[]> {
   const out: string[] = [];
@@ -39,7 +46,9 @@ async function walk(dir: string): Promise<string[]> {
  */
 export class VideoProcessor {
   private readonly log = new Logger('Transcode');
-  constructor(private readonly prisma: PrismaClient, private readonly storage: Storage, private readonly config: AppConfig) {}
+  constructor(private readonly prisma: PrismaClient, private readonly storage: Storage, private readonly config: AppConfig,
+    /** Encodes long videos in pieces (on every worker server through the queue); null: always in one run. */
+    private readonly chunks: ChunkRunner | null = null) {}
 
   private async setProgress(id: string, progress: number, stage: string, extra: Partial<Video> = {}) {
     const p = Math.max(0, Math.min(100, Math.round(progress)));
@@ -113,7 +122,7 @@ export class VideoProcessor {
           info.hasAudio ? timed('loudnessMs', () => measureLoudness(this.config.media.ffmpegPath, source2, signal)) : null,
         ]);
         signal?.throwIfAborted();
-        await timed('sdEncodeMs', () => this.encode(source2, work, fast, info, hdr, info.hasAudio ? { loudness: loud } : null, (f) => this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined), signal));
+        await timed('sdEncodeMs', () => this.encode(source2, work, fast, info, hdr, info.hasAudio ? { loudness: loud } : null, (f) => this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined), signal, { videoId, sourceKey: podcast ? null : video.sourceFileS3Key!, background: false }));
         signal?.throwIfAborted();
         const playable = await timed('sdPublishMs', () => this.publish(videoId, work, fast, info, done, thumbs, passes.length ? 'Playable · adding qualities' : 'Playable · preparing seek previews', 5 + fastWeight));
         if (playable !== null && !video.hlsMasterKey) this.log.log({ event: 'video_first_playable', videoId, processingToPlayableMs: Math.round(playable - started), ...timings });
@@ -149,7 +158,7 @@ export class VideoProcessor {
         const from = progress;
         const span = (95 - (5 + fastWeight)) * weight(base) / total;
         const quality = rungs.at(-1)!.name;
-        await timed(`encode_${quality}Ms`, () => this.encode(source2, work, rungs, info, hdr, null, (f) => this.setProgress(videoId, from + f * span, stage).catch(() => undefined), signal));
+        await timed(`encode_${quality}Ms`, () => this.encode(source2, work, rungs, info, hdr, null, (f) => this.setProgress(videoId, from + f * span, stage).catch(() => undefined), signal, { videoId, sourceKey: podcast ? null : video.sourceFileS3Key!, background: true }));
         signal?.throwIfAborted();
         progress += span;
         await timed(`publish_${quality}Ms`, () => this.publish(videoId, work, rungs, info, done, null, index === passes.length - 1 ? 'Ready' : stage, Math.round(progress)));
@@ -258,15 +267,15 @@ export class VideoProcessor {
    * One ffmpeg run: decode once, scale for each rung, H.264 HLS with 4 s fMP4 segments and 2 s keyframes. With
    * `audio`, also the one shared AAC rendition, loudness-normalised. HDR is tone mapped once, at the pass's top size.
    */
-  private async encode(source: string, work: string, rungs: PlannedRung[], info: ProbeResult, hdr: Hdr, audio: { loudness: Loudness | null } | null, onProgress: (f: number) => void, signal?: AbortSignal) {
+  private async encode(source: string, work: string, rungs: PlannedRung[], info: ProbeResult, hdr: Hdr, audio: { loudness: Loudness | null } | null, onProgress: (f: number) => void, signal?: AbortSignal, ctx?: EncodeContext) {
     const enc = this.config.media.encoder;
-    if (enc === 'libx264') return this.encodeWith('libx264', source, work, rungs, info, hdr, audio, onProgress, signal);
-    try { return await this.encodeWith(enc, source, work, rungs, info, hdr, audio, onProgress, signal); }
+    if (enc === 'libx264') return this.encodeWith('libx264', source, work, rungs, info, hdr, audio, onProgress, signal, ctx);
+    try { return await this.encodeWith(enc, source, work, rungs, info, hdr, audio, onProgress, signal, ctx); }
     catch (e) {
       if (signal?.aborted) throw e;
       // No usable GPU on this server (driver missing, out of sessions): the CPU does it instead.
       this.log.warn(`${enc} failed, using libx264: ${(e as Error).message.slice(-300)}`);
-      return this.encodeWith('libx264', source, work, rungs, info, hdr, audio, onProgress, signal);
+      return this.encodeWith('libx264', source, work, rungs, info, hdr, audio, onProgress, signal, ctx);
     }
   }
 
@@ -278,42 +287,92 @@ export class VideoProcessor {
     return ['-c:v', 'libx264', '-preset', isHighRung(r) ? this.config.media.presetHigh : this.config.media.preset, '-profile:v', 'high', '-crf', '21', ...rate];
   }
 
-  private async encodeWith(enc: AppConfig['media']['encoder'], source: string, work: string, rungs: PlannedRung[], info: ProbeResult, hdr: Hdr, audio: { loudness: Loudness | null } | null, onProgress: (f: number) => void, signal?: AbortSignal) {
-    if (!rungs.length) return;
-    const fps = Math.min(60, info.fps);
+  /**
+   * The filter graph for a pass's encoded rungs, outputs [o0], [o1] …: the source is scaled once, to the pass's
+   * largest rung, and the smaller rungs are made from that (much less work than scaling each from 1080p or 4K).
+   */
+  private videoFilter(enc: AppConfig['media']['encoder'], encoded: PlannedRung[], info: ProbeResult, hdr: Hdr): string | null {
+    if (!encoded.length) return null;
+    const fmt = `format=${enc === 'qsv' ? 'nv12' : 'yuv420p'}`;
+    const top = encoded.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a));
+    const pre = `${info.fps > 60 ? `fps=${Math.min(60, info.fps)},` : ''}${hdr ? `${toneMap(hdr, top.width, top.height)},` : ''}`;
+    const scale = (r: PlannedRung) => `scale=${r.width}:${r.height}:flags=bicubic,${fmt}`;
+    if (encoded.length === 1) return `[0:v]${pre}${scale(encoded[0])}[o0]`;
+    const ti = encoded.indexOf(top);
+    return `[0:v]${pre}scale=${top.width}:${top.height}:flags=bicubic,split=${encoded.length}${encoded.map((_, i) => `[s${i}]`).join('')};${encoded.map((r, i) => `[s${i}]${i === ti ? fmt : scale(r)}[o${i}]`).join(';')}`;
+  }
+
+  /**
+   * A long video's encoded rungs in pieces of CHUNK_SECONDS: each piece is its own job that any worker can take
+   * (on the 2-second keyframe grid), then each rung's pieces are joined without re-encoding and cut into HLS.
+   * Same settings as one run, so viewers cannot tell the difference.
+   */
+  private async encodeChunked(enc: AppConfig['media']['encoder'], source: string, work: string, encoded: PlannedRung[], info: ProbeResult, hdr: Hdr, onProgress: (f: number) => void, signal: AbortSignal | undefined, ctx: EncodeContext & { sourceKey: string }) {
+    const filter = this.videoFilter(enc, encoded, info, hdr)!;
+    const length = this.config.media.chunkSeconds;
+    // A short tail (under 2 s) joins the piece before it: a sliver could hold no frame at all. The last piece runs to the end.
+    let count = Math.ceil(info.durationSeconds / length);
+    if (count > 1 && info.durationSeconds - (count - 1) * length < 2) count -= 1;
+    const runId = randomUUID().slice(0, 8);
+    const dir = join(work, `chunks-${runId}`);
+    await mkdir(dir, { recursive: true });
+    const tasks: ChunkTask[] = Array.from({ length: count }, (_, index) => {
+      const args = ['-hide_banner', '-y', '-nostats', '-ss', String(index * length), ...(index < count - 1 ? ['-t', String(length)] : []), '-i', '{IN}', '-filter_complex', filter];
+      encoded.forEach((r, i) => args.push('-map', `[o${i}]`, ...(hdr ? BT709_TAGS : []), ...this.videoArgs(enc, r),
+        '-force_key_frames', index === 0 ? FIRST_KEYFRAMES : NEXT_KEYFRAMES, '-sc_threshold', '0', '-an', `{OUT:${r.name}}`));
+      return { videoId: ctx.videoId, run: runId, index, args, rungs: encoded.map((r) => r.name), source: { host: nodeName(), path: source, key: ctx.sourceKey }, out: { host: nodeName(), dir }, niceness: ctx.background ? 10 : 0 };
+    });
+    try {
+      const results = await this.chunks!.runAll(tasks, (n) => onProgress((n / count) * 0.95), signal);
+      // Pieces made on other servers come through storage.
+      await Promise.all(results.filter((r) => r.remote).flatMap((r) => encoded.map((rung) => this.storage.download(chunkKey(ctx.videoId, runId, r.index, rung.name), chunkFile(dir, r.index, rung.name), signal))));
+      signal?.throwIfAborted();
+      await Promise.all(encoded.map(async (r) => {
+        const list = join(dir, `${r.name}.txt`);
+        await writeFile(list, results.map((x) => `file '${chunkFile(dir, x.index, r.name).replace(/'/g, "'\\''")}'`).join('\n'));
+        const out = join(work, 'out', 'hls', r.name);
+        await mkdir(out, { recursive: true });
+        await run(this.config.media.ffmpegPath, ['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-map', '0:v:0', '-c:v', 'copy', ...hlsArgs(out)], undefined, signal);
+      }));
+      onProgress(1);
+      this.log.log({ event: 'video_encoded_in_pieces', videoId: ctx.videoId, pieces: count, qualities: encoded.map((r) => r.name), remote: results.filter((r) => r.remote).length });
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      // The whole video's folder: also what an interrupted earlier attempt left (one job per video at a time).
+      await this.storage.deletePrefix(videoChunksPrefix(ctx.videoId)).catch(() => undefined);
+    }
+  }
+
+  private async encodeWith(enc: AppConfig['media']['encoder'], source: string, work: string, rungs: PlannedRung[], info: ProbeResult, hdr: Hdr, audio: { loudness: Loudness | null } | null, onProgress: (f: number) => void, signal?: AbortSignal, ctx?: EncodeContext) {
+    if (!rungs.length && !audio) return;
     // A rung copied from the upload needs no filter; the others are scaled and encoded.
     const encoded = rungs.filter((r) => !r.copy);
-    const top = (encoded.length ? encoded : rungs).reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a));
-    const pre = `${info.fps > 60 ? `fps=${fps},` : ''}${hdr ? `${toneMap(hdr, top.width, top.height)},` : ''}`;
-    const scale = (r: PlannedRung) => `scale=${r.width}:${r.height}:flags=bicubic,format=${enc === 'qsv' ? 'nv12' : 'yuv420p'}`;
-    // Scale the source once, to the pass's largest rung; the smaller rungs are made from that (much less work
-    // than scaling each one from a 1080p or 4K source).
-    const ti = encoded.indexOf(top);
-    const toTop = `scale=${top.width}:${top.height}:flags=bicubic`;
-    const filter = !encoded.length ? null : encoded.length === 1
-      ? `[0:v]${pre}${scale(encoded[0])}[o0]`
-      : `[0:v]${pre}${toTop},split=${encoded.length}${encoded.map((_, i) => `[s${i}]`).join('')};${encoded.map((r, i) => `[s${i}]${i === ti ? `format=${enc === 'qsv' ? 'nv12' : 'yuv420p'}` : scale(r)}[o${i}]`).join(';')}`;
+    // A long video: the encoded rungs are made in pieces on every worker; the copied rungs and the sound meanwhile here.
+    if (ctx?.sourceKey && this.chunks && this.config.media.chunked && encoded.length && info.durationSeconds >= this.config.media.chunkMinSeconds) {
+      const others = rungs.filter((r) => r.copy);
+      await Promise.all([
+        this.encodeChunked(enc, source, work, encoded, info, hdr, onProgress, signal, ctx as EncodeContext & { sourceKey: string }),
+        others.length || audio ? this.encodeWith(enc, source, work, others, info, hdr, audio, () => undefined, signal) : null,
+      ]);
+      return;
+    }
+    const filter = this.videoFilter(enc, encoded, info, hdr);
     const args = ['-hide_banner', '-y', '-nostats', '-progress', 'pipe:1', '-i', source, ...(filter ? ['-filter_complex', filter] : [])];
-    // Short first segments (1 s) so playback starts sooner; keyframes at 0, 1, 2, 4, 6 … seconds in every rung.
-    const hls = (dir: string) => ['-f', 'hls', '-hls_time', '4', '-hls_init_time', '1', '-hls_playlist_type', 'vod', '-hls_segment_type', 'fmp4', '-hls_flags', 'independent_segments',
-      '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', join(dir, 'seg_%05d.m4s'), join(dir, 'index.m3u8')];
     for (const r of rungs) {
       const dir = join(work, 'out', 'hls', r.name);
       await mkdir(dir, { recursive: true });
-      if (r.copy) { args.push('-map', '0:v:0', '-c:v', 'copy', ...hls(dir)); continue; }
+      if (r.copy) { args.push('-map', '0:v:0', '-c:v', 'copy', ...hlsArgs(dir)); continue; }
       args.push('-map', `[o${encoded.indexOf(r)}]`, ...(hdr ? BT709_TAGS : []));
       args.push(
         ...this.videoArgs(enc, r),
-        '-force_key_frames', 'expr:if(lt(t,2),gte(t,n_forced),gte(t,(n_forced-1)*2))', '-sc_threshold', '0', '-movflags', '+faststart',
-        ...hls(dir),
+        '-force_key_frames', FIRST_KEYFRAMES, '-sc_threshold', '0', '-movflags', '+faststart',
+        ...hlsArgs(dir),
       );
     }
     if (audio) {
       const dir = join(work, 'out', 'hls', 'audio');
       await mkdir(dir, { recursive: true });
-      args.push('-map', '0:a:0', '-af', loudnessFilter(audio.loudness), '-c:a', 'aac', '-b:a', `${AUDIO.kbps}k`, '-ac', '2', '-ar', '48000',
-        '-f', 'hls', '-hls_time', '4', '-hls_init_time', '1', '-hls_playlist_type', 'vod', '-hls_segment_type', 'fmp4', '-hls_flags', 'independent_segments',
-        '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', join(dir, 'seg_%05d.m4s'), join(dir, 'index.m3u8'));
+      args.push('-map', '0:a:0', '-af', loudnessFilter(audio.loudness), '-c:a', 'aac', '-b:a', `${AUDIO.kbps}k`, '-ac', '2', '-ar', '48000', ...hlsArgs(dir));
     }
     let last = 0;
     await run(this.config.media.ffmpegPath, args, (chunk) => {

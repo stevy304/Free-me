@@ -166,7 +166,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                   <p className="mt-2 truncate text-[14px] font-semibold">{snap.title}</p>
                   <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface"><div className="h-full bg-brand transition-[width]" style={{ width: `${snap.total ? Math.round((snap.sent / snap.total) * 100) : 0}%` }} /></div>
                   <p className="mt-1 flex items-center gap-2 text-[12px] text-muted">
-                    <span className="flex-1">{snap.state === 'error' ? <span className="text-danger">{snap.error}</span> : snap.state === 'finishing' ? 'Finishing…' : `Uploading ${snap.total ? Math.round((snap.sent / snap.total) * 100) : 0}%`}</span>
+                    <span className="flex-1">{snap.state === 'error' ? <span className="text-danger">{snap.error}</span> : snap.state === 'finishing' ? 'Finishing…' : snap.state === 'compressing' ? `Making it smaller ${Math.round((snap.compress?.progress ?? 0) * 100)}%` : `Uploading ${snap.total ? Math.round((snap.sent / snap.total) * 100) : 0}%`}</span>
                     {snap.state === 'error' ? <button type="button" onClick={() => void upload.start()} className="font-semibold text-brand">Try again</button> : <button type="button" onClick={() => { void upload.cancel(); setUploads((all) => all.filter((u) => u.key !== key)); }} className="font-semibold">Cancel</button>}
                   </p>
                 </article>

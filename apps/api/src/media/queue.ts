@@ -5,6 +5,7 @@ import { APP_CONFIG, type AppConfig } from '../config/config';
 import { PrismaService } from '../database/prisma.service';
 import { RedisService } from '../database/redis.service';
 import { MediaJobs, type MediaJob } from './jobs';
+import { LocalChunks } from './chunks';
 import { createStorage, type Storage } from './storage';
 
 export const MEDIA_QUEUE = 'media';
@@ -42,7 +43,8 @@ export class MediaQueue implements OnModuleDestroy {
     // BullMQ does not close a connection it was given, so this service owns and closes it.
     this.connection = config.redisUrl ? new Redis(config.redisUrl, { maxRetriesPerRequest: null }) : null;
     this.queue = this.connection ? new Queue(MEDIA_QUEUE, { connection: this.connection, prefix: config.media.queuePrefix }) : null;
-    this.inline = this.queue ? null : new MediaJobs(prisma, storage, config, redis.client);
+    this.inline = this.queue ? null : new MediaJobs(prisma, storage, config, redis.client, null,
+      new LocalChunks(config.media.chunkConcurrency, { ffmpegPath: config.media.ffmpegPath, storage, scratchDir: config.media.scratchDir }));
     if (this.inline) this.log.warn('REDIS_URL is not set: media jobs run inside the API (development only).');
   }
 

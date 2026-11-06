@@ -16,7 +16,7 @@ export function CreateMenu() {
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [open]);
-  const active = items.filter((i) => ['starting', 'uploading', 'paused', 'finishing'].includes(i.snap.state));
+  const active = items.filter((i) => ['starting', 'compressing', 'uploading', 'paused', 'finishing'].includes(i.snap.state));
   const sent = active.reduce((a, i) => a + i.snap.sent, 0); const total = active.reduce((a, i) => a + i.snap.total, 0);
   return (
     <div ref={box} className="relative flex items-center gap-2">
