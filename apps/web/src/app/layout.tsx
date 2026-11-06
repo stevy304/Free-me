@@ -37,7 +37,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const theme = jar.get('fm_theme')?.value;
   return (
     <html lang={viewer?.profile?.preferredLanguage ?? 'en'} className={`${inter.variable} ${jakarta.variable} ${theme === 'dark' ? 'dark' : ''}`} suppressHydrationWarning>
-      <head><script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} /></head>
+      <head>
+        {/* Private preview tunnels need their session cookie on manifest requests. */}
+        <link rel="manifest" href="/manifest.webmanifest" crossOrigin="use-credentials" />
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       {/* Browser extensions (Grammarly, password managers…) add attributes to <body> before React loads. */}
       <body className="font-sans" suppressHydrationWarning>
         <AppShell viewer={viewer} locale={locale}>{children}</AppShell>

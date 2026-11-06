@@ -1,8 +1,10 @@
 import type { MetadataRoute } from 'next';
 
 /** Free Me as an installed app: its own icon on the home screen, full screen, opens on the home feed. */
-export default function manifest(): MetadataRoute.Manifest {
-  return {
+export const dynamic = 'force-static';
+
+export function GET() {
+  const manifest: MetadataRoute.Manifest = {
     id: '/',
     name: 'Free Me',
     short_name: 'Free Me',
@@ -28,4 +30,5 @@ export default function manifest(): MetadataRoute.Manifest {
       { name: 'Creator Hub', url: '/hub?source=app', icons: [{ src: '/icons/shortcut-upload.png', sizes: '96x96', type: 'image/png' }] },
     ],
   };
+  return Response.json(manifest, { headers: { 'Content-Type': 'application/manifest+json' } });
 }
