@@ -138,7 +138,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   const watchUrl = typeof window !== 'undefined' ? `${window.location.origin}/live/${st.stream.id}` : `/live/${st.stream.id}`;
 
   if (!basic) return (
-    <main className={styles.studio}>
+    <main className={`dark ${styles.studio}`}>
       <header className={styles.top}>
         <Link href="/" className={styles.brand}><Icon.Live size={21} /> Free Me <span>Live Studio</span></Link>
         <input aria-label="Title" className={styles.title} value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} disabled={state !== 'idle' || live} />
