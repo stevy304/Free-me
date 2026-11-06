@@ -69,7 +69,7 @@ function tiles(ctx: CanvasRenderingContext2D, feeds: Drawable[], x: number, y: n
   feeds.forEach((f, i) => place(ctx, f, x + (i % cols) * (tw + gap), y + Math.floor(i / cols) * (th + gap), tw, th, 'cover', 'Connecting…', 10));
 }
 
-const corner = (c: Corner, w: number, h: number, m: number) => ({ x: c.endsWith('l') ? m : W - w - m, y: c.startsWith('t') ? m : H - h - m });
+const corner = (c: Corner, w: number, h: number, m: number, bottom = H) => ({ x: c.endsWith('l') ? m : c.endsWith('c') ? (W - w) / 2 : W - w - m, y: c.startsWith('t') ? m : bottom - h - m });
 const ease = (t: number) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
@@ -119,13 +119,17 @@ export function drawFrame(ctx: CanvasRenderingContext2D, scene: SceneDef, g: Gra
     }
   }
 
-  // Logo (bug).
+  const tickerOn = g.ticker.show && !!g.ticker.text.trim();
+  const lowerOn = g.lower.show && !!g.lower.name.trim();
+  // Logo (bug). At the bottom it sits above the ticker, and above the lower third when they would meet.
   const logo = g.logo.show ? image(g.logo.src) : null;
   if (logo) {
     const maxW = W * g.logo.size, maxH = maxW * 0.6;
     const k = Math.min(maxW / logo.naturalWidth, maxH / logo.naturalHeight);
     const lw = logo.naturalWidth * k, lh = logo.naturalHeight * k;
-    const p = corner(g.logo.corner, lw, lh, 28);
+    let bottom = tickerOn ? H - 56 : H;
+    if (lowerOn && (g.logo.corner === 'bl' || g.logo.corner === 'bc')) bottom = 560 - (tickerOn ? 58 : 0);
+    const p = corner(g.logo.corner, lw, lh, g.logo.corner.startsWith('b') ? 16 : 28, bottom);
     ctx.globalAlpha = g.logo.opacity; ctx.drawImage(logo, p.x, p.y, lw, lh); ctx.globalAlpha = 1;
   }
   // Clock, in the top corner the logo does not use.
@@ -139,9 +143,8 @@ export function drawFrame(ctx: CanvasRenderingContext2D, scene: SceneDef, g: Gra
     ctx.fillStyle = '#fff'; ctx.fillText(text, x + 14, 56);
   }
 
-  const tickerOn = g.ticker.show && !!g.ticker.text.trim();
   // Lower third: slides in from the left; with auto-hide, slides out again.
-  if (g.lower.show && g.lower.name.trim()) {
+  if (lowerOn) {
     const t = now - timing.lowerSince;
     const hideAt = g.lower.autoHideSec > 0 ? g.lower.autoHideSec * 1000 : Infinity;
     const p = t < hideAt ? ease(t / 450) : 1 - ease((t - hideAt) / 450);

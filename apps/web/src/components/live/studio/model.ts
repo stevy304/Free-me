@@ -8,7 +8,8 @@
 export type Layout = 'solo' | 'pip' | 'side' | 'grid' | 'card';
 /** camera: the host's main input · screen: the shared screen · media: an image or video file · guests: on-air guests. */
 export type SourceId = 'camera' | 'screen' | 'media' | 'guests';
-export type Corner = 'tl' | 'tr' | 'bl' | 'br';
+/** Where a logo or corner picture sits: top/bottom × left/centre/right. */
+export type Corner = 'tl' | 'tc' | 'tr' | 'bl' | 'bc' | 'br';
 
 export interface SceneDef {
   id: string;

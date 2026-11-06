@@ -14,6 +14,7 @@ type Cue = { id: number; name: string; sceneId: string; graphics: Graphics };
 const button = 'rounded-xl border border-line px-3 py-2 text-sm font-semibold hover:bg-surface disabled:opacity-50';
 const field = 'mt-1 w-full rounded-md border border-[#25424a] bg-[#0b2328] px-2 py-1.5 text-[13px] text-[#e9f4f6]';
 const CORNERS: Array<{ id: Corner; label: string }> = [{ id: 'tl', label: 'Top left' }, { id: 'tr', label: 'Top right' }, { id: 'bl', label: 'Bottom left' }, { id: 'br', label: 'Bottom right' }];
+const LOGO_PLACES: Array<{ id: Corner; label: string }> = [{ id: 'tl', label: 'Top left' }, { id: 'tc', label: 'Top centre' }, { id: 'tr', label: 'Top right' }, { id: 'bl', label: 'Bottom left' }, { id: 'bc', label: 'Bottom centre' }, { id: 'br', label: 'Bottom right' }];
 const TRANSITIONS: Transition[] = ['cut', 'fade', 'slide', 'wipe'];
 
 /** Whether a scene shows a source (so its sound is heard while that scene is on air). */
@@ -512,7 +513,7 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
         <label className="block text-[12px] font-semibold">Broadcast logo<input type="file" accept="image/png,image/jpeg,image/webp" className="mt-1 block w-full text-[12px]" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void readImage(f, 512).then((src) => setDraft((d) => ({ ...d, logo: { ...d.logo, src, show: true } }))).catch((err) => setStatus((err as Error).message)); }} /></label>
         {draft.logo.src && <>
           <div className="grid grid-cols-2 gap-2">
-            <label className="block text-[12px] font-semibold">Logo position<select className={field} value={draft.logo.corner} onChange={(e) => setDraft({ ...draft, logo: { ...draft.logo, corner: e.target.value as Corner } })}>{CORNERS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>
+            <label className="block text-[12px] font-semibold">Logo position<select className={field} value={draft.logo.corner} onChange={(e) => setDraft({ ...draft, logo: { ...draft.logo, corner: e.target.value as Corner } })}>{LOGO_PLACES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>
             <label className="block text-[12px] font-semibold">Size<input type="range" className="mt-2 w-full accent-[#21d9cb]" min={0.06} max={0.3} step={0.01} value={draft.logo.size} onChange={(e) => setDraft({ ...draft, logo: { ...draft.logo, size: Number(e.target.value) } })} /></label>
           </div>
           <label className="block text-[12px] font-semibold">Opacity<input type="range" className="mt-2 w-full accent-[#21d9cb]" min={0.2} max={1} step={0.05} value={draft.logo.opacity} onChange={(e) => setDraft({ ...draft, logo: { ...draft.logo, opacity: Number(e.target.value) } })} /></label>
