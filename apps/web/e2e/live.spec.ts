@@ -45,6 +45,13 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   await host.reload();
   await host.getByRole('button', { name: 'Camera' }).click();
   await host.getByLabel('Title').fill(`Morning show ${run}`);
+  await host.getByLabel('Lower third').fill('Kigali · Morning show');
+  const swatch = (index: number) => host.locator('canvas').nth(index).evaluate((canvas: HTMLCanvasElement) =>
+    [...canvas.getContext('2d')!.getImageData(34, 582, 1, 1).data]);
+  await expect.poll(() => swatch(0)).toEqual([8, 100, 95, 255]);
+  await expect.poll(() => swatch(1)).not.toEqual([8, 100, 95, 255]);
+  await host.getByRole('button', { name: 'Take to air' }).click();
+  await expect.poll(() => swatch(1)).toEqual([8, 100, 95, 255]);
   await host.getByRole('button', { name: 'Go live' }).click();
   await expect(host.getByText(/^Live · /)).toBeVisible({ timeout: 20_000 });
 
@@ -68,4 +75,27 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   // The creator ends it; the viewer is told.
   await host.getByRole('button', { name: 'End stream' }).click();
   await expect(viewer.getByText('This stream has ended')).toBeVisible({ timeout: 30_000 });
+});
+
+test('free host adds a signed-in WebRTC guest to the program', async ({ browser }) => {
+  test.skip(!LOG, 'Set E2E_API_LOG to the API log (MAIL_TRANSPORT=console).');
+  const host = await (await browser.newContext({ permissions: ['camera', 'microphone'] })).newPage();
+  const guest = await (await browser.newContext({ permissions: ['camera', 'microphone'] })).newPage();
+  await signIn(host, `cohost.${run}@example.com`);
+  expect((await post(host, '/channels', { handle: `cohost.${run}`, name: 'Co-stream Kigali' })).status()).toBe(201);
+  await host.goto('/go-live');
+  await host.getByRole('button', { name: 'Camera' }).click();
+  await host.getByRole('button', { name: 'Create guest invite' }).click();
+  const invite = await host.getByRole('textbox', { name: 'Guest invitation link' }).inputValue();
+
+  await signIn(guest, `guest.${run}@example.com`);
+  await guest.goto(invite);
+  await guest.getByRole('button', { name: 'Join with camera and microphone' }).click();
+  await expect(guest.getByText('Connected. The host decides when to put you on air.')).toBeVisible({ timeout: 20_000 });
+  await host.getByRole('button', { name: 'Add to program' }).click();
+  await expect(host.getByText(/Guest 1 · In program/)).toBeVisible();
+  await host.getByRole('button', { name: 'Go live', exact: true }).click();
+  await expect(host.getByText(/^Live · /)).toBeVisible({ timeout: 20_000 });
+  await host.getByRole('button', { name: 'End stream' }).click();
+  await expect(guest.getByText('The green room closed or disconnected.')).toBeVisible({ timeout: 30_000 });
 });

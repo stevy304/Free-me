@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
+import { createHmac } from 'node:crypto';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Header, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString, Length } from 'class-validator';
 import type { Channel, LiveStream } from '@prisma/client';
@@ -36,6 +37,18 @@ export class LiveController {
   async now() {
     const rows = await this.prisma.liveStream.findMany({ where: { status: 'LIVE' }, orderBy: { startedAt: 'desc' }, take: 50, include: { channel: true } });
     return { streams: await Promise.all(rows.map((s) => this.view(s))) };
+  }
+
+  @Get('live/ice')
+  @Header('Cache-Control', 'private, no-store')
+  @RequireAuth()
+  @ApiOperation({ summary: 'Temporary ICE configuration for an authenticated broadcast participant' })
+  ice(@CurrentAuth() auth: AuthContext) {
+    const turn = this.config.live.turn;
+    if (!turn) return { iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }] };
+    const username = `${Math.floor(Date.now() / 1000) + 8 * 3600}:${auth.user.id}`;
+    const credential = createHmac('sha1', turn.secret).update(username).digest('base64');
+    return { iceServers: [{ urls: turn.urls, username, credential }] };
   }
 
   @Get('live/:id')

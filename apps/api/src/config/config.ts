@@ -30,6 +30,7 @@ export interface BillingConfig {
 /** Live streaming (see DEPLOYMENT.md → Live). */
 export interface LiveConfig {
   browserLimit: number;
+  turn: { urls: string[]; secret: string } | null;
   /** Encoder address shown to creators for OBS and TV encoders, e.g. rtmp://live.freeme.example/live (null: browser only). */
   rtmpUrl: string | null;
   /** Shared secret in nginx-rtmp's on_publish / on_publish_done callback addresses. */
@@ -194,7 +195,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (rtmpUrl && (!rtmpSecret || rtmpSecret.length < 24)) problems.push('LIVE_RTMP_SECRET (24+ random characters) is required with LIVE_RTMP_URL.');
   const browserLimit = Number(env.LIVE_BROWSER_LIMIT ?? 3);
   if (!Number.isInteger(browserLimit) || browserLimit < 1) problems.push('LIVE_BROWSER_LIMIT must be a positive integer.');
-  const live: LiveConfig = { browserLimit, rtmpUrl, rtmpSecret, rtmpHlsDir: env.LIVE_RTMP_HLS_DIR?.trim() || null };
+  const turnUrls = (env.LIVE_TURN_URLS ?? '').split(',').map((url) => url.trim()).filter(Boolean);
+  const turnSecret = env.LIVE_TURN_SECRET?.trim() || '';
+  if (turnUrls.some((url) => !/^turns?:[^\s]+$/.test(url))) problems.push('LIVE_TURN_URLS must contain TURN URLs.');
+  if ((turnUrls.length && turnSecret.length < 24) || (!turnUrls.length && turnSecret)) problems.push('Configure LIVE_TURN_URLS together with a LIVE_TURN_SECRET of at least 24 characters.');
+  const turn = turnUrls.length ? { urls: turnUrls, secret: turnSecret } : null;
+  const live: LiveConfig = { turn, browserLimit, rtmpUrl, rtmpSecret, rtmpHlsDir: env.LIVE_RTMP_HLS_DIR?.trim() || null };
 
   if (problems.length) throw new ConfigError(`Free Me API configuration:\n- ${problems.join('\n- ')}`);
   return {

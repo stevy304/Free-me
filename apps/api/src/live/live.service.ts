@@ -140,7 +140,7 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
   /** One piece of the browser's recording. Returns false if the stream is not running here. */
   chunk(streamId: string, socketId: string, data: Buffer) {
     const b = this.browser.get(streamId);
-    if (!b || b.socketId !== socketId) return false;
+    if (!b || b.socketId !== socketId || !b.ff.stdin?.writable || b.ff.stdin.writableLength + data.length > 8 * 1024 * 1024) return false;
     b.bytes += data.length;
     b.ff.stdin?.write(data);
     return true;

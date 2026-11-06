@@ -163,3 +163,11 @@ above (thousands of simultaneous viewers), load test, then grow server by server
 ## Not yet covered (phase 6)
 
 Monitoring and alerts (Prometheus, Grafana) and a central log store (logs are already JSON lines with request ids, and `/api/admin/system` reports health, queue and failures), staged load tests at 100, 500 and 1,000 concurrent viewers, and a recorded restore drill.
+
+### Guest connections and browser production
+
+Free Go Live supports a host and two invited guests. Premium Studio allows six guest seats and composites the selected scene, video transition, lower third, ticker and logo into the browser recording. The host's browser renders the Program feed. Keep its tab in the foreground during a show.
+
+Guests need an authenticated Free Me account and a private invitation link. Enable the Socket.IO Redis adapter for signaling across API nodes. Direct WebRTC connections use STUN by default. For networks that require relaying, set `LIVE_TURN_URLS` to your comma-separated coturn addresses and set `LIVE_TURN_SECRET` to the coturn `static-auth-secret` on each API node. The API signs temporary credentials. Keep the shared secret on the servers.
+
+Browser composition applies to browser broadcasts. External encoders still supply their own composed program feed through Premium RTMP.

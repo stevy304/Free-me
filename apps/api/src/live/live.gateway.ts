@@ -1,7 +1,8 @@
-import { ConnectedSocket, MessageBody, type OnGatewayDisconnect, SubscribeMessage, WebSocketGateway } from '@nestjs/websockets';
-import type { Socket } from 'socket.io';
+import { ConnectedSocket, MessageBody, type OnGatewayDisconnect, type OnGatewayInit, SubscribeMessage, WebSocketGateway } from '@nestjs/websockets';
+import type { Server, Socket } from 'socket.io';
 import { PrismaService } from '../database/prisma.service';
 import { RateLimitService } from '../common/rate-limit.service';
+import { LiveGuests } from './live-guests';
 import { LiveError, LiveService } from './live.service';
 
 const ID = /^[0-9a-f-]{36}$/;
@@ -11,8 +12,26 @@ const ID = /^[0-9a-f-]{36}$/;
  * (Same endpoint as RealtimeGateway, which signs the socket in and puts it in its rooms.)
  */
 @WebSocketGateway({ path: '/api/socket', addTrailingSlash: false, serveClient: false, transports: ['websocket'], maxHttpBufferSize: 8 * 1024 * 1024 })
-export class LiveGateway implements OnGatewayDisconnect {
+export class LiveGateway implements OnGatewayDisconnect, OnGatewayInit {
+  private readonly guests = new LiveGuests();
+
   constructor(private readonly live: LiveService, private readonly prisma: PrismaService, private readonly limits: RateLimitService) {}
+
+  afterInit(server: Server) {
+    const namespace = server.of('/');
+    namespace.on('freeme:guest-join', (id: string, userId: string, token: string, reply: (result: unknown) => void) => {
+      if (!this.guests.hasInvite(token)) { reply(null); return; }
+      reply(this.guests.join({
+        id, data: { userId }, emit: (event, payload) => namespace.to(id).emit(event, payload),
+      }, token));
+    });
+    namespace.on('freeme:guest-relay', (id: string, target: string, payload: unknown) => {
+      this.guests.signal({ id, data: {}, emit: () => undefined }, target, payload);
+    });
+    namespace.on('freeme:guest-leave', (id: string) => {
+      this.guests.leave({ id, data: {}, emit: () => undefined });
+    });
+  }
 
   private async user(socket: Socket) {
     const id = socket.data.userId as string | undefined;
@@ -41,6 +60,66 @@ export class LiveGateway implements OnGatewayDisconnect {
     return { ok: await this.live.stopBrowser(streamId, socket.id) };
   }
 
+  @SubscribeMessage('live:guest-open')
+  async openGuests(@ConnectedSocket() socket: Socket, @MessageBody() body: unknown) {
+    const { streamId: id, basic } = (body ?? {}) as { streamId?: unknown; basic?: unknown };
+    const user = await this.user(socket);
+    if (!socket.connected || socket.data.guestHost || socket.data.guestJoining || user?.status !== 'ACTIVE' || typeof id !== 'string' || !ID.test(id)) return { ok: false };
+    const owned = await this.prisma.liveStream.findFirst({ where: { id, status: { in: ['IDLE', 'LIVE'] }, channel: { userId: user.id } }, select: { id: true } });
+    if (!socket.connected || !owned) return { ok: false };
+    const premium = user.premiumUntil && user.premiumUntil > new Date();
+    const room = this.guests.open(socket, premium && basic === false ? 6 : 2);
+    return room ? { ok: true, ...room } : { ok: false };
+  }
+
+  @SubscribeMessage('live:guest-join')
+  async joinGuest(@ConnectedSocket() socket: Socket, @MessageBody() token: unknown) {
+    const userId = socket.data.userId as string | undefined;
+    if (!userId || socket.data.guestJoining || socket.data.guestHost || typeof token !== 'string' || !/^[A-Za-z0-9_-]{32}$/.test(token)) return { ok: false };
+    socket.data.guestJoining = true;
+    try {
+      if (this.guests.hasInvite(token)) return this.guests.join(socket, token);
+      await this.limits.consume(`live:guest:${userId}`, 15, 60, 'Too many guest joins.');
+      const results = await socket.nsp.serverSideEmitWithAck('freeme:guest-join', socket.id, userId, token);
+      const result = results.find(Boolean) as { ok: boolean; host?: string; error?: string } | undefined;
+      if (result?.ok) {
+        if (!socket.connected) {
+          socket.nsp.serverSideEmit('freeme:guest-leave', socket.id);
+          return { ok: false };
+        }
+        socket.data.guestHost = result.host;
+      }
+      return result ?? { ok: false, error: 'This guest invitation is unavailable.' };
+    } catch {
+      return { ok: false, error: 'Could not reach the green room. Try again shortly.' };
+    } finally { socket.data.guestJoining = false; }
+  }
+
+  @SubscribeMessage('live:guest-signal')
+  signalGuest(@ConnectedSocket() socket: Socket, @MessageBody() body: unknown) {
+    const { target, payload } = (body ?? {}) as { target?: unknown; payload?: unknown };
+    if (typeof target !== 'string' || !payload || typeof payload !== 'object') return { ok: false };
+    if (JSON.stringify(payload).length > 24_000) return { ok: false };
+    if (this.guests.signal(socket, target, payload)) return { ok: true };
+    if (socket.data.guestHost !== target) return { ok: false };
+    socket.nsp.serverSideEmit('freeme:guest-relay', socket.id, target, payload);
+    return { ok: true };
+  }
+
+  @SubscribeMessage('live:guest-remove')
+  removeGuest(@ConnectedSocket() socket: Socket, @MessageBody() target: unknown) {
+    return { ok: typeof target === 'string' && this.guests.remove(socket, target) };
+  }
+
+  @SubscribeMessage('live:guest-leave')
+  leaveGuests(@ConnectedSocket() socket: Socket) {
+    this.guests.leave(socket);
+    if (socket.data.guestHost) {
+      socket.nsp.serverSideEmit('freeme:guest-leave', socket.id);
+      delete socket.data.guestHost;
+    }
+  }
+
   @SubscribeMessage('live:chat')
   async chat(@ConnectedSocket() socket: Socket, @MessageBody() body: unknown) {
     const { streamId, text } = (body ?? {}) as { streamId?: unknown; text?: unknown };
@@ -60,5 +139,5 @@ export class LiveGateway implements OnGatewayDisconnect {
     return { ok: true };
   }
 
-  async handleDisconnect(socket: Socket) { await this.live.dropSocket(socket.id); }
+  async handleDisconnect(socket: Socket) { this.leaveGuests(socket); await this.live.dropSocket(socket.id); }
 }
