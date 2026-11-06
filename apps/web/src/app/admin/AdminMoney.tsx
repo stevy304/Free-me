@@ -21,6 +21,7 @@ export function AdminMoney() {
   const { locale } = useShell();
   const [s, setS] = useState<Summary | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [unpaid, setUnpaid] = useState<Review[]>([]);
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [handle, setHandle] = useState('');
@@ -31,8 +32,8 @@ export function AdminMoney() {
 
   const load = useCallback(async () => {
     try {
-      const [a, b, c] = await Promise.all([api<Summary>('/admin/billing'), api<{ campaigns: Review[] }>('/admin/billing/campaigns'), api<{ payouts: Payout[] }>('/admin/billing/payouts')]);
-      setS(a); setReviews(b.campaigns); setPayouts(c.payouts);
+      const [a, b, c, d] = await Promise.all([api<Summary>('/admin/billing'), api<{ campaigns: Review[] }>('/admin/billing/campaigns'), api<{ payouts: Payout[] }>('/admin/billing/payouts'), api<{ campaigns: Review[] }>('/admin/billing/campaigns?status=DRAFT')]);
+      setS(a); setReviews(b.campaigns); setPayouts(c.payouts); setUnpaid(d.campaigns);
     } catch (e) { setError((e as Error).message); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -67,6 +68,23 @@ export function AdminMoney() {
             </article>
           ))}
           {!reviews.length && <p className="text-[14px] text-muted">Nothing waiting.</p>}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-[18px] font-semibold">Unpaid ads ({unpaid.length})</h2>
+        <p className="text-[13px] text-muted">Ads created but not paid yet. To test ads before payments are switched on, or for a partner or Free Me’s own ads, approve one without payment: it starts at once and runs at $0 a day, so creators are not paid for money that never came in.</p>
+        <div className="mt-2 space-y-2">
+          {unpaid.map((r) => (
+            <article key={r.id} className="flex flex-wrap items-center gap-2 rounded-2xl border border-line p-4">
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">{r.headline}</p>
+                <p className="text-[13px] text-muted">{r.businessName} · {r.email} · {r.days} {r.days === 1 ? 'day' : 'days'} · {r.video ? `${r.video.title} (${duration(r.video.durationSeconds)})` : 'video missing'}</p>
+              </div>
+              <button type="button" disabled={!r.video} onClick={() => void run(() => api(`/admin/billing/campaigns/${r.id}/review`, { body: { approve: true, free: true } }), 'Approved without payment: the ad is running now.')} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Approve without payment</button>
+            </article>
+          ))}
+          {!unpaid.length && <p className="text-[14px] text-muted">None.</p>}
         </div>
       </section>
 
