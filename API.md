@@ -148,6 +148,7 @@ Public and unlisted videos play from the CDN: `playbackUrl` in `/videos/:id` and
 | PATCH | `/admin/users/:id/status` | `{ status: ACTIVE or SUSPENDED }`; suspension signs the account out everywhere |
 | GET | `/admin/audit?cursor=` | Latest audit entries |
 | POST | `/admin/system/reprocess` | `{ limit?: 1–500 (50), dryRun? }`: queue older videos (processed before seek previews existed) for the current pipeline, oldest first; they stay watchable. Answers `{ queued, wouldQueue, remaining }` |
+| POST | `/admin/system/repair-media` | `{ apply? }`: find (and with `apply`, bring back) files videos left in the wrong storage place (broken thumbnails or playback); lists up to 100 affected videos |
 | GET | `/admin/system` | `ok`, `warnings` (database or Redis down, email not really sent, Google sign-in missing, videos waiting, stuck over 2 hours or failed in 24 hours), `services`, `processing` (queue counts), `videos` by status, `storage` bytes, `accounts`, `moderation.openReports` |
 
 ## Notifications 🔒

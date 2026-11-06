@@ -62,3 +62,14 @@ test('sitemap lists public videos and Spaces only; older videos can be re-proces
   expect((await admin.agent.post('/api/admin/system/reprocess').set('Origin', WEB).send({ dryRun: true }).expect(200)).body).toEqual({ queued: 0, wouldQueue: 2, remaining: 2 });
   await admin.agent.post('/api/admin/system/reprocess').set('Origin', WEB).send({ limit: 0 }).expect(400);
 });
+
+test('repair media: administrators only; reports videos whose files are in the wrong place', async () => {
+  const c = await signIn(ctx.http, ctx.mail, 'maker@example.com');
+  const ch = (await c.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'maker', name: 'Maker' }).expect(201)).body.channel;
+  await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Lost', durationSeconds: 5, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', publishedAt: new Date(), hlsMasterKey: 'hls/master.m3u8', thumbnailKey: 'thumbs/2.jpg' } });
+  await c.agent.post('/api/admin/system/repair-media').set('Origin', WEB).send({}).expect(403);
+  const admin = await signIn(ctx.http, ctx.mail, 'boss@example.com');
+  const r = (await admin.agent.post('/api/admin/system/repair-media').set('Origin', WEB).send({}).expect(200)).body;
+  expect(r).toMatchObject({ checked: 1, needingRepair: 1, applied: false, busy: 0 });
+  expect(r.videos[0]).toMatchObject({ title: 'Lost', missing: ['hls/master.m3u8', 'thumbs/2.jpg'], leftovers: 0, repaired: false });
+});

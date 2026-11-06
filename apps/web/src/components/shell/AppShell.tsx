@@ -18,6 +18,13 @@ export function AppShell({ viewer, locale, children }: { viewer: Viewer | null; 
     mq.addEventListener('change', follow);
     return () => mq.removeEventListener('change', follow);
   }, []);
+  // An image that cannot load (a removed or moved file) is hidden instead of showing a broken icon: the tinted box
+  // behind every thumbnail and avatar shows through. One listener for the whole app.
+  useEffect(() => {
+    const onError = (e: Event) => { const t = e.target; if (t instanceof HTMLImageElement) t.style.visibility = 'hidden'; };
+    window.addEventListener('error', onError, true);
+    return () => window.removeEventListener('error', onError, true);
+  }, []);
   return (
     <ShellProvider viewer={viewer} locale={locale}>
       <UploadsProvider>

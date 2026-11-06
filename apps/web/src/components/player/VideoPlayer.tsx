@@ -122,7 +122,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
 
   const toggle = useCallback(() => {
     const el = video.current!;
-    if (el.paused || el.ended) { void el.play(); setFlash('play'); } else { el.pause(); setFlash('pause'); }
+    if (el.paused || el.ended) { el.play().catch(() => undefined); setFlash('play'); } else { el.pause(); setFlash('pause'); }
     setTimeout(() => setFlash(null), 500);
   }, []);
   const seek = useCallback((t: number) => { const el = video.current!; el.currentTime = Math.max(0, Math.min((el.duration || duration) - 0.05, t)); }, [duration]);

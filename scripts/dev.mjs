@@ -108,6 +108,10 @@ run('npm run -s db:seed');
 say('Building the shared package and the API…');
 run('npm run -s build -w @free-me/shared');
 run('npx swc src -d dist --strip-leading-paths --copy-files -q', { cwd: 'apps/api' });
+// Files a video left in the wrong storage place (an old bug: publishing while processing) are brought back, so
+// thumbnails and playback never 404 locally. Quick when nothing is wrong.
+say('Checking video files…');
+try { run('node dist/tools/repair-media.js --apply', { cwd: 'apps/api', stdio: ['ignore', 'ignore', 'inherit'] }); } catch { say('Could not check video files (continuing).'); }
 
 /** A package's command, from the workspace's own node_modules first (npm may install it there), then the root. */
 const bin = (name, ws) => [join(root, ws, 'node_modules', '.bin', name), join(root, 'node_modules', '.bin', name)].find(existsSync) ?? fail(`${name} is not installed: run npm install.`);
