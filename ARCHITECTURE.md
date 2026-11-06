@@ -68,7 +68,7 @@ Browser ──1. POST /api/uploads──────────────> AP
         ──3. POST /api/uploads/:id/complete─> API: checks size, queues "transcode" (BullMQ on Redis)
 Media worker: download source → ffprobe (rejects non-video) → 3 thumbnail frames
             → first rendition (up to 360p) → upload → video READY, playable
-            → remaining qualities → upload → master playlist rewritten → seek previews
+            → remaining rungs through 720p → 1080p and above → seek previews
 Viewer: CDN serves pub/<id>/hls/master.m3u8 and its fMP4 segments; private videos go through the API, which
         returns playlists whose segment links are signed for 4 hours.
 ```

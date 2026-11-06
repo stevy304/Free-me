@@ -19,6 +19,10 @@ export const LADDER: Rung[] = [
   { name: '2160p', short: 2160, kbps: 16000 },
 ];
 
+export const HD_RUNGS = new Set(['480p', '720p']);
+/** Rungs from 1080p up use TRANSCODE_PRESET_HIGH (faster by default): they cost the most CPU. */
+export const isHighRung = (r: Rung) => r.short >= 1080;
+
 export interface PlannedRung extends Rung { width: number; height: number; videoKbps: number; maxKbps: number }
 
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);

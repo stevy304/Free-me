@@ -9,7 +9,7 @@
  */
 import { execSync, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +25,10 @@ const quiet = (cmd) => spawnSync('sh', ['-c', cmd], { stdio: 'ignore' }).status 
 const sudo = process.getuid?.() === 0 ? '' : 'sudo -n ';
 
 // 1. Configuration.
-if (!existsSync('node_modules')) { say('Installing packages (npm install)…'); run('npm install'); }
+// After a `git pull` that added packages (package-lock.json is newer than the last install), install them first,
+// or the app fails with "Module not found".
+const installed = existsSync('node_modules/.package-lock.json') ? statSync('node_modules/.package-lock.json').mtimeMs : 0;
+if (!installed || statSync('package-lock.json').mtimeMs > installed) { say('Installing packages (npm install)…'); run('npm install'); }
 if (!existsSync('.env')) {
   copyFileSync('.env.example', '.env');
   const env = readFileSync('.env', 'utf8').replace(/^SESSION_SECRET=.*$/m, `SESSION_SECRET=${randomBytes(36).toString('base64url')}`);
