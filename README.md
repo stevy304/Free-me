@@ -46,14 +46,14 @@ npm run dev
 
 1. creates `.env` from `.env.example` on the first run (with a random `SESSION_SECRET`);
 2. installs PostgreSQL, Redis and FFmpeg with apt if they are missing (first run only; `npm run setup` does just this), and starts them if they are stopped;
-3. creates the database user and database from `DATABASE_URL`, applies the migrations and seeds the video categories;
+3. creates the database user and database from `DATABASE_URL`, refreshes the database client for the current code, applies the migrations and seeds the video categories (so after `git pull`, just run `npm run dev` again);
 4. runs the **API** (http://localhost:4000, docs at `/api/docs`, rebuilt when you edit it), the **media worker** and the **web app** (http://localhost:3000), with labelled logs in one terminal. Ctrl+C stops all of them.
 
 In GitHub Codespaces it uses the forwarded https address of port 3000 automatically (open it from the Ports tab).
 
 Videos are stored in `./.data/storage` (`STORAGE_DRIVER=local`). With `MAIL_TRANSPORT=console`, sign-in codes are printed in the `[api]` lines. Put your address in `ADMIN_EMAILS` in `.env` to become an administrator (and moderator).
 
-The parts can also be started separately, each in its own terminal: `npm run dev:api`, `npm run dev:worker`, `npm run dev:web` (PostgreSQL and Redis must already be running and migrated: `npm run db:migrate && npm run db:seed`).
+The parts can also be started separately, each in its own terminal: `npm run dev:api`, `npm run dev:worker`, `npm run dev:web` (PostgreSQL and Redis must already be running and migrated: `npm run db:generate && npm run db:migrate && npm run db:seed`; after a `git pull`, run these again or the API answers 500 with "Unknown field …").
 
 ## Checks
 
