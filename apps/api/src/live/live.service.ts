@@ -10,6 +10,7 @@ import { RedisService } from '../database/redis.service';
 import { MediaQueue, STORAGE } from '../media/queue';
 import type { Storage } from '../media/storage';
 import { publish, room } from '../realtime/publish';
+import { pushTo } from '../push/push';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { endLive, finishLive, LIVE_PLAYLIST, LiveSync } from './sync';
 
@@ -77,6 +78,7 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
     const to = followers.filter((f) => f.userId !== ch.userId);
     if (to.length) await this.prisma.notification.createMany({ data: to.map((f) => ({ userId: f.userId, type: 'LIVE' as const, actorId: ch.userId, liveStreamId: s.id })) });
     for (const f of to) publish(room.user(f.userId), 'notifications');
+    pushTo(to.map((f) => f.userId), { title: `${ch.name} is live`, body: s.title, url: `/live/${s.id}`, tag: `live-${s.id}` });
   }
 
   /** Starts a browser broadcast or a Premium encoder broadcast. */

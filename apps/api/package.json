@@ -22,6 +22,7 @@
     "@types/node": "22.20.5",
     "@types/nodemailer": "8.0.2",
     "@types/supertest": "7.2.1",
+    "@types/web-push": "3.6.4",
     "jest": "30.5.2",
     "socket.io-client": "4.8.4",
     "supertest": "7.3.1"
@@ -48,7 +49,8 @@
     "nodemailer": "7.0.13",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
-    "socket.io": "4.8.4"
+    "socket.io": "4.8.4",
+    "web-push": "3.6.7"
   },
   "jest": {
     "testEnvironment": "node",

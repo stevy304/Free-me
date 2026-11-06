@@ -2,12 +2,16 @@ import { Inject, Injectable, ServiceUnavailableException, UnauthorizedException 
 import { OAuth2Client, CodeChallengeMethod } from 'google-auth-library';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { APP_CONFIG, type AppConfig } from '../config/config';
+import { PrismaService } from '../database/prisma.service';
+import { loadGoogleSettings } from './google-settings';
 
 export interface GoogleProfile { sub: string; email: string; emailVerified: boolean; name: string | null; picture: string | null; nonce: string | null }
 
 /** The Google side of sign-in, behind an interface so tests can stand in for Google. */
 export interface GoogleOAuth {
   readonly enabled: boolean;
+  /** Re-reads keys saved in the app (Administration → Sign-in). */
+  refresh?(force?: boolean): Promise<void>;
   authorizationUrl(p: { state: string; nonce: string; codeChallenge: string; redirectUri: string }): string;
   exchange(p: { code: string; codeVerifier: string; redirectUri: string }): Promise<GoogleProfile>;
 }
@@ -16,11 +20,26 @@ export const GOOGLE_OAUTH = Symbol('GOOGLE_OAUTH');
 /** Google OpenID Connect: authorization code flow with PKCE; the ID token is verified (signature, audience, expiry). */
 @Injectable()
 export class GoogleOAuthClient implements GoogleOAuth {
-  readonly enabled: boolean;
-  private readonly client: OAuth2Client | null;
-  constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {
-    this.enabled = !!config.google;
-    this.client = config.google ? new OAuth2Client({ clientId: config.google.clientId, clientSecret: config.google.clientSecret }) : null;
+  private client: OAuth2Client | null = null;
+  private clientId: string | null = null;
+  private loadedAt = 0;
+  constructor(@Inject(APP_CONFIG) private readonly config: AppConfig, private readonly prisma: PrismaService) {
+    this.use(config.google ?? null);
+  }
+  get enabled() { return !!this.client; }
+
+  private use(keys: { clientId: string; clientSecret: string } | null) {
+    if (keys?.clientId === this.clientId && !!keys === !!this.client) return;
+    this.clientId = keys?.clientId ?? null;
+    this.client = keys ? new OAuth2Client({ clientId: keys.clientId, clientSecret: keys.clientSecret }) : null;
+  }
+
+  /** Keys saved in the app win over GOOGLE_CLIENT_ID/SECRET; read at most every 15 seconds. */
+  async refresh(force = false) {
+    if (!force && Date.now() - this.loadedAt < 15_000) return;
+    this.loadedAt = Date.now();
+    const saved = await loadGoogleSettings(this.prisma, this.config).catch(() => undefined);
+    this.use(saved === undefined ? this.config.google ?? null : saved?.enabled && saved.clientId && saved.clientSecret ? { clientId: saved.clientId, clientSecret: saved.clientSecret } : null);
   }
 
   private need() {
@@ -39,7 +58,7 @@ export class GoogleOAuthClient implements GoogleOAuth {
     const client = this.need();
     const { tokens } = await client.getToken({ code: p.code, codeVerifier: p.codeVerifier, redirect_uri: p.redirectUri });
     if (!tokens.id_token) throw new UnauthorizedException('Google did not return an identity.');
-    const ticket = await client.verifyIdToken({ idToken: tokens.id_token, audience: this.config.google!.clientId });
+    const ticket = await client.verifyIdToken({ idToken: tokens.id_token, audience: this.clientId! });
     const c = ticket.getPayload();
     if (!c?.sub || !c.email) throw new UnauthorizedException('Google did not share an email address.');
     return { sub: c.sub, email: c.email, emailVerified: c.email_verified === true, name: c.name ?? null, picture: c.picture ?? null, nonce: (c as { nonce?: string }).nonce ?? null };

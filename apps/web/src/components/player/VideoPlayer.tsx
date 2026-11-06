@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type Hls from 'hls.js';
 import { languageName } from '@free-me/shared';
 import { AdBreak, type AdSlot } from './AdBreak';
+import { DATA_SAVER_MAX, dataSaverActive } from '@/lib/datasaver';
 
 export interface CaptionTrack { language: string; auto: boolean; url: string }
 
@@ -51,6 +52,13 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const [speed, setSpeed] = useState(1);
   const [levels, setLevels] = useState<Level[]>([]);
   const [level, setLevel] = useState(-1); // -1 = auto
+  // Data saver caps "Auto" at 360p; "Sound only" plays the shared audio rendition alone (a fraction of the data).
+  const [saver, setSaver] = useState(false);
+  const [audio, setAudio] = useState<{ for: string; url: string } | null>(null);
+  const [soundOnly, setSoundOnly] = useState(false);
+  const resumeAt = useRef<{ t: number; play: boolean } | null>(null);
+  useEffect(() => { setSoundOnly(false); setAudio(null); resumeAt.current = null; }, [src]);
+  const playSrc = soundOnly && audio?.for === src ? audio.url : src;
   const [playingLevel, setPlayingLevel] = useState<number | null>(null);
   const [menu, setMenu] = useState<null | 'main' | 'quality' | 'speed' | 'captions'>(null);
   const { cc, chooseCc, cueText } = useCaptions(video, captions);
@@ -119,13 +127,16 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   // Source: native HLS on Safari/iOS, hls.js elsewhere.
   useEffect(() => {
     const el = video.current!;
+    const url = playSrc;
+    const back = resumeAt.current; resumeAt.current = null;
+    if (back) el.addEventListener('loadedmetadata', () => { el.currentTime = back.t; if (back.play) void el.play().catch(() => undefined); }, { once: true });
     firstPlay.current = { started: null, measured: false };
     setError(null); setLevels([]); setLevel(-1); reported.current = false; watched.current = 0;
     const v = Number(store.get('fm_volume') ?? '1'); const m = store.get('fm_muted') === '1';
     el.volume = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1; el.muted = m; setVolume(el.volume); setMuted(m);
     let cancelled = false;
     if (el.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) {
-      el.src = src;
+      el.src = url;
     } else {
       import('hls.js').then(({ default: H }) => {
         if (cancelled) return;
@@ -133,7 +144,16 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
         // startFragPrefetch: the first segment downloads while the player is still setting up.
         const h = new H({ capLevelToPlayerSize: true, startLevel: -1, startFragPrefetch: true, maxBufferLength: 30, backBufferLength: 60 });
         hls.current = h;
-        h.on(H.Events.MANIFEST_PARSED, () => setLevels(h.levels.map((l, index) => ({ index, height: l.height, width: l.width, label: label(l.height, l.width) })).reverse()));
+        h.on(H.Events.MANIFEST_PARSED, () => {
+          setLevels(h.levels.map((l, index) => ({ index, height: l.height, width: l.width, label: label(l.height, l.width) })).reverse());
+          const track = h.audioTracks[0];
+          if (track?.url && url === src) setAudio({ for: src, url: track.url });
+          // Data saver: "Auto" stays at 360p or below (the viewer can still pick a higher quality).
+          const cap = h.levels.reduce((best, l, i) => (Math.min(l.width, l.height) <= DATA_SAVER_MAX && (best < 0 || l.height * l.width > h.levels[best].height * h.levels[best].width) ? i : best), -1);
+          const on = dataSaverActive() && cap >= 0 && cap < h.levels.length - 1;
+          setSaver(on);
+          if (on) { h.autoLevelCapping = cap; h.nextLoadLevel = Math.min(h.nextLoadLevel, cap); }
+        });
         h.on(H.Events.LEVEL_SWITCHED, (_e, d) => { const l = h.levels[d.level]; setPlayingLevel(l ? Math.min(l.height, l.width) : null); });
         let recoveries = 0;
         h.on(H.Events.ERROR, (_e, d) => {
@@ -143,13 +163,13 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
           else if (d.type === H.ErrorTypes.MEDIA_ERROR && recoveries++ < 3) h.recoverMediaError();
           else { setError('This video cannot be played right now. Check your connection and try again.'); setWaiting(false); }
         });
-        h.loadSource(src); h.attachMedia(el);
+        h.loadSource(url); h.attachMedia(el);
       });
     }
     const start = () => { if (!cancelled && !preRoll.current) el.play().catch(() => { el.muted = true; setMuted(true); el.play().catch(() => undefined); }); };
     if (autoPlay) { if (withAds) void adsReady.current.then(start); else start(); }
     return () => { cancelled = true; hls.current?.destroy(); hls.current = null; el.removeAttribute('src'); el.load(); };
-  }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [playSrc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { const s = Number(store.get('fm_speed') ?? '1'); if (SPEEDS.includes(s)) { setSpeed(s); if (video.current) video.current.playbackRate = s; } }, []);
 
@@ -161,7 +181,16 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const seek = useCallback((t: number) => { const el = video.current!; el.currentTime = Math.max(0, Math.min((el.duration || duration) - 0.05, t)); }, [duration]);
   const setVol = (v: number, m = v === 0) => { const el = video.current!; el.volume = v; el.muted = m; setVolume(v); setMuted(m); store.set('fm_volume', String(v)); store.set('fm_muted', m ? '1' : '0'); };
   const setRate = (s: number) => { video.current!.playbackRate = s; setSpeed(s); store.set('fm_speed', String(s)); };
-  const chooseLevel = (i: number) => { if (hls.current) { hls.current.currentLevel = i; hls.current.loadLevel = i; } setLevel(i); setMenu(null); };
+  const chooseLevel = (i: number) => {
+    if (hls.current) { if (i >= 0) hls.current.autoLevelCapping = -1; hls.current.currentLevel = i; hls.current.loadLevel = i; }
+    if (i >= 0) setSaver(false);
+    setLevel(i); setMenu(null);
+  };
+  const toggleSoundOnly = () => {
+    const el = video.current!;
+    resumeAt.current = { t: el.currentTime, play: !el.paused };
+    setSoundOnly((v) => !v); setMenu(null);
+  };
   // Phones: a tap shows or hides the controls (it does not pause); a double tap on the left or right third skips 10 s.
   const lastTap = useRef<{ t: number; x: number } | null>(null);
   const [skip, setSkip] = useState<null | 'back' | 'fwd'>(null);
@@ -238,7 +267,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
 
   const pct = (n: number) => `${duration ? Math.min(100, (n / duration) * 100) : 0}%`;
   const VolIcon = muted || volume === 0 ? Icon.VolumeOff : volume < 0.5 ? Icon.VolumeLow : Icon.VolumeHigh;
-  const autoLabel = level === -1 ? `Auto${playingLevel ? ` (${playingLevel}p)` : ''}` : levels.find((l) => l.index === level)?.label ?? 'Auto';
+  const autoLabel = soundOnly ? 'Sound only' : level === -1 ? `Auto${saver ? ' · data saver' : ''}${playingLevel ? ` (${playingLevel}p)` : ''}` : levels.find((l) => l.index === level)?.label ?? 'Auto';
   const btn = 'grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white hover:bg-white/10';
   const showUi = !playing || !idle || menu !== null;
 
@@ -270,6 +299,13 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
           <span className="max-w-[88%] whitespace-pre-line rounded-lg bg-[rgb(5_10_10/0.8)] px-2.5 py-1 text-center text-[13px] font-semibold leading-snug text-white sm:max-w-[72%] sm:px-3.5 sm:py-1.5 sm:text-[19px]">{cueText}</span>
         </div>
       )}
+      {soundOnly && (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-black">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {poster && <img src={poster} alt="" className="absolute inset-0 h-full w-full object-cover opacity-40 blur-sm" />}
+          <span className="relative rounded-full bg-black/60 px-4 py-2 text-[14px] font-semibold text-white">Sound only · saving data</span>
+        </div>
+      )}
       {ad && videoId && <AdBreak slot={ad} videoId={videoId} muted={muted} onDone={adDone} />}
       {waiting && !error && !ad && <Icon.Spinner className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/90" />}
       {flash && <div className="pointer-events-none absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 animate-ping place-items-center rounded-full bg-[rgb(43_181_171/0.6)] text-white [animation-iteration-count:1]">{flash === 'play' ? <Icon.Play size={30} /> : <Icon.Pause size={30} />}</div>}
@@ -291,6 +327,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
                 <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/50">Playback</p>
                 <button type="button" className="flex w-full items-center justify-between rounded-xl px-3 py-3 hover:bg-white/10" onClick={() => setMenu('speed')}><span>Speed</span><span className="flex items-center gap-1 text-white/70">{speed === 1 ? 'Normal' : `${speed}×`}<Icon.ChevronRight size={16} /></span></button>
                 {levels.length > 0 && <button type="button" className="flex w-full items-center justify-between rounded-xl px-3 py-3 hover:bg-white/10" onClick={() => setMenu('quality')}><span>Quality</span><span className="flex items-center gap-1 text-white/70">{autoLabel}<Icon.ChevronRight size={16} /></span></button>}
+                {audio?.for === src && <button type="button" role="menuitemcheckbox" aria-checked={soundOnly} className="flex w-full items-center justify-between rounded-xl px-3 py-3 hover:bg-white/10" onClick={toggleSoundOnly}><span>Sound only</span><span className="text-white/70">{soundOnly ? 'On · saves data' : 'Off'}</span></button>}
                 {captions.length > 0 && <button type="button" className="flex w-full items-center justify-between rounded-xl px-3 py-3 hover:bg-white/10" onClick={() => setMenu('captions')}><span>Subtitles</span><span className="flex items-center gap-1 text-white/70">{cc ? captionLabel(captions.find((c) => c.language === cc)!) : 'Off'}<Icon.ChevronRight size={16} /></span></button>}
               </>
             )}

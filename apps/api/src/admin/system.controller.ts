@@ -8,6 +8,8 @@ import { PrismaService } from '../database/prisma.service';
 import { RedisService } from '../database/redis.service';
 import { RequireAuth } from '../common/auth.guard';
 import { MediaQueue, STORAGE } from '../media/queue';
+import { effective, loadStored } from '../billing/settings';
+import { loadGoogleSettings } from '../auth/google-settings';
 import { MediaJobs, VideoBusy } from '../media/jobs';
 import type { Storage } from '../media/storage';
 
@@ -32,6 +34,39 @@ const HOUR = 3_600_000;
 @RequireAuth('ADMIN')
 export class SystemController {
   constructor(private readonly prisma: PrismaService, private readonly redis: RedisService, private readonly media: MediaQueue, @Inject(APP_CONFIG) private readonly config: AppConfig, @Inject(STORAGE) private readonly storage: Storage) {}
+
+  /**
+   * Before opening to the public: each thing a real launch needs, checked on this server, with what to do when it is
+   * not ready. "required" ones block a launch; the others are strongly advised.
+   */
+  @Get('launch')
+  @ApiOperation({ summary: 'Launch readiness checklist (administrators only)' })
+  async launch() {
+    const c = this.config;
+    const [billing, google, admins, official, workers, pushKey] = await Promise.all([
+      loadStored(this.prisma, c).then((s) => effective(c, s)).catch(() => null),
+      loadGoogleSettings(this.prisma, c).catch(() => undefined),
+      this.prisma.user.count({ where: { roles: { has: 'ADMIN' } } }),
+      this.prisma.channel.findFirst({ where: { isVerified: true, user: { roles: { has: 'ADMIN' } } }, select: { name: true, handle: true } }),
+      this.media.queue ? this.media.queue.getWorkers().then((w) => w.length).catch(() => 0) : Promise.resolve(-1),
+      this.prisma.appSetting.findUnique({ where: { key: 'push' }, select: { key: true } }),
+    ]);
+    const googleOn = google === undefined ? !!c.google : !!(google?.enabled && google.clientId && google.clientSecret);
+    const pay = billing ? [billing.momo && 'MTN MoMo', billing.flutterwave && 'cards (Flutterwave)', billing.manual && 'manual payments'].filter(Boolean) as string[] : [];
+    const checks = [
+      { id: 'https', required: true, ok: c.appUrl.startsWith('https://'), label: 'Secure address (https)', detail: c.appUrl, fix: 'Point your domain at the server, set APP_URL=https://your-domain in /etc/freeme/freeme.env and run the install again: Caddy gets the certificate by itself.' },
+      { id: 'workers', required: true, ok: workers !== 0, label: 'Video workers running', detail: workers < 0 ? 'Videos are processed inside the API (no Redis): fine for one small server.' : `${workers} connected`, fix: 'Start the media worker: sudo systemctl enable --now freeme-worker@1 (see DEPLOYMENT.md).' },
+      { id: 'storage', required: false, ok: c.media.driver === 's3', label: 'Object storage for videos', detail: c.media.driver === 's3' ? 'S3-compatible storage' : 'Files on this server’s disk', fix: 'For growth, use object storage (Hetzner, Wasabi, R2…): deploy/ubuntu/storage-setup.sh and the S3_* settings.' },
+      { id: 'cdn', required: false, ok: c.media.driver === 's3' && !!process.env.MEDIA_PUBLIC_BASE_URL, label: 'CDN in front of videos', detail: c.media.publicBaseUrl || 'none', fix: 'Set MEDIA_PUBLIC_BASE_URL to your CDN address (e.g. https://media.your-domain) so videos load fast everywhere.' },
+      { id: 'email', required: true, ok: c.mail.transport === 'smtp', label: 'Email delivery (sign-in codes)', detail: c.mail.transport === 'smtp' ? c.mail.from : 'Emails are only written to the log', fix: 'Set SMTP_HOST, SMTP_USER, SMTP_PASS and MAIL_FROM (any SMTP service: Brevo, Mailgun, Gmail Workspace…).' },
+      { id: 'payments', required: false, ok: pay.length > 0, label: 'A way to pay', detail: pay.length ? pay.join(', ') : 'None switched on', fix: 'Administration → Money → Payment settings: start with “Send money (manual)” and your MoMo number.' },
+      { id: 'google', required: false, ok: googleOn, label: 'Google sign-in', detail: googleOn ? 'On' : 'Off (email codes still work)', fix: 'Administration → Sign-in: paste the Client ID and secret from Google Cloud Console.' },
+      { id: 'admin', required: true, ok: admins > 0, label: 'An administrator', detail: `${admins} administrator account(s)`, fix: 'npm run make-admin -- you@example.com' },
+      { id: 'official', required: false, ok: !!official, label: 'Official verified Space', detail: official ? `${official.name} (@${official.handle})` : 'None', fix: 'npm run make-admin -- you@example.com --space "Free Me" --handle freeme' },
+      { id: 'push', required: false, ok: !!pushKey && c.appUrl.startsWith('https://'), label: 'Phone notifications', detail: pushKey ? 'Ready' : 'Made automatically the first time someone turns them on', fix: 'Needs the https address; nothing else to set.' },
+    ];
+    return { ready: checks.every((x) => x.ok || !x.required), checks };
+  }
 
   @Get()
   @ApiOperation({ summary: 'Health, processing queue, stuck and failed videos, storage used and accounts (administrators only)' })

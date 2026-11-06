@@ -36,6 +36,10 @@ const config: NextConfig = {
   },
   async headers() {
     return [{
+      // The service worker must always be the latest one (its own code decides what the app keeps offline).
+      source: '/sw.js',
+      headers: [{ key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' }, { key: 'Service-Worker-Allowed', value: '/' }],
+    }, {
       source: '/:path*',
       headers: [
         { key: 'X-Content-Type-Options', value: 'nosniff' },

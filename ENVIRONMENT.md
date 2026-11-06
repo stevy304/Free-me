@@ -14,7 +14,7 @@ Values for local development are in [.env.example](.env.example). In production 
 | `EXTRA_ORIGINS` | | | Other web origins allowed to send changes (comma-separated) |
 | `SESSION_SECRET` | production | development value | 32+ random characters (`openssl rand -base64 48`). Keys code hashes and the OAuth state cookie. Changing it invalidates pending codes and Google sign-ins in progress (not sessions) |
 | `SESSION_TTL_DAYS` | | `30` | Session lifetime, sliding, 1–90 |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | for Google sign-in | | OAuth client ("Web application"). Authorised redirect URI: `${APP_URL}/api/auth/google/callback` |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | for Google sign-in | | OAuth client ("Web application"). Authorised redirect URI: `${APP_URL}/api/auth/google/callback`. Easier: set them in the app, **Administration → Sign-in** (stored encrypted; what is saved there wins), which also shows the exact addresses to give Google. Logo for Google's consent screen: `apps/web/public/brand/free-me-logo-120.png` |
 | `MAIL_TRANSPORT` | | `console` (dev), `smtp` (prod) | `smtp`, `console` (prints codes in the log) or `memory` (tests). Production requires `smtp` |
 | `MAIL_FROM` | production | | Sender, e.g. `Free Me <no-reply@freeme.example>` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` | with smtp | port 587 | Mail provider credentials (`SMTP_SECURE=true` or port 465 for implicit TLS) |
