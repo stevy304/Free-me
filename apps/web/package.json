@@ -12,6 +12,7 @@
   "dependencies": {
     "@free-me/shared": "0.1.0",
     "hls.js": "1.7.4",
+    "mediabunny": "1.62.1",
     "next": "15.5.29",
     "react": "19.2.9",
     "react-dom": "19.2.9",

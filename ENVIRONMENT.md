@@ -43,6 +43,12 @@ Values for local development are in [.env.example](.env.example). In production 
 | `WORKER_CONCURRENCY` | | `2` | Videos one worker instance processes at once |
 | `TRANSCODE_PRESET` | | `veryfast` | x264 preset: faster = quicker processing, slightly larger files |
 | `TRANSCODE_PRESET_HIGH` | | `superfast` | x264 preset for 1080p and above (the rungs that cost the most CPU); `veryfast` for slightly smaller files, slower |
+| `CHUNKED_ENCODING` | | `true` | Encode long videos in pieces that every worker server takes from a shared queue (more media servers = long videos ready sooner). `false`: one run per pass, as before |
+| `CHUNK_MIN_SECONDS` | | `120` | Videos at least this long are encoded in pieces |
+| `CHUNK_SECONDS` | | `30` | Length of one piece (rounded to an even number, so keyframes stay on the 2-second grid) |
+| `CHUNK_CONCURRENCY` | | `1` | Pieces one worker instance encodes at once (x264 already uses every core, so 1 is right for most servers) |
+| `NODE_NAME` | | the host name | Name of this media server. Pieces encoded on the server that planned the work skip object storage; set it only if two servers share a host name |
+| `COPY_TOP_RUNG` | | `true` | Use the upload's own H.264 as the top quality when it is suitable (exact size, 8-bit, normal colour, keyframe at least every 4.5 s, bitrate viewers can stream): the most expensive encode is skipped. `false` always re-encodes |
 | `VIDEO_ENCODER` | | `libx264` | `nvenc` (NVIDIA GPU) or `qsv` (Intel Quick Sync) for a media server with a GPU: several times faster. Falls back to `libx264` by itself if the GPU encoder fails |
 | `FFMPEG_PATH`, `FFPROBE_PATH` | | `ffmpeg`, `ffprobe` | Binaries |
 | `QUEUE_PREFIX` | | `fm` | Redis key prefix for the job queue |
@@ -71,7 +77,9 @@ Values for local development are in [.env.example](.env.example). In production 
 
 ## Payments (API and worker)
 
-Premium, ad campaigns and creator earnings are priced in US dollars. Turn on one or both payment methods; with neither, the Premium and Ads pages say payments are not set up. Prices are set by the operator (MONETISATION.md explains the numbers).
+Premium, ad campaigns and creator earnings are priced in US dollars. **The easiest way: Administration → Money → Payment settings**, in the app. There, administrators set the prices, switch on *Send money (manual)* (people pay to your MoMo, Airtel Money or bank account with a reference code, and you confirm each payment; no provider account needed), create MTN MoMo sandbox keys from a Collections subscription key in one click, or paste live MoMo and Flutterwave keys. Keys are stored encrypted with SESSION_SECRET. Settings saved in the app win over the variables below, which remain for servers configured from files. MONETISATION.md explains the numbers.
+
+To make someone an administrator (everything, including every Premium feature such as Live Studio): `npm run make-admin -- someone@example.com`, or list the address in `ADMIN_EMAILS`. To make that account the platform's official Space too (verified badge): `npm run make-admin -- someone@example.com --space "Free Me" --handle freeme` (the person must have signed in once).
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |

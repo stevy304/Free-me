@@ -46,7 +46,7 @@ export class HubController {
 
   private async view(v: Video & { category?: { slug: string; name: string } | null; tags?: Array<{ tag: { name: string } }>; renditions?: Array<{ resolution: string; height: number; width: number }> }) {
     return {
-      id: v.id, title: v.title, description: v.description, visibility: v.visibility, status: v.status, madeForKids: v.madeForKids, isShort: v.isShort, isPodcast: v.isPodcast,
+      id: v.id, title: v.title, description: v.description, visibility: v.visibility, status: v.status, madeForKids: v.madeForKids, isShort: v.isShort, isPodcast: v.isPodcast, isAd: v.isAd,
       language: v.language, category: v.category ? { slug: v.category.slug, name: v.category.name } : null, tags: v.tags?.map((t) => t.tag.name) ?? [],
       durationSeconds: v.durationSeconds, width: v.width, height: v.height, processingProgress: v.processingProgress, processingStage: v.processingStage,
       processingError: v.processingError, viewCount: v.viewCount.toString(), likeCount: v.likeCount, dislikeCount: v.dislikeCount, commentCount: v.commentCount, commentsEnabled: v.commentsEnabled,
@@ -62,9 +62,10 @@ export class HubController {
 
   @Get()
   @ApiOperation({ summary: 'My videos, newest first' })
-  async list(@CurrentAuth() auth: AuthContext, @Query('cursor') cursor?: string, @Query('status') status?: string) {
+  async list(@CurrentAuth() auth: AuthContext, @Query('cursor') cursor?: string, @Query('status') status?: string, @Query('ads') ads?: string) {
     const rows = await this.prisma.video.findMany({
-      where: { channel: { userId: auth.user.id }, ...(status === 'UPLOADING' ? { status: 'UPLOADING' } : {}) },
+      // Ads live in Ad Studio (?ads=true), not with the Space's videos.
+      where: { channel: { userId: auth.user.id }, isAd: ads === 'true', ...(status === 'UPLOADING' ? { status: 'UPLOADING' } : {}) },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 31, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), include: { category: true, renditions: { select: { resolution: true, width: true, height: true } } },
     });
     return { videos: await Promise.all(rows.slice(0, 30).map((v) => this.view(v))), nextCursor: rows.length > 30 ? rows[29].id : null };
@@ -93,6 +94,7 @@ export class HubController {
       if (!key) throw new BadRequestException('That thumbnail is not available yet.');
       data.thumbnailKey = key; data.customThumbnail = false;
     }
+    if (v.isAd && body.visibility === 'PUBLIC') throw new BadRequestException('An ad stays out of feeds: it plays only before videos.');
     if (body.visibility !== undefined && body.visibility !== v.visibility) {
       data.visibility = body.visibility;
       if (body.visibility !== 'PRIVATE' && !v.publishedAt) data.publishedAt = new Date();

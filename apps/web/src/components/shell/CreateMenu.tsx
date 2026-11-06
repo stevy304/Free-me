@@ -16,7 +16,7 @@ export function CreateMenu() {
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [open]);
-  const active = items.filter((i) => ['starting', 'uploading', 'paused', 'finishing'].includes(i.snap.state));
+  const active = items.filter((i) => ['starting', 'compressing', 'uploading', 'paused', 'finishing'].includes(i.snap.state));
   const sent = active.reduce((a, i) => a + i.snap.sent, 0); const total = active.reduce((a, i) => a + i.snap.total, 0);
   return (
     <div ref={box} className="relative flex items-center gap-2">
@@ -34,6 +34,7 @@ export function CreateMenu() {
           <button role="menuitem" type="button" onClick={() => { setOpen(false); openDialog(null, 'moment'); }} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Moments size={20} />Post a Moment</button>
           <button role="menuitem" type="button" onClick={() => { setOpen(false); openDialog(null, 'podcast'); }} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Mic size={20} />Upload podcast</button>
           <Link role="menuitem" href="/studio/live" onClick={() => setOpen(false)} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Live size={20} />Go live</Link>
+          <Link role="menuitem" href="/studio/ads" onClick={() => setOpen(false)} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Megaphone size={20} />Create an ad</Link>
           <Link role="menuitem" href="/hub" onClick={() => setOpen(false)} className="flex w-full items-center gap-4 px-4 py-2.5 text-[14px] hover:bg-surface"><Icon.Hub size={20} />Creator Hub</Link>
         </div>
       )}

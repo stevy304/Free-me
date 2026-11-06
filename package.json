@@ -20,7 +20,8 @@
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "postinstall": "prisma generate && npm run build -w @free-me/shared"
+    "postinstall": "prisma generate && npm run build -w @free-me/shared",
+    "make-admin": "node --import tsx apps/api/src/tools/make-admin.ts"
   },
   "prisma": {
     "schema": "prisma/schema.prisma"

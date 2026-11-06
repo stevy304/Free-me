@@ -25,14 +25,18 @@ export class BillingService extends Billing {
 export const paymentView = (p: Payment) => ({
   id: p.id, purpose: p.purpose, method: p.provider, status: p.status, amount: p.amountMinor.toString(), currency: p.currency, usdCents: p.usdCents,
   months: p.months, campaignId: p.campaignId, checkoutUrl: p.status === 'PENDING' ? p.checkoutUrl : null, failureReason: p.failureReason, createdAt: p.createdAt, paidAt: p.paidAt,
+  // Manual payments: the code to write in the transfer message, and the transaction id the payer gave.
+  reference: p.provider === 'manual' ? p.providerRef.split('-').slice(0, 2).join('-') : null, payerReference: p.payerReference,
 });
 
-export const premiumView = (u: Pick<User, 'premiumUntil'>) => ({ active: isPremium(u), until: u.premiumUntil });
+/** Membership; administrators can use every Premium feature without one. */
+export const premiumView = (u: Pick<User, 'premiumUntil'> & Partial<Pick<User, 'roles'>>) => ({ active: isPremium(u) || !!u.roles?.includes('ADMIN'), until: u.premiumUntil, admin: !!u.roles?.includes('ADMIN') });
 
 export class PayDto {
-  @ApiProperty({ enum: ['mtn_momo', 'flutterwave'] }) @IsIn(['mtn_momo', 'flutterwave']) method!: ProviderName;
+  @ApiProperty({ enum: ['mtn_momo', 'flutterwave', 'manual'] }) @IsIn(['mtn_momo', 'flutterwave', 'manual']) method!: ProviderName;
   @ApiPropertyOptional({ description: 'MTN Mobile Money number (method mtn_momo)' }) @IsOptional() @IsString() @MaxLength(24) phone?: string;
 }
+class ProofDto { @ApiProperty({ description: 'Transaction id from the MoMo, Airtel or bank confirmation message' }) @IsString() @MaxLength(120) reference!: string }
 class PremiumDto extends PayDto { @ApiProperty({ enum: PREMIUM_MONTHS }) @IsInt() @IsIn([...PREMIUM_MONTHS]) months!: number }
 
 @ApiTags('billing')
@@ -42,13 +46,16 @@ export class BillingController {
 
   @Get('plans')
   @ApiOperation({ summary: 'Prices and the payment methods this server accepts' })
-  plans() {
-    const b = this.billing.cfg.billing;
+  async plans() {
+    const b = await this.billing.settings();
     return {
       premium: { usdCents: b.premiumUsdCents, months: PREMIUM_MONTHS },
       ads: { usdCentsPerDay: b.adDayUsdCents, maxAdsPerVideo: 2 },
       payoutMinimumUsdCents: b.payoutMinUsdCents,
-      methods: this.billing.methods().map((m) => ({ ...m, perUsd: m.name === 'mtn_momo' ? b.momo!.perUsd : 1 })),
+      methods: (await this.billing.methods()).map((m) => ({
+        ...m, perUsd: m.name === 'mtn_momo' ? b.momo!.perUsd : m.name === 'manual' ? b.manual!.perUsd : 1,
+        ...(m.name === 'manual' ? { accounts: b.manual!.accounts, instructions: b.manual!.instructions } : {}),
+      })),
     };
   }
 
@@ -68,7 +75,7 @@ export class BillingController {
   @ApiOperation({ summary: 'Pay for Premium (MoMo prompt on the phone, or a card checkout link)' })
   async premium(@CurrentAuth() auth: AuthContext, @Body() body: PremiumDto) {
     await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
-    const usdCents = this.billing.cfg.billing.premiumUsdCents * body.months;
+    const usdCents = (await this.billing.settings()).premiumUsdCents * body.months;
     const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'PREMIUM', method: body.method, phone: body.phone, months: body.months, usdCents, description: `Free Me Premium, ${body.months} ${body.months === 1 ? 'month' : 'months'}`, returnPath: '/premium' }));
     return { payment: paymentView(p) };
   }
@@ -84,12 +91,21 @@ export class BillingController {
     return { payment: paymentView(fresh), premium: premiumView(u) };
   }
 
+  @Post('payments/:id/proof')
+  @RequireAuth()
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Manual payment: give the transaction id from your MoMo, Airtel or bank message; an administrator confirms it' })
+  async proof(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: ProofDto) {
+    await this.limits.consume(`pay:proof:${auth.user.id}`, 20, 3600);
+    return { payment: paymentView(await this.billing.attempt(() => this.billing.submitProof(auth.user.id, id, body.reference))) };
+  }
+
   @Post('webhooks/flutterwave')
   @Webhook()
   @HttpCode(200)
   @ApiOperation({ summary: 'Flutterwave callback (checked with the verif-hash header; the payment is then verified with Flutterwave itself)' })
   async flutterwave(@Req() req: Request, @Body() body: { data?: { tx_ref?: string } }) {
-    const hash = this.billing.cfg.billing.flutterwave?.webhookHash;
+    const hash = (await this.billing.settings()).flutterwave?.webhookHash;
     if (!hash || req.headers['verif-hash'] !== hash) throw new ForbiddenException('Unknown sender.');
     const ref = body?.data?.tx_ref;
     const p = ref ? await this.prisma.payment.findUnique({ where: { providerRef: ref } }) : null;

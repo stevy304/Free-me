@@ -305,5 +305,5 @@ test('videos whose processing stopped are found for re-processing; finished ones
   const { MediaJobs } = await import('../src/media/jobs');
   const { STORAGE } = await import('../src/media/queue');
   const jobs = new MediaJobs(ctx.prisma, ctx.app.get(STORAGE), ctx.config, null);
-  expect((await jobs.stuckVideos()).sort()).toEqual([stuck.id, halfway.id].sort());
+  expect((await jobs.stuckVideos()).map((v) => v.id).sort()).toEqual([stuck.id, halfway.id].sort());
 });

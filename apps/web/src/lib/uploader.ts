@@ -1,9 +1,14 @@
 'use client';
 
 import { api, ApiError } from './client-api';
+import { compressVideo } from './compress';
 
-export type UploadState = 'starting' | 'uploading' | 'paused' | 'finishing' | 'done' | 'error' | 'cancelled';
-export interface UploadSnapshot { state: UploadState; videoId: string | null; title: string; sent: number; total: number; bytesPerSecond: number; secondsLeft: number | null; error: string | null }
+export type UploadState = 'starting' | 'compressing' | 'uploading' | 'paused' | 'finishing' | 'done' | 'error' | 'cancelled';
+export interface UploadSnapshot {
+  state: UploadState; videoId: string | null; title: string; sent: number; total: number; bytesPerSecond: number; secondsLeft: number | null; error: string | null;
+  /** While compressing: how far (0–1). After: the original size, when a smaller copy is being uploaded instead. */
+  compress: { progress: number; originalBytes: number; savedBytes: number | null } | null;
+}
 
 const INITIAL_PARALLEL = 4;
 const MAX_PARALLEL = 6;
@@ -40,15 +45,48 @@ export class VideoUpload {
   private retryWaiters = new Set<() => void>();
   private samples: Array<[number, number]> = [];
 
-  constructor(readonly file: File, private readonly onChange: (s: UploadSnapshot) => void) {
-    this.snap = { state: 'starting', videoId: null, title: file.name.replace(/\.[^.]+$/, ''), sent: 0, total: file.size, bytesPerSecond: 0, secondsLeft: null, error: null };
+  /** What is uploaded: the chosen file, or a smaller copy made in the browser. */
+  file: File;
+  private compressed = false;
+  private compressing: AbortController | null = null;
+
+  constructor(readonly original: File, private readonly onChange: (s: UploadSnapshot) => void, private readonly options: { ad?: boolean; compress?: boolean } = {}) {
+    this.file = original;
+    this.snap = { state: 'starting', videoId: null, title: original.name.replace(/\.[^.]+$/, ''), sent: 0, total: original.size, bytesPerSecond: 0, secondsLeft: null, error: null, compress: null };
+  }
+
+  private cancelled() { return this.snap.state === 'cancelled'; }
+  /** Upload the original instead of finishing the smaller copy. */
+  skipCompression() { this.compressing?.abort(new DOMException('skipped', 'AbortError')); }
+
+  /**
+   * A smaller copy before uploading (on by default; less mobile data and a much shorter upload). Not for a file that
+   * is already partly uploaded from an earlier visit: that upload resumes as it was.
+   */
+  private async prepare() {
+    if (this.options.compress === false || this.compressed || this.snap.videoId || remembered()[fileKey(this.original)]) return;
+    const ctl = new AbortController(); this.compressing = ctl;
+    this.set({ state: 'compressing', compress: { progress: 0, originalBytes: this.original.size, savedBytes: null } });
+    try {
+      const r = await compressVideo(this.original, (progress) => { if (this.snap.state === 'compressing') this.set({ compress: { progress, originalBytes: this.original.size, savedBytes: null } }); }, ctl.signal);
+      if (r) {
+        this.file = r.file; this.compressed = true;
+        this.set({ total: r.file.size, compress: { progress: 1, originalBytes: this.original.size, savedBytes: this.original.size - r.file.size } });
+      } else this.set({ compress: null });
+    } catch {
+      this.set({ compress: null }); // skipped or cancelled: the original goes up
+    } finally { this.compressing = null; }
+    if (this.snap.state === 'compressing') this.set({ state: 'starting' });
   }
   get snapshot() { return this.snap; }
   private set(p: Partial<UploadSnapshot>) { this.snap = { ...this.snap, ...p }; this.onChange(this.snap); }
 
   async start() {
     try {
-      const previous = remembered()[fileKey(this.file)];
+      await this.prepare();
+      if (this.cancelled()) return;
+      // A smaller copy is made anew each time, so it is not resumed after the tab closes (the original is).
+      const previous = this.compressed ? undefined : remembered()[fileKey(this.file)];
       if (previous) {
         const s = await api<{ status: string; partSize: number; assembled?: boolean; parts: Array<{ partNumber: number; etag: string }> }>(`/uploads/${previous}`).catch((e: unknown) => {
           if (e instanceof ApiError && e.status === 404) return null;
@@ -70,13 +108,13 @@ export class VideoUpload {
         }
       }
       if (!this.snap.videoId) {
-        const r = await api<{ videoId: string; title: string; partSize: number; partCount: number }>('/uploads', { body: { fileName: this.file.name, sizeBytes: this.file.size } });
+        const r = await api<{ videoId: string; title: string; partSize: number; partCount: number }>('/uploads', { body: { fileName: this.file.name, sizeBytes: this.file.size, ...(this.options.ad ? { ad: true } : {}) } });
         if (this.snap.state === 'cancelled') {
           await api(`/uploads/${r.videoId}`, { method: 'DELETE', body: {} });
           return;
         }
         this.partSize = r.partSize; this.partCount = r.partCount;
-        remember(this.file, r.videoId);
+        if (!this.compressed) remember(this.file, r.videoId);
         this.set({ videoId: r.videoId, title: r.title });
       }
       await this.run();
@@ -261,6 +299,7 @@ export class VideoUpload {
   async cancel() {
     if (this.snap.state === 'finishing' || this.snap.state === 'done') return;
     this.set({ state: 'cancelled' });
+    this.compressing?.abort();
     this.stopTransfers();
     remember(this.file, null);
     if (this.snap.videoId) await api(`/uploads/${this.snap.videoId}`, { method: 'DELETE', body: {} }).catch(() => undefined);

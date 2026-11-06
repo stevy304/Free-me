@@ -11,7 +11,7 @@ import { money, usd } from '@/lib/money';
 import type { Payment, Plans, Viewer } from '@/lib/types';
 import { useShell } from '@/components/shell/ShellContext';
 
-interface Me { premium: { active: boolean; until: string | null }; payments: Payment[] }
+interface Me { premium: { active: boolean; until: string | null; admin?: boolean }; payments: Payment[] }
 
 const PERKS = [
   { icon: 'badge', title: 'Verified badge', text: 'Show the Free Me seal on your Space, videos and conversations.' },
@@ -76,7 +76,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
         ))}
       </div>
       <div className="mt-4">
-        <PayPanel usdCents={plans.premium.usdCents * months} plans={plans} label={active ? 'Extend Premium' : 'Get Premium'} onPaid={paid}
+        <PayPanel usdCents={plans.premium.usdCents * months} plans={plans} label={active ? 'Extend Premium' : 'Get Premium'} onPaid={paid} pending={me.payments.find((p) => p.status === 'PENDING' && p.method === 'manual' && p.purpose === 'PREMIUM') ?? null}
           start={async (method, phone) => (await api<{ payment: Payment }>('/billing/premium', { body: { method, phone, months } })).payment} />
       </div>
     </div>
@@ -98,7 +98,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
             {active ? (
               <>
                 <h1 className="mt-1 flex items-center gap-2 font-display text-[30px] font-extrabold leading-tight sm:text-[38px]">{name}<VerifiedBadge size={28} /></h1>
-                <p className="mt-1 text-[15px] text-[#c9d6d4]">Member until <b className="text-white">{until!.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })}</b> · {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left</p>
+                <p className="mt-1 text-[15px] text-[#c9d6d4]">{until && until.getTime() > Date.now() ? <>Member until <b className="text-white">{until.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })}</b> · {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left</> : 'Every Premium feature is included with your administrator account.'}</p>
               </>
             ) : (
               <>
@@ -120,7 +120,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
               { href: '/hub?tab=money', icon: Icon.Wallet, title: 'Monetisation', text: 'Earnings and withdrawals' },
               { href: '/studio/live', icon: Icon.Live, title: 'Live Studio', text: 'Go live now' },
               { href: '/hub', icon: Icon.Hub, title: 'Creator Hub', text: 'Videos, Moments, podcasts' },
-              { href: '/ads', icon: Icon.Megaphone, title: 'Ads Manager', text: 'Promote with video ads' },
+              { href: '/studio/ads', icon: Icon.Megaphone, title: 'Ad Studio', text: 'Upload and run video ads' },
             ].map((t) => (
               <Link key={t.href} href={t.href} className="group rounded-3xl border border-line bg-elevated p-5 hover:border-brand">
                 <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-soft text-brand"><t.icon size={22} /></span>

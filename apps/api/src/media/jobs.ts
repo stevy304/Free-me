@@ -8,9 +8,14 @@ import { LATE_FOLDERS } from './captions';
 import { autoCaptions } from './autocaptions';
 import { MediaError, VideoProcessor } from './process';
 import type { Storage } from './storage';
+import type { ChunkRunner } from './chunks';
 import { ViewCounter } from './views';
 
-export type MediaJob = { name: 'transcode'; videoId: string } | { name: 'relocate'; videoId: string } | { name: 'purge'; videoId: string };
+/**
+ * `transcode` makes a video playable (360p, thumbnails, seek previews); `upgrade` adds the higher qualities. Upgrades
+ * have a lower priority, so a new upload never waits for another video's 1080p or 4K.
+ */
+export type MediaJob = { name: 'transcode'; videoId: string } | { name: 'upgrade'; videoId: string } | { name: 'relocate'; videoId: string } | { name: 'purge'; videoId: string };
 
 /** Thrown when a video is busy with another job; the queue retries later. */
 export class VideoBusy extends Error {}
@@ -22,8 +27,12 @@ export class MediaJobs {
   readonly views: ViewCounter;
   private readonly localLocks = new Set<string>();
 
-  constructor(private readonly prisma: PrismaClient, private readonly storage: Storage, private readonly config: AppConfig, private readonly redis: Redis | null) {
-    this.processor = new VideoProcessor(prisma, storage, config);
+  constructor(private readonly prisma: PrismaClient, private readonly storage: Storage, private readonly config: AppConfig, private readonly redis: Redis | null,
+    /** Queues a follow-up job (the higher qualities after a video becomes playable). */
+    private readonly enqueue: ((job: MediaJob) => Promise<void>) | null = null,
+    /** Where long videos' pieces are encoded (every worker through the queue, or this process). */
+    chunks: ChunkRunner | null = null) {
+    this.processor = new VideoProcessor(prisma, storage, config, chunks);
     this.views = new ViewCounter(prisma, redis);
   }
 
@@ -62,11 +71,11 @@ export class MediaJobs {
   }
 
   /** `final` = no retries left: a failure becomes visible to the creator. */
-  async transcode(videoId: string, final: boolean, signal?: AbortSignal) {
+  async transcode(videoId: string, final: boolean, signal?: AbortSignal, part: 'playable' | 'rest' = 'playable'): Promise<void> {
     const done = await this.withLock(videoId, async (lease) => {
       const processingSignal = lease && signal ? AbortSignal.any([lease, signal]) : lease ?? signal;
       try {
-        return await this.processor.process(videoId, processingSignal);
+        return await this.processor.process(videoId, processingSignal, part);
       } catch (e) {
         if (processingSignal?.aborted) throw processingSignal.reason;
         const known = e instanceof MediaError;
@@ -77,6 +86,11 @@ export class MediaJobs {
         throw e;
       }
     });
+    // The higher qualities: queued behind every other upload's first job (or right away without a queue).
+    if (done.more) {
+      if (this.enqueue) await this.enqueue({ name: 'upgrade', videoId });
+      else return this.transcode(videoId, final, signal, 'rest');
+    }
     // Automatic captions after the video is ready and unlocked: publishing or moving it never waits for them.
     if (done.speech) await autoCaptions(this.prisma, this.storage, this.config, videoId, done.speech, signal);
   }
@@ -145,7 +159,7 @@ export class MediaJobs {
    * Videos whose processing stopped without finishing (server restart, lost queue): still PROCESSING, or SD ready
    * with more qualities pending. Unqueued uploads become eligible in five minutes, active stages in thirty.
    */
-  async stuckVideos(): Promise<string[]> {
+  async stuckVideos(): Promise<Array<{ id: string; playable: boolean }>> {
     const before = new Date(Date.now() - 30 * 60_000);
     const rows = await this.prisma.video.findMany({
       where: { OR: [
@@ -153,13 +167,14 @@ export class MediaJobs {
         { status: 'PROCESSING', updatedAt: { lt: before } },
         { status: 'READY', processingStage: { not: 'Ready' }, updatedAt: { lt: before } },
       ] },
-      select: { id: true }, take: 200,
+      select: { id: true, status: true, hlsMasterKey: true }, take: 200,
     });
-    return rows.map((r) => r.id);
+    return rows.map((r) => ({ id: r.id, playable: r.status === 'READY' && !!r.hlsMasterKey }));
   }
 
   async run(job: MediaJob, final: boolean, signal?: AbortSignal) {
     if (job.name === 'transcode') return this.transcode(job.videoId, final, signal);
+    if (job.name === 'upgrade') return this.transcode(job.videoId, final, signal, 'rest');
     if (job.name === 'relocate') return this.relocate(job.videoId);
     return this.purge(job.videoId);
   }

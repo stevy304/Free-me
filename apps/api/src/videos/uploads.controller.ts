@@ -1,7 +1,8 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, Logger, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
-import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, Inject, Logger, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
+import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { hasPremiumAccess } from '../billing/billing';
 import { extname } from 'node:path';
 import { APP_CONFIG, type AppConfig } from '../config/config';
 import { PrismaService } from '../database/prisma.service';
@@ -16,6 +17,7 @@ import type { Storage } from '../media/storage';
 class StartUploadDto {
   @ApiProperty({ example: 'my-trip.mp4' }) @IsString() @MaxLength(255) fileName!: string;
   @ApiProperty({ example: 734003200 }) @IsInt() @Min(1) sizeBytes!: number;
+  @ApiPropertyOptional({ description: 'An ad for Ad Studio (Premium): unlisted, kept out of feeds and the Space' }) @IsOptional() @IsBoolean() ad?: boolean;
 }
 class PartNumbersDto { @ApiProperty({ example: [1, 2, 3] }) @IsArray() @ArrayMaxSize(100) @IsInt({ each: true }) @Min(1, { each: true }) @Max(10_000, { each: true }) partNumbers!: number[] }
 class PartDto { @IsInt() @Min(1) @Max(10_000) partNumber!: number; @IsString() @MaxLength(200) etag!: string }
@@ -72,7 +74,8 @@ export class UploadsController {
     const partSize = this.config.media.driver === 's3' && body.sizeBytes >= 4 * 1024 ** 3
       ? Math.max(this.config.media.partBytes, 64 * 1024 ** 2)
       : this.config.media.partBytes;
-    const video = await this.prisma.video.create({ data: { channelId: channel.id, title, status: 'UPLOADING', visibility: 'PRIVATE', sourceSizeBytes: BigInt(body.sizeBytes), uploadPartBytes: BigInt(partSize), processingStage: 'Uploading' } });
+    if (body.ad && !hasPremiumAccess(auth.user)) throw new ForbiddenException('Ad Studio is part of Premium.');
+    const video = await this.prisma.video.create({ data: { channelId: channel.id, title, status: 'UPLOADING', visibility: body.ad ? 'UNLISTED' : 'PRIVATE', isAd: !!body.ad, sourceSizeBytes: BigInt(body.sizeBytes), uploadPartBytes: BigInt(partSize), processingStage: 'Uploading' } });
     const key = sourceKey(video.id, ext);
     let uploadId: string | undefined;
     try {

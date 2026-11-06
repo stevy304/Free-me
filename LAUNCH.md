@@ -33,6 +33,7 @@ payment or a decision only the operator can make.
 ## 4. Check it works (as an administrator)
 
 - [ ] `https://<domain>/api/health` → `"database":"ok","redis":"ok"`.
+- [ ] Make yourself administrator: `npm run make-admin -- you@example.com` (or `ADMIN_EMAILS`). In Administration → Money → Payment settings, switch on *Send money (manual)* with your MoMo number, and later MoMo or Flutterwave keys.
 - [ ] Sign in with the `ADMIN_EMAILS` address, then open `https://<domain>/api/admin/system`: `"ok": true` and no warnings. It warns when email is not really sent, Google sign-in is missing, Redis is down, videos wait or fail.
 - [ ] Create a Space, upload a video, add a custom thumbnail, publish **before** processing finishes, then check on another device: plays, thumbnail shows, search finds it (also with a typo), "Up next" lists it on other videos.
 - [ ] Report a video as another account; see it in the moderation queue; remove and restore it.
