@@ -13,7 +13,7 @@ const run = Date.now().toString(36);
 test.use({
   launchOptions: {
     ...(process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {}),
-    args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+    args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--allow-loopback-in-peer-connection'],
   },
 });
 
