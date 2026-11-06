@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
+import { createHmac } from 'node:crypto';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Header, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString, Length } from 'class-validator';
 import type { Channel, LiveStream } from '@prisma/client';
@@ -39,6 +40,18 @@ export class LiveController {
     return { streams: await Promise.all(rows.map((s) => this.view(s))) };
   }
 
+  @Get('live/ice')
+  @Header('Cache-Control', 'private, no-store')
+  @RequireAuth()
+  @ApiOperation({ summary: 'Temporary ICE configuration for an authenticated broadcast participant' })
+  ice(@CurrentAuth() auth: AuthContext) {
+    const turn = this.config.live.turn;
+    if (!turn) return { iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }] };
+    const username = `${Math.floor(Date.now() / 1000) + 8 * 3600}:${auth.user.id}`;
+    const credential = createHmac('sha1', turn.secret).update(username).digest('base64');
+    return { iceServers: [{ urls: turn.urls, username, credential }] };
+  }
+
   @Get('live/:id')
   @ApiOperation({ summary: 'One live stream (and the recent chat)' })
   async one(@Param('id', ParseUUIDPipe) id: string) {
@@ -54,8 +67,8 @@ export class LiveController {
   async studio(@CurrentAuth() auth: AuthContext) {
     const s = await this.attempt(() => this.live.mine(auth.user.id));
     const full = await this.prisma.liveStream.findUniqueOrThrow({ where: { id: s.id }, include: { channel: true } });
-    const past = await this.prisma.liveStream.findMany({ where: { channelId: s.channelId, status: 'ENDED' }, orderBy: { endedAt: 'desc' }, take: 10 });
     const premium = hasPremiumAccess(auth.user);
+    const past = premium ? await this.prisma.liveStream.findMany({ where: { channelId: s.channelId, status: 'ENDED' }, orderBy: { endedAt: 'desc' }, take: 10 }) : [];
     return {
       premium, stream: await this.view(full),
       encoder: this.config.live.rtmpUrl && premium ? { server: this.config.live.rtmpUrl, streamKey: await this.live.streamKey(auth.user.id) } : null,

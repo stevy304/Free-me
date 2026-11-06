@@ -27,6 +27,7 @@ interface BrowserSession { ff: ChildProcess; sync: LiveSync; timer: NodeJS.Timeo
 @Injectable()
 export class LiveService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('Live');
+  private readonly starting = new Set<string>();
   private readonly browser = new Map<string, BrowserSession>();
   private viewersTimer: NodeJS.Timeout | null = null;
   private readonly chat = new Map<string, unknown[]>();
@@ -78,14 +79,16 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
     for (const f of to) publish(room.user(f.userId), 'notifications');
   }
 
-  /** Goes live (Premium members only). */
+  /** Starts a browser broadcast or a Premium encoder broadcast. */
   async goLive(user: User, streamId: string, source: 'browser' | 'rtmp') {
-    if (!hasPremiumAccess(user)) throw new LiveError('Live Studio is part of Premium.');
+    if (source === 'rtmp' && !hasPremiumAccess(user)) throw new LiveError('Live Studio is part of Premium.');
     const s = await this.prisma.liveStream.findUnique({ where: { id: streamId }, include: { channel: true } });
     if (!s || s.channel.userId !== user.id) throw new LiveError('Stream not found.');
     if (s.status === 'ENDED') throw new LiveError('This stream has ended. Start a new one.');
-    const updated = await this.prisma.liveStream.update({ where: { id: s.id }, data: { status: 'LIVE', source, startedAt: s.startedAt ?? new Date() } });
-    if (s.status === 'IDLE') await this.announce(updated);
+    const started = await this.prisma.liveStream.updateMany({ where: { id: s.id, status: 'IDLE' }, data: { status: 'LIVE', source, startedAt: new Date() } });
+    if (!started.count) throw new LiveError('This stream is already running.');
+    const updated = await this.prisma.liveStream.findUniqueOrThrow({ where: { id: s.id } });
+    await this.announce(updated).catch((error) => this.log.warn(`Live notice ${s.id}: ${(error as Error).message}`));
     publish(room.live(s.id), 'started', { id: s.id });
     return updated;
   }
@@ -93,40 +96,51 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
   // ----- Browser streams -----
 
   async startBrowser(user: User, streamId: string, socketId: string) {
-    if (this.browser.has(streamId)) throw new LiveError('This stream is already running in another window.');
-    const s = await this.goLive(user, streamId, 'browser');
-    const dir = join(this.config.media.scratchDir, 'live', s.id);
-    await mkdir(dir, { recursive: true });
-    const ff = spawn(this.config.media.ffmpegPath, [
-      // Start after about a second of input (by default ffmpeg first analyses 5 MB, seconds of delay for viewers).
-      '-hide_banner', '-loglevel', 'error', '-probesize', '256k', '-analyzeduration', '1000000', '-fflags', '+genpts', '-i', 'pipe:0',
-      '-map', '0:v:0?', '-map', '0:a:0?',
-      '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-profile:v', 'main', '-pix_fmt', 'yuv420p',
-      '-vf', "scale='min(1280,iw)':-2", '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0', '-b:v', '2500k', '-maxrate', '3000k', '-bufsize', '5000k',
-      '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
-      '-f', 'hls', '-hls_time', '2', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments', '-hls_segment_filename', join(dir, 'seg%05d.ts'), join(dir, LIVE_PLAYLIST),
-    ], { stdio: ['pipe', 'ignore', 'pipe'] });
-    let err = '';
-    ff.stderr?.on('data', (d: Buffer) => { err = (err + d.toString()).slice(-2000); });
-    ff.stdin?.on('error', () => undefined);
-    const sync = new LiveSync(this.storage, s.id, dir);
-    const timer = setInterval(() => { void sync.tick().catch((e) => this.log.warn(`live ${s.id}: ${(e as Error).message}`)); }, 1000);
-    const ended = new Promise<void>((resolve) => ff.on('close', async (code) => {
-      clearInterval(timer);
-      this.browser.delete(s.id);
-      if (code) this.log.warn(`live ${s.id}: encoder stopped (${code}): ${err.trim().slice(-500)}`);
-      await endLive(this.prisma, s.id);
-      await finishLive(this.prisma, this.storage, sync, (videoId) => this.queue.add({ name: 'transcode', videoId }), this.log, this.config.media.ffmpegPath);
-      resolve();
-    }));
-    this.browser.set(s.id, { ff, sync, timer, socketId, bytes: 0, ended });
-    return s;
+    if (this.browser.has(streamId) || this.starting.has(streamId)) throw new LiveError('This stream is already running in another window.');
+    if (this.browser.size + this.starting.size >= this.config.live.browserLimit) throw new LiveError('All browser streaming slots are busy. Try again shortly.');
+    this.starting.add(streamId);
+    try {
+      const dir = join(this.config.media.scratchDir, 'live', streamId);
+      // Prepare the scratch directory only for the owner's stream.
+      const stream = await this.prisma.liveStream.findFirst({ where: { id: streamId, channel: { userId: user.id } }, select: { id: true } });
+      if (!stream) throw new LiveError('Stream not found.');
+      await mkdir(dir, { recursive: true });
+      const s = await this.goLive(user, streamId, 'browser');
+      const ff = spawn(this.config.media.ffmpegPath, [
+        // Start after about a second of input (by default ffmpeg first analyses 5 MB, seconds of delay for viewers).
+        '-hide_banner', '-loglevel', 'error', '-probesize', '256k', '-analyzeduration', '1000000', '-fflags', '+genpts', '-i', 'pipe:0',
+        '-map', '0:v:0?', '-map', '0:a:0?',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-profile:v', 'main', '-pix_fmt', 'yuv420p',
+        '-vf', "scale='min(1280,iw)':-2", '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0', '-b:v', '2500k', '-maxrate', '3000k', '-bufsize', '5000k',
+        '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
+        '-f', 'hls', '-hls_time', '2', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments', '-hls_segment_filename', join(dir, 'seg%05d.ts'), join(dir, LIVE_PLAYLIST),
+      ], { stdio: ['pipe', 'ignore', 'pipe'] });
+      let err = '';
+      ff.on('error', (error) => { err = error.message; });
+      ff.stderr?.on('data', (d: Buffer) => { err = (err + d.toString()).slice(-2000); });
+      ff.stdin?.on('error', () => undefined);
+      const sync = new LiveSync(this.storage, s.id, dir);
+      const timer = setInterval(() => { void sync.tick().catch((e) => this.log.warn(`live ${s.id}: ${(e as Error).message}`)); }, 1000);
+      const ended = new Promise<void>((resolve) => ff.on('close', async (code) => {
+        clearInterval(timer);
+        this.browser.delete(s.id);
+        if (code) this.log.warn(`live ${s.id}: encoder stopped (${code}): ${err.trim().slice(-500)}`);
+        try {
+          await endLive(this.prisma, s.id);
+          await finishLive(this.prisma, this.storage, sync, (videoId) => this.queue.add({ name: 'transcode', videoId }), this.log, this.config.media.ffmpegPath);
+        } catch (error) {
+          this.log.warn(`Could not finish stream ${s.id}: ${(error as Error).message}`);
+        } finally { resolve(); }
+      }));
+      this.browser.set(s.id, { ff, sync, timer, socketId, bytes: 0, ended });
+      return s;
+    } finally { this.starting.delete(streamId); }
   }
 
   /** One piece of the browser's recording. Returns false if the stream is not running here. */
   chunk(streamId: string, socketId: string, data: Buffer) {
     const b = this.browser.get(streamId);
-    if (!b || b.socketId !== socketId) return false;
+    if (!b || b.socketId !== socketId || !b.ff.stdin?.writable || b.ff.stdin.writableLength + data.length > 8 * 1024 * 1024) return false;
     b.bytes += data.length;
     b.ff.stdin?.write(data);
     return true;

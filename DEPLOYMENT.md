@@ -55,15 +55,17 @@ Copy the repository's `deploy/ubuntu` folder to each server (or clone the reposi
 9. **Google sign-in:** add `https://freeme.example/api/auth/google/callback` as an authorised redirect URI.
 10. **Check:** `https://freeme.example/api/health` shows `database: ok, redis: ok`; sign in, create a channel, upload a video, publish it, play it.
 
-## Automatic captions (optional)
+## Automatic captions
 
-Captions are made on the media server with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (open source, no outside service, no per-minute fees). Without it, creators can still upload their own captions.
+Captions are made on the media server with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (open source, no outside service, no per-minute fees). Configure Whisper on every media worker to generate captions without creator uploads. Existing ready videos with a retained source and no caption tracks are queued in small, lower-priority batches.
 
 1. On each media server: `sudo apt-get install -y build-essential cmake git`, then
    `sudo git clone https://github.com/ggml-org/whisper.cpp /opt/whisper.cpp && cd /opt/whisper.cpp && sudo cmake -B build && sudo cmake --build build -j --config Release`
 2. A model: `sudo bash ./models/download-ggml-model.sh small` (multilingual; `base` is faster, `medium` more accurate). Model files are 0.1–1.5 GB.
 3. In `/etc/freeme/freeme.env`: `WHISPER_CPP_PATH=/opt/whisper.cpp/build/bin/whisper-cli`, `WHISPER_MODEL=/opt/whisper.cpp/models/ggml-small.bin`, optionally `WHISPER_THREADS=4`; restart the workers.
 4. `/api/admin/system` then shows `autoCaptions: true`. Transcription runs after a video is ready; on 4 cores, the `small` model takes roughly as long as the video, `base` about a third (estimates; measure on your hardware).
+
+Payment receipts are sent by the worker using the configured SMTP transport. Apply the database migrations before restarting the API and worker. Only newly confirmed payments are queued for receipts.
 
 ## Services
 
@@ -87,14 +89,14 @@ Services run as the unprivileged `freeme` user with systemd hardening (read-only
 
 ## Live streaming
 
-Premium members go live from **Live Studio** (`/studio/live`) in two ways.
+Creators with a Space can broadcast for free at **Go Live** (`/go-live`). Premium members can also use **Live Studio** (`/studio/live`) for encoder keys, stream history, and integrated chat.
 
 **From the browser** (camera or screen): nothing to install. The browser sends its recording over the socket to an
 API server, which encodes it with ffmpeg into HLS (2-second segments, 720p, about 2.6 Mbit/s) and copies it to
 storage as it grows; viewers play it from the CDN. Each browser stream uses about one CPU core on the API server
-that receives it: count on 3 to 4 simultaneous browser streams per 4-core application server.
+that receives it. Each API process defaults to three concurrent browser streams. Set `LIVE_BROWSER_LIMIT` to match the CPU available per process.
 
-**From OBS, a TV encoder or a camera (RTMP):** install nginx with the RTMP module on the media server and let it
+**Premium encoder streaming (RTMP):** install nginx with the RTMP module on the media server and let it
 write HLS that the worker copies to storage. The encoder's key is checked by the API, and the stream is published
 under the stream id, so the key never appears in any public address.
 
@@ -166,6 +168,14 @@ above (thousands of simultaneous viewers), load test, then grow server by server
 ## Not yet covered (phase 6)
 
 Monitoring and alerts (Prometheus, Grafana) and a central log store (logs are already JSON lines with request ids, and `/api/admin/system` reports health, queue and failures), staged load tests at 100, 500 and 1,000 concurrent viewers, and a recorded restore drill.
+
+### Guest connections and browser production
+
+Free Go Live supports a host and two invited guests. Premium Studio allows six guest seats and composites the selected scene, video transition, lower third, ticker and logo into the browser recording. The host's browser renders the Program feed. Keep its tab in the foreground during a show.
+
+Guests need an authenticated Free Me account and a private invitation link. Enable the Socket.IO Redis adapter for signaling across API nodes. Direct WebRTC connections use STUN by default. For networks that require relaying, set `LIVE_TURN_URLS` to your comma-separated coturn addresses and set `LIVE_TURN_SECRET` to the coturn `static-auth-secret` on each API node. The API signs temporary credentials. Keep the shared secret on the servers.
+
+Browser composition applies to browser broadcasts. External encoders still supply their own composed program feed through Premium RTMP.
 
 ## Upload and playback timing
 

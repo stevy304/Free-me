@@ -302,6 +302,9 @@ model Video {
   adImpressions         AdImpression[]
   reports               Report[]
 
+  captionAttemptedAt    DateTime?
+
+  @@index([status, captionAttemptedAt])
   @@index([channelId])
   @@index([categoryId])
   @@index([status, visibility])
@@ -858,6 +861,10 @@ model Payment {
   failureReason         String?
   createdAt             DateTime          @default(now())
   paidAt                DateTime?
+  receiptDueAt          DateTime?
+  receiptSentAt         DateTime?
+
+  @@index([receiptDueAt])
 
   @@index([userId, createdAt])
   @@index([status, createdAt])

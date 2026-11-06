@@ -16,7 +16,7 @@ interface Me { premium: { active: boolean; until: string | null; admin?: boolean
 const PERKS = [
   { icon: 'badge', title: 'Verified badge', text: 'Show the Free Me seal on your Space, videos and conversations.' },
   { icon: Icon.Wallet, title: 'Earn from your videos', text: 'Eligible creators share 60% of daily ad revenue based on the ads shown on their videos.' },
-  { icon: Icon.Live, title: 'Live Studio', text: 'Go live from your browser, or from OBS, a TV encoder or a camera with a stream key.' },
+  { icon: Icon.Live, title: 'Live Studio', text: 'Stream with OBS or a hardware encoder, and manage your broadcast from Live Studio.' },
   { icon: Icon.Hub, title: 'Premium dashboard', text: 'Your membership, earnings, withdrawals and tools in one place.' },
 ] as const;
 
