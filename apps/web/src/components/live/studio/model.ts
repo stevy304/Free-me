@@ -30,20 +30,24 @@ export interface SceneDef {
 }
 
 export type LowerStyle = 'brand' | 'news' | 'minimal';
+/** How a graphic comes in and goes out. "type" (lower third only): the words appear letter by letter. */
+export type Anim = 'none' | 'fade' | 'slide' | 'pop' | 'wipe' | 'type';
+/** A logo can keep moving gently while it is on screen. */
+export type Loop = 'none' | 'pulse' | 'float' | 'shine';
 export interface Graphics {
-  logo: { show: boolean; src: string | null; corner: Corner; size: number; opacity: number };
-  lower: { show: boolean; name: string; title: string; style: LowerStyle; autoHideSec: number };
-  ticker: { show: boolean; label: string; text: string; speed: number };
-  clock: { show: boolean };
+  logo: { show: boolean; src: string | null; corner: Corner; size: number; opacity: number; anim: Anim; loop: Loop };
+  lower: { show: boolean; name: string; title: string; style: LowerStyle; autoHideSec: number; anim: Anim };
+  ticker: { show: boolean; label: string; text: string; speed: number; anim: Anim };
+  clock: { show: boolean; anim?: Anim };
   brand: { primary: string; accent: string };
 }
 
 export const BRAND_PRIMARY = '#08645f';
 export const defaultGraphics = (): Graphics => ({
-  logo: { show: true, src: null, corner: 'tr', size: 0.13, opacity: 1 },
-  lower: { show: false, name: '', title: '', style: 'brand', autoHideSec: 0 },
-  ticker: { show: false, label: 'LIVE', text: '', speed: 1 },
-  clock: { show: false },
+  logo: { show: true, src: null, corner: 'tr', size: 0.13, opacity: 1, anim: 'pop', loop: 'none' },
+  lower: { show: false, name: '', title: '', style: 'brand', autoHideSec: 0, anim: 'slide' },
+  ticker: { show: false, label: 'LIVE', text: '', speed: 1, anim: 'slide' },
+  clock: { show: false, anim: 'fade' },
   brand: { primary: BRAND_PRIMARY, accent: '#f5b95c' },
 });
 
@@ -58,6 +62,11 @@ export const defaultScenes = (): SceneDef[] => [
   scene('screen', 'Screen + Host', { layout: 'pip', main: 'screen', second: 'camera', pipCorner: 'br' }),
   scene('break', 'Break', { layout: 'card', card: { title: 'We’ll be right back', subtitle: '', countdownMin: 0 }, hostMic: false }),
 ];
+
+export const ANIMS: Array<{ id: Anim; label: string }> = [
+  { id: 'slide', label: 'Slide in' }, { id: 'fade', label: 'Fade' }, { id: 'pop', label: 'Pop (zoom)' }, { id: 'wipe', label: 'Wipe' }, { id: 'type', label: 'Typewriter' }, { id: 'none', label: 'No animation' },
+];
+export const LOOPS: Array<{ id: Loop; label: string }> = [{ id: 'none', label: 'Still' }, { id: 'pulse', label: 'Pulse' }, { id: 'float', label: 'Float' }, { id: 'shine', label: 'Shine' }];
 
 export const LAYOUTS: Array<{ id: Layout; label: string }> = [
   { id: 'solo', label: 'Solo' }, { id: 'pip', label: 'Picture in picture' }, { id: 'side', label: 'Side by side' }, { id: 'grid', label: 'Grid' }, { id: 'card', label: 'Title card' },

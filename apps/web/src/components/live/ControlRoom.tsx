@@ -6,8 +6,8 @@ import styles from './ControlRoom.module.css';
 import { api } from '@/lib/client-api';
 import { getSocket } from '@/lib/realtime';
 import { guestPeer, type GuestSignal } from './guest-peer';
-import { drawFrame, drawTransition, H, W, type Inputs, type Timing, type Transition } from './studio/compose';
-import { cloneGraphics, cloneScene, LAYOUTS, loadShow, readImage, saveShow, SOURCES, type Corner, type Graphics, type Layout, type LowerStyle, type SceneDef, type SourceId } from './studio/model';
+import { drawFrame, drawTransition, H, newTiming, syncTiming, W, type Inputs, type Timing, type Transition } from './studio/compose';
+import { ANIMS, cloneGraphics, cloneScene, LAYOUTS, loadShow, LOOPS, readImage, saveShow, SOURCES, type Anim, type Corner, type Graphics, type Layout, type Loop, type LowerStyle, type SceneDef, type SourceId } from './studio/model';
 
 type Guest = { id: string; stream: MediaStream | null; onAir: boolean };
 type Cue = { id: number; name: string; sceneId: string; graphics: Graphics };
@@ -66,8 +66,8 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
   const [cueName, setCueName] = useState('');
   const nextCue = useRef(0);
   const trans = useRef<{ frame: HTMLCanvasElement; started: number; duration: number; kind: Transition } | null>(null);
-  const previewTiming = useRef<Timing>({ sceneSince: performance.now(), lowerSince: performance.now() });
-  const programTiming = useRef<Timing>({ sceneSince: performance.now(), lowerSince: performance.now() });
+  const previewTiming = useRef<Timing>(newTiming());
+  const programTiming = useRef<Timing>(newTiming());
   const [screen, setScreen] = useState<MediaStream | null>(null);
   const [media, setMedia] = useState<{ url: string; kind: 'image' | 'video'; name: string } | null>(null);
   const [music, setMusic] = useState<{ url: string; name: string; playing: boolean } | null>(null);
@@ -99,7 +99,11 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
     return () => clearTimeout(t);
   }, [scenes, draft, basic]);
   useEffect(() => { previewTiming.current.sceneSince = performance.now(); }, [previewId]);
-  useEffect(() => { previewTiming.current.lowerSince = performance.now(); }, [draft.lower.show, draft.lower.name, draft.lower.title, draft.lower.style]);
+  // Graphics animate in and out in the preview as they are switched on and off.
+  useEffect(() => { syncTiming(previewTiming.current, draft); }, [draft]);
+  useEffect(() => { syncTiming(previewTiming.current, draft, performance.now(), ['lower']); }, [draft.lower.name, draft.lower.title, draft.lower.style, draft.lower.anim]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { syncTiming(previewTiming.current, draft, performance.now(), ['logo']); }, [draft.logo.anim, draft.logo.corner]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { syncTiming(programTiming.current, onAir); }, [onAir]);
   useEffect(() => { if (!recording) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [recording]);
   useEffect(() => () => { screen?.getTracks().forEach((t) => t.stop()); }, [screen]);
 
@@ -163,6 +167,8 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
     type Input = { key: unknown; sources: AudioNode[]; gain: GainNode; meter: AnalyserNode; sends: Map<string, GainNode> };
     const inputs = new Map<string, Input>();
     const elementSources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
+    // The free co-stream shows no graphics: nothing is ever "on" in its timing.
+    const noGraphics = newTiming();
     let destination: MediaStreamAudioDestinationNode | undefined;
     let lastMeter = 0;
 
@@ -274,7 +280,7 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
       });
       const t = performance.now();
       const programGraphics = s.basic ? { ...s.onAir, logo: { ...s.onAir.logo, show: false }, lower: { ...s.onAir.lower, show: false }, ticker: { ...s.onAir.ticker, show: false }, clock: { show: false } } : s.onAir;
-      drawFrame(ctx, showing, programGraphics, inputsFor(programOn), programTiming.current, t);
+      drawFrame(ctx, showing, programGraphics, inputsFor(programOn), s.basic ? noGraphics : programTiming.current, t);
       const tr = trans.current;
       if (tr) {
         const p = (t - tr.started) / tr.duration;
@@ -309,7 +315,7 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
       trans.current = { frame, started: performance.now(), duration: fadeMs, kind: transition };
     } else trans.current = null;
     if (program.id !== scene.id) programTiming.current.sceneSince = previewTiming.current.sceneSince;
-    if (lowerChanged(draft, onAir)) programTiming.current.lowerSince = performance.now();
+    syncTiming(programTiming.current, draft, performance.now(), lowerChanged(draft, onAir) ? ['lower'] : []);
     setProgram(cloneScene(scene));
     setProgramGuests(guests.filter((g) => g.onAir).map((g) => g.id));
     setOnAir(cloneGraphics(draft));
@@ -317,7 +323,7 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
   };
   /** Graphics only (lower third, ticker, logo…) straight to air, without changing the scene. */
   const sendGraphics = () => {
-    if (lowerChanged(draft, onAir)) programTiming.current.lowerSince = performance.now();
+    syncTiming(programTiming.current, draft, performance.now(), lowerChanged(draft, onAir) ? ['lower'] : []);
     setOnAir(cloneGraphics(draft));
   };
   const takeRef = useRef(take); takeRef.current = take;
@@ -497,6 +503,7 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
           <label className="block text-[12px] font-semibold">Style<select className={field} value={draft.lower.style} onChange={(e) => setLower({ style: e.target.value as LowerStyle })}><option value="brand">Brand</option><option value="news">News</option><option value="minimal">Minimal</option></select></label>
           <label className="block text-[12px] font-semibold">Hide after<select className={field} value={draft.lower.autoHideSec} onChange={(e) => setLower({ autoHideSec: Number(e.target.value) })}><option value={0}>Stays on</option><option value={6}>6 s</option><option value={10}>10 s</option><option value={20}>20 s</option></select></label>
         </div>
+        <label className="block text-[12px] font-semibold">Lower third animation<select className={field} value={draft.lower.anim} onChange={(e) => setLower({ anim: e.target.value as Anim })}>{ANIMS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></label>
         <label className="flex items-center gap-2 text-[12px]"><input type="checkbox" checked={draft.lower.show} onChange={(e) => setLower({ show: e.target.checked })} />Show lower third</label>
       </fieldset>
       <fieldset className={styles.group}>
@@ -506,6 +513,7 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
           <label className="block text-[12px] font-semibold">Label<input className={field} maxLength={24} value={draft.ticker.label} onChange={(e) => setDraft({ ...draft, ticker: { ...draft.ticker, label: e.target.value.toUpperCase() } })} /></label>
           <label className="block text-[12px] font-semibold">Speed<input type="range" className="mt-2 w-full accent-[#21d9cb]" min={0.4} max={2.5} step={0.1} value={draft.ticker.speed} onChange={(e) => setDraft({ ...draft, ticker: { ...draft.ticker, speed: Number(e.target.value) } })} /></label>
         </div>
+        <label className="block text-[12px] font-semibold">Ticker animation<select className={field} value={draft.ticker.anim} onChange={(e) => setDraft({ ...draft, ticker: { ...draft.ticker, anim: e.target.value as Anim } })}>{ANIMS.filter((a) => a.id !== 'type' && a.id !== 'pop').map((a) => <option key={a.id} value={a.id}>{a.id === 'slide' ? 'Slide up' : a.label}</option>)}</select></label>
         <label className="flex items-center gap-2 text-[12px]"><input type="checkbox" checked={draft.ticker.show} onChange={(e) => setDraft({ ...draft, ticker: { ...draft.ticker, show: e.target.checked } })} />Show ticker</label>
       </fieldset>
       <fieldset className={styles.group}>
@@ -517,6 +525,10 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
             <label className="block text-[12px] font-semibold">Size<input type="range" className="mt-2 w-full accent-[#21d9cb]" min={0.06} max={0.3} step={0.01} value={draft.logo.size} onChange={(e) => setDraft({ ...draft, logo: { ...draft.logo, size: Number(e.target.value) } })} /></label>
           </div>
           <label className="block text-[12px] font-semibold">Opacity<input type="range" className="mt-2 w-full accent-[#21d9cb]" min={0.2} max={1} step={0.05} value={draft.logo.opacity} onChange={(e) => setDraft({ ...draft, logo: { ...draft.logo, opacity: Number(e.target.value) } })} /></label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-[12px] font-semibold">Logo animation<select className={field} value={draft.logo.anim} onChange={(e) => setDraft({ ...draft, logo: { ...draft.logo, anim: e.target.value as Anim } })}>{ANIMS.filter((a) => a.id !== 'type').map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></label>
+            <label className="block text-[12px] font-semibold">Logo motion<select className={field} value={draft.logo.loop} onChange={(e) => setDraft({ ...draft, logo: { ...draft.logo, loop: e.target.value as Loop } })}>{LOOPS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></label>
+          </div>
           <div className="flex flex-wrap gap-2">
             <label className="flex items-center gap-2 text-[12px]"><input type="checkbox" checked={draft.logo.show} onChange={(e) => setDraft({ ...draft, logo: { ...draft.logo, show: e.target.checked } })} />Show logo</label>
             <button type="button" className={styles.small} onClick={() => setDraft({ ...draft, logo: { ...draft.logo, src: null } })}>Remove logo</button>
@@ -528,7 +540,7 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-[12px] font-semibold">Main colour<input type="color" className="mt-1 block h-8 w-12 rounded border border-[#25424a] bg-transparent" value={draft.brand.primary} onChange={(e) => setDraft({ ...draft, brand: { ...draft.brand, primary: e.target.value } })} /></label>
           <label className="text-[12px] font-semibold">Accent<input type="color" className="mt-1 block h-8 w-12 rounded border border-[#25424a] bg-transparent" value={draft.brand.accent} onChange={(e) => setDraft({ ...draft, brand: { ...draft.brand, accent: e.target.value } })} /></label>
-          <label className="flex items-center gap-2 pb-1 text-[12px]"><input type="checkbox" checked={draft.clock.show} onChange={(e) => setDraft({ ...draft, clock: { show: e.target.checked } })} />Clock on screen</label>
+          <label className="flex items-center gap-2 pb-1 text-[12px]"><input type="checkbox" checked={draft.clock.show} onChange={(e) => setDraft({ ...draft, clock: { ...draft.clock, show: e.target.checked } })} />Clock on screen</label>
         </div>
       </fieldset>
       <button type="button" className={styles.small} onClick={sendGraphics}>Send graphics to air now</button>
