@@ -1,0 +1,16 @@
+# Optional: PostgreSQL and Redis in containers for local development.
+# On Ubuntu you can install them natively instead (see README); nothing else needs Docker.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: rights
+      POSTGRES_PASSWORD: rights
+      POSTGRES_DB: rights
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+volumes:
+  pgdata:
