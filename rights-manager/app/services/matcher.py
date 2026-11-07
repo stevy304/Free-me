@@ -41,14 +41,23 @@ class Scores:
 
 
 def _hashes(lst: list[dict], key: str) -> np.ndarray:
-    return np.array([int(f[key], 16) for f in lst], dtype=np.uint64)
+    # Older fingerprints have no top-region hash ("t" was the frame time then): those frames are skipped for it.
+    vals = [int(f[key], 16) for f in lst if isinstance(f.get(key), str)]
+    return np.array(vals, dtype=np.uint64)
+
+
+# Which reference hashes each upload hash is compared with (same region, as is or mirrored).
+PAIRS = {"h": ("h", "hf", "c", "cf"), "c": ("h", "hf", "c", "cf"), "t": ("t", "tf")}
 
 
 def frame_distances(upload: list[dict], reference: list[dict]) -> np.ndarray:
-    """For each upload frame, the smallest Hamming distance to any reference frame (any of the four hashes)."""
-    ref = np.concatenate([_hashes(reference, k) for k in ("h", "c", "hf", "cf")])
+    """For each upload frame, the smallest Hamming distance to any reference frame (whole, centre or top region,
+    as is or mirrored)."""
     best = np.full(len(upload), 64, dtype=np.int64)
-    for key in ("h", "c"):
+    for key, ref_keys in PAIRS.items():
+        ref = np.concatenate([_hashes(reference, k) for k in ref_keys])
+        if not len(ref) or any(not isinstance(f.get(key), str) for f in upload):
+            continue
         up = _hashes(upload, key)
         d = np.bitwise_count(up[:, None] ^ ref[None, :]).min(axis=1).astype(np.int64)
         best = np.minimum(best, d)

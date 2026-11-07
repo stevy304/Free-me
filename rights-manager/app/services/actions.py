@@ -61,7 +61,7 @@ def apply_outcome(db: Session, upload: Upload, matches: list[Match]) -> str | No
         verb = {"blocked": "was blocked", "muted": "was posted without sound", "flagged": "is waiting for review", "tracked": "was posted (tracked)"}[m.status]
         notify(db, m.reference.owner_id, f"An upload by @{upload.uploader.username} matched \"{m.reference.title}\" ({m.combined_score:.0f}%) and {verb}.", f"/matches?q={upload.uploader.username}")
     if upload.status == UploadStatus.Blocked:
-        notify(db, upload.uploader_id, f"{upload.message}. You can dispute this if you have the rights to use it.", "/upload")
+        notify(db, upload.uploader_id, f"{upload.message}. You can dispute this if you have the rights to use it.", "/check")
     return "mute" if mute and upload.status != UploadStatus.Blocked else None
 
 
@@ -81,12 +81,12 @@ def review(db: Session, match: Match, admin: User, approve: bool, note: str | No
         if not any(m.status in ("blocked", "flagged") for m in others):
             upload.status = UploadStatus.Approved
             upload.message = MUTED_MESSAGE if upload.audio_removed else None
-        notify(db, upload.uploader_id, f"Your upload \"{upload.title or upload.id}\" was approved after review.", "/upload")
+        notify(db, upload.uploader_id, f"Your upload \"{upload.title or upload.id}\" was approved after review.", "/check")
     else:
         match.status = "blocked"
         upload.status = UploadStatus.Blocked
         upload.message = BLOCKED_MESSAGE.format(owner=match.reference.owner.username)
-        notify(db, upload.uploader_id, f"{upload.message}. You can dispute this if you have the rights to use it.", "/upload")
+        notify(db, upload.uploader_id, f"{upload.message}. You can dispute this if you have the rights to use it.", "/check")
     notify(db, match.reference.owner_id, f"An administrator {'approved' if approve else 'blocked'} @{upload.uploader.username}'s upload that matched \"{match.reference.title}\"." + (f" Note: {note}" if note else ""), "/matches")
 
 

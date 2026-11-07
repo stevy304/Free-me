@@ -20,14 +20,14 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { if (user) router.replace("/dashboard"); }, [user, router]);
+  useEffect(() => { if (user) router.replace("/go-live"); }, [user, router]);
 
   async function submit(path: string, body: Record<string, string>) {
     setBusy(true); setError(null);
     try {
       const r = await api<TokenOut>(path, { method: "POST", json: body });
       signIn(r.access_token, r.user);
-      router.replace("/dashboard");
+      router.replace("/go-live");
     } catch (e) {
       setError((e as Error).message);
     } finally {

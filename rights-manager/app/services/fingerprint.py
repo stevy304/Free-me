@@ -3,7 +3,8 @@
 Each sampled frame keeps four 64-bit pHashes (as hex):
   h  — the whole frame, after black/plain borders are trimmed (survives letterboxing, padding, scaling, colour filters)
   c  — the centre 70 % (survives cropping and zooming, overlays/watermarks in the corners)
-  hf, cf — the same two for the mirrored frame (survives horizontal flips)
+  t  — the top 62 % (survives lower thirds, tickers, subtitles and other overlays a streamer adds at the bottom)
+  hf, cf, tf — the same for the mirrored frame (survives horizontal flips)
 """
 
 from pathlib import Path
@@ -13,6 +14,7 @@ import numpy as np
 from PIL import Image, ImageOps
 
 CENTRE = 0.70
+TOP = 0.62
 
 
 def trim_borders(img: Image.Image, tolerance: float = 12.0) -> Image.Image:
@@ -39,6 +41,11 @@ def centre(img: Image.Image, part: float = CENTRE) -> Image.Image:
     return img.crop((dx, dy, w - dx, h - dy))
 
 
+def top(img: Image.Image, part: float = TOP) -> Image.Image:
+    w, h = img.size
+    return img.crop((0, 0, w, int(h * part)))
+
+
 def frame_hashes(path: Path) -> dict[str, str]:
     with Image.open(path) as raw:
         img = trim_borders(raw.convert("RGB"))
@@ -48,12 +55,14 @@ def frame_hashes(path: Path) -> dict[str, str]:
         "c": str(imagehash.phash(centre(img))),
         "hf": str(imagehash.phash(mirrored)),
         "cf": str(imagehash.phash(centre(mirrored))),
+        "t": str(imagehash.phash(top(img))),
+        "tf": str(imagehash.phash(top(mirrored))),
     }
 
 
 def hash_frames(frames: list[tuple[float, Path]]) -> list[dict]:
-    """[{t: seconds, h, c, hf, cf}, …] — the `video_phash_list` stored with a video."""
-    return [{"t": round(t, 2), **frame_hashes(p)} for t, p in frames]
+    """[{at: seconds, h, c, t, hf, cf, tf}, …] — the `video_phash_list` stored with a video."""
+    return [{"at": round(t, 2), **frame_hashes(p)} for t, p in frames]
 
 
 def to_ints(hexes: list[str]) -> np.ndarray:

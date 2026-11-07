@@ -40,13 +40,13 @@ function Result({ u, onChange }: { u: Upload; onChange: () => void }) {
   );
 }
 
-export default function UploadPage() {
+export default function CheckPage() {
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   // While any upload is being checked, ask again every 2 seconds; the API never blocks on the check.
-  const uploads = useData(() => api<Upload[]>("/api/uploads"), [], { every: 2000, poll: (d) => d.some((u) => u.status === "Processing") });
+  const uploads = useData(() => api<Upload[]>("/api/checks"), [], { every: 2000, poll: (d) => d.some((u) => u.status === "Processing") });
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -56,7 +56,7 @@ export default function UploadPage() {
     if (title.trim()) form.append("title", title.trim());
     setError(null); setProgress(0);
     try {
-      const u = await uploadWithProgress<Upload>("/api/uploads", form, setProgress);
+      const u = await uploadWithProgress<Upload>("/api/checks", form, setProgress);
       uploads.setData((prev) => [u, ...(prev ?? [])]);
       setFile(null); setTitle("");
     } catch (err) {
@@ -69,7 +69,7 @@ export default function UploadPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Upload</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Check a video</h1>
         <p className="text-sm text-muted-foreground">Every video is checked against protected originals before it is posted.</p>
       </div>
       <Card>

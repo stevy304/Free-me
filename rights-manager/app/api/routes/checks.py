@@ -1,4 +1,4 @@
-"""Videos people want to post. The file is saved and queued; the page polls GET /api/uploads/{id} every 2 s."""
+"""Rights Manager checks: a video is checked against protected originals before posting (GET /api/checks/{id} is polled)."""
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
@@ -13,7 +13,7 @@ from app.security import get_current_user
 from app.services.actions import decisive_match
 from app.workers.tasks import process_upload
 
-router = APIRouter(prefix="/api/uploads", tags=["uploads"])
+router = APIRouter(prefix="/api/checks", tags=["rights checks"])
 
 
 def _out(db: Session, u: Upload) -> UploadOut:
