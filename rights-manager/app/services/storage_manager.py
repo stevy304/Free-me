@@ -6,7 +6,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
-from app.config import get_settings
+from app.config import get_settings  # noqa: F401 (re-exported for routes)
 from app.services import hetzner_storage as hz
 
 

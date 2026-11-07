@@ -7,6 +7,7 @@ import { Bell, LogOut, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { when } from "@/components/shared";
+import { UploadTray } from "@/components/upload-tray";
 import { api, type Notification } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useData } from "@/lib/hooks";
@@ -117,6 +118,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <main className="container py-8">{children}</main>
+      <UploadTray />
     </div>
   );
 }
