@@ -40,16 +40,16 @@ export class StatsController {
     const [daily, prev, follows, prevFollows, top] = await Promise.all([
       this.prisma.$queryRaw<Array<{ day: Date; views: bigint; watch: bigint }>>`
         SELECT s."day", SUM(s."views")::bigint AS views, SUM(s."watchSeconds")::bigint AS watch FROM "VideoDailyStat" s JOIN "Video" v ON v."id" = s."videoId"
-        WHERE v."channelId" = ${channel.id} AND s."day" >= ${start} GROUP BY s."day"`,
+        WHERE v."channelId" = ${channel.id} AND s."day" >= ${iso(start)}::date GROUP BY s."day"`,
       this.prisma.$queryRaw<Array<{ views: bigint | null; watch: bigint | null }>>`
         SELECT SUM(s."views")::bigint AS views, SUM(s."watchSeconds")::bigint AS watch FROM "VideoDailyStat" s JOIN "Video" v ON v."id" = s."videoId"
-        WHERE v."channelId" = ${channel.id} AND s."day" >= ${prevStart} AND s."day" < ${start}`,
+        WHERE v."channelId" = ${channel.id} AND s."day" >= ${iso(prevStart)}::date AND s."day" < ${iso(start)}::date`,
       this.prisma.$queryRaw<Array<{ day: Date; n: bigint }>>`
-        SELECT date_trunc('day', "createdAt" AT TIME ZONE 'UTC')::date AS day, COUNT(*)::bigint AS n FROM "Subscription" WHERE "channelId" = ${channel.id} AND "createdAt" >= ${start} GROUP BY 1`,
+        SELECT "createdAt"::date AS day, COUNT(*)::bigint AS n FROM "Subscription" WHERE "channelId" = ${channel.id} AND "createdAt" >= ${iso(start)}::date GROUP BY 1`,
       this.prisma.subscription.count({ where: { channelId: channel.id, createdAt: { gte: prevStart, lt: start } } }),
       this.prisma.$queryRaw<Array<{ videoId: string; views: bigint; watch: bigint }>>`
         SELECT s."videoId", SUM(s."views")::bigint AS views, SUM(s."watchSeconds")::bigint AS watch FROM "VideoDailyStat" s JOIN "Video" v ON v."id" = s."videoId"
-        WHERE v."channelId" = ${channel.id} AND s."day" >= ${start} GROUP BY s."videoId" ORDER BY views DESC, watch DESC LIMIT 10`,
+        WHERE v."channelId" = ${channel.id} AND s."day" >= ${iso(start)}::date GROUP BY s."videoId" ORDER BY views DESC, watch DESC LIMIT 10`,
     ]);
     const byDay = new Map(daily.map((d) => [iso(d.day), d]));
     const followsByDay = new Map(follows.map((f) => [iso(f.day), Number(f.n)]));

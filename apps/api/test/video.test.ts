@@ -299,9 +299,9 @@ test('videos whose processing stopped are found for re-processing; finished ones
   const old = new Date(Date.now() - 2 * 3600_000);
   const stuck = await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Stuck', status: 'PROCESSING' } });
   const halfway = await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'SD only', status: 'READY', processingStage: 'SD ready · processing HD' } });
-  await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Done', status: 'READY', processingStage: 'Ready' } });
+  const done = await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Done', status: 'READY', processingStage: 'Ready' } });
   await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Just started', status: 'PROCESSING' } });
-  await ctx.prisma.$executeRaw`UPDATE "Video" SET "updatedAt" = ${old} WHERE title IN ('Stuck', 'SD only', 'Done')`;
+  await ctx.prisma.video.updateMany({ where: { id: { in: [stuck.id, halfway.id, done.id] } }, data: { updatedAt: old } });
   const { MediaJobs } = await import('../src/media/jobs');
   const { STORAGE } = await import('../src/media/queue');
   const jobs = new MediaJobs(ctx.prisma, ctx.app.get(STORAGE), ctx.config, null);

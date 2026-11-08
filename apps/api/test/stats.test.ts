@@ -40,6 +40,11 @@ test('Creator Hub stats: daily views, watch time and follows, comparison, top vi
   ] });
   for (const e of ['f1', 'f2']) { const f = await signIn(ctx.http, ctx.mail, `${e}@example.com`); await f.agent.post('/api/channels/maker/follow').set('Origin', WEB).expect(200); }
 
+  // Store both follows late on the same UTC day, when a positive database offset would roll them into tomorrow.
+  await ctx.prisma.subscription.updateMany({
+    where: { channelId: ch.id },
+    data: { createdAt: new Date(day(0).getTime() + DAY - 30 * 60_000) },
+  });
   await request(ctx.http).get('/api/hub/stats').expect(401);
   await c.agent.get('/api/hub/stats?days=5').expect(400);
   const s = (await c.agent.get('/api/hub/stats?days=7').expect(200)).body;

@@ -50,7 +50,24 @@ const db = new URL(env.DATABASE_URL || fail('DATABASE_URL is missing from .env')
 const redis = env.REDIS_URL ? new URL(env.REDIS_URL) : null;
 const local = (h) => ['localhost', '127.0.0.1', '::1'].includes(h);
 const open = (host, port) => new Promise((ok) => { const s = net.connect({ host, port }, () => { s.end(); ok(true); }); s.on('error', () => ok(false)); s.setTimeout(1500, () => { s.destroy(); ok(false); }); });
-const waitFor = async (host, port, secs) => { for (let i = 0; i < secs * 2; i++) { if (await open(host, port)) return true; await new Promise((r) => setTimeout(r, 500)); } return false; };
+const waitUntil = async (check, seconds) => {
+  const deadline = Date.now() + seconds * 1000;
+  while (Date.now() < deadline) {
+    if (await check()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+};
+const waitFor = (host, port, seconds) => waitUntil(() => open(host, port), seconds);
+const healthy = async (url) => {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
+    await response.body?.cancel();
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
 
 // Nothing else may hold the API and web ports (e.g. an earlier `npm run dev:web`).
 for (const [port, what] of [[Number(env.PORT || 4000), 'API'], [3000, 'web app']]) {
@@ -145,7 +162,16 @@ start('api', process.execPath, ['--watch', 'dist/main.js'], 'apps/api');
 start('worker', process.execPath, ['--watch', 'dist/worker.js'], 'apps/api');
 start('web', bin('next', 'apps/web'), ['dev', '-p', '3000'], 'apps/web');
 
-await waitFor('127.0.0.1', 3000, 60);
-say(`Free Me is running: ${C.web}${env.APP_URL}${C.off}  (API ${env.API_INTERNAL_URL}/api, docs ${env.API_INTERNAL_URL}/api/docs)`);
-if (env.MAIL_TRANSPORT === 'console') say('Sign-in codes are printed in the [api] lines below.');
-say('Press Ctrl+C to stop everything.');
+const apiHealth = `http://127.0.0.1:${env.PORT || 4000}/api/health`;
+const [apiReady, webReady] = await Promise.all([
+  waitUntil(() => healthy(apiHealth), 60),
+  waitFor('127.0.0.1', 3000, 60),
+]);
+if (!stopping && (!apiReady || !webReady)) {
+  console.error(`${C.err}[dev] Startup timed out. ${!apiReady ? 'The API health check failed.' : 'The web app did not open port 3000.'}${C.off}`);
+  stop(1);
+} else if (!stopping) {
+  say(`Free Me is running: ${C.web}${env.APP_URL}${C.off}  (API ${env.API_INTERNAL_URL}/api, docs ${env.API_INTERNAL_URL}/api/docs)`);
+  if (env.MAIL_TRANSPORT === 'console') say('Sign-in codes are printed in the [api] lines below.');
+  say('Press Ctrl+C to stop everything.');
+}
