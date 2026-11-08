@@ -1,13 +1,10 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, Plus_Jakarta_Sans } from 'next/font/google';
 import { cookies } from 'next/headers';
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
 import { getLocale, getViewer, siteOrigin } from '@/lib/server-api';
+import './fonts/fonts.css';
 import './globals.css';
-
-const inter = Inter({ subsets: ['latin', 'latin-ext'], variable: '--font-inter', display: 'swap' });
-const jakarta = Plus_Jakarta_Sans({ subsets: ['latin', 'latin-ext'], weight: ['600', '700', '800'], variable: '--font-jakarta', display: 'swap' });
 
 const DESCRIPTION = 'Watch and share videos from creators everywhere. Your content. Your freedom. Your opportunity.';
 
@@ -36,7 +33,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const [viewer, jar, locale] = await Promise.all([getViewer().catch(() => null), cookies(), getLocale()]);
   const theme = jar.get('fm_theme')?.value;
   return (
-    <html lang={viewer?.profile?.preferredLanguage ?? 'en'} className={`${inter.variable} ${jakarta.variable} ${theme === 'dark' ? 'dark' : ''}`} suppressHydrationWarning>
+    <html lang={viewer?.profile?.preferredLanguage ?? 'en'} className={theme === 'dark' ? 'dark' : undefined} suppressHydrationWarning>
       <head>
         {/* Private preview tunnels need their session cookie on manifest requests. */}
         <link rel="manifest" href="/manifest.webmanifest" crossOrigin="use-credentials" />
