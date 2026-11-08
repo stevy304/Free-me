@@ -11,7 +11,7 @@ type Metric = 'followers' | 'views' | 'momentViews' | 'watchHours' | 'sparks';
 const metrics: Record<Metric, string> = { followers: 'Followers', views: 'Public video views', momentViews: 'Public Moments views', watchHours: 'Public watch hours', sparks: 'Sparks' };
 
 interface Money {
-  eligibility: { current: Record<Metric, number>; required: Record<Metric, number>; canApply: boolean; pending: boolean; recentRemovals: number; rejectionReason: string | null };
+  eligibility: { suspended: boolean; current: Record<Metric, number>; required: Record<Metric, number>; canApply: boolean; pending: boolean; recentRemovals: number; rejectionReason: string | null };
   premium: { active: boolean; until: string | null }; joined: boolean; joinedAt: string | null; earning: boolean;
   balance: { currency: string; availableCents: number; lifetimeCents: number; withdrawnCents: number }; adsShownLast28Days: number;
   earnings: Array<{ id: string; kind: string; amountCents: number; day: string | null; description: string; at: string }>;
@@ -72,7 +72,7 @@ export function HubMoney() {
       {!m.joined ? (
         <section className="rounded-3xl border border-line bg-elevated p-6">
           <h3 className="font-display text-xl font-bold">Monetisation eligibility</h3>
-          <p className="mt-1 text-sm text-muted">Build your audience to apply. Views, watch time and Sparks use the last 90 days.</p>
+          <p className="mt-1 text-sm text-muted">{m.eligibility.suspended ? 'Monetisation is suspended. Request restoration when the issue has been resolved.' : 'Build your audience to apply. Views, watch time and Sparks use the last 90 days.'}</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             {(Object.keys(metrics) as Metric[]).map((key) => {
               const current = m.eligibility.current[key];
@@ -83,14 +83,15 @@ export function HubMoney() {
               </div>;
             })}
           </div>
-          {m.eligibility.recentRemovals > 0 && <p className="mt-3 text-sm text-muted">You can apply 90 days after your most recent content removal.</p>}
+          {!m.eligibility.suspended && m.eligibility.recentRemovals > 0 && <p className="mt-3 text-sm text-muted">You can apply 90 days after your most recent content removal.</p>}
           {m.eligibility.rejectionReason && <p className="mt-3 text-sm text-muted">{m.eligibility.rejectionReason}</p>}
-          {m.eligibility.pending ? <p className="mt-4 font-semibold text-brand">Application under review</p> :
-            <button type="button" disabled={busy || !m.eligibility.canApply} onClick={() => void run(() => api('/hub/monetisation/join', { body: {} }))} className="mt-4 h-11 rounded-2xl bg-brand px-5 text-sm font-bold text-on-brand disabled:opacity-50">Apply for monetisation</button>}
+          {m.eligibility.pending ? <p className="mt-4 font-semibold text-brand">{m.eligibility.suspended ? 'Restoration request under review' : 'Application under review'}</p> :
+            <button type="button" disabled={busy || (!m.eligibility.suspended && !m.eligibility.canApply)} onClick={() => void run(() => api('/hub/monetisation/join', { body: {} }))} className="mt-4 h-11 rounded-2xl bg-brand px-5 text-sm font-bold text-on-brand disabled:opacity-50">{m.eligibility.suspended ? 'Request restoration' : 'Apply for monetisation'}</button>}
         </section>
-      ) : (
+      ) : null}
+      {(m.joined || m.eligibility.suspended) && (
         <>
-          <section className="rounded-3xl border border-line bg-elevated p-5 sm:p-6" aria-labelledby="earn-heading">
+          {m.joined && <section className="rounded-3xl border border-line bg-elevated p-5 sm:p-6" aria-labelledby="earn-heading">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 id="earn-heading" className="font-display text-xl font-bold">Earn</h3>
               {earn && <span className="rounded-full bg-brand/10 px-3 py-1 text-sm font-semibold text-brand">Live estimate</span>}
@@ -107,7 +108,7 @@ export function HubMoney() {
                 </table></div> : <p className="mt-1 text-sm text-muted">No ad activity today.</p>}
               </>
             ) : <p className="mt-2 text-sm text-muted">Live earnings are currently unavailable.</p>}
-          </section>
+          </section>}
           <div className="grid gap-3 sm:grid-cols-4">
             {[['Available', m.balance.availableCents], ['Earned in total', m.balance.lifetimeCents], ['Withdrawn', m.balance.withdrawnCents]].map(([l, v]) => (
               <div key={l as string} className="rounded-3xl border border-line bg-elevated p-5"><p className="text-[13px] text-muted">{l}</p><p className="font-display text-[26px] font-extrabold tabular-nums">{usd(v as number, locale)}</p></div>

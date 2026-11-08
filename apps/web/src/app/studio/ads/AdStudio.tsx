@@ -31,12 +31,14 @@ const busyVideo = (v: HubVideo) => v.status === 'UPLOADING' || v.status === 'PRO
 
 /**
  * Ad Studio (Premium): a business's own place for video ads. Ad videos are uploaded here and kept apart from the
- * Space's videos (never in feeds, search or the Space page); campaigns run them before videos, by the day.
+ * Space's videos (never in feeds, search or the Space page); campaigns run them midway through eligible videos, by the day.
  */
 export function AdStudio({ viewer }: { viewer: Viewer }) {
   const { locale } = useShell();
   const params = useSearchParams();
   const premium = viewer.premium.active;
+  const [badgeActive, setBadgeActive] = useState(false);
+  const adAccess = premium || badgeActive;
   const [plans, setPlans] = useState<Plans | null>(null);
   const [list, setList] = useState<{ business: { name: string; country: string; registrationNumber: string | null; verified: boolean } | null; campaigns: Campaign[] } | null>(null);
   const [adVideos, setAdVideos] = useState<HubVideo[]>([]);
@@ -58,9 +60,11 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
     setAdVideos(ads.videos); setSpaceVideos(space.videos.filter(usableVideo));
   }, [viewer.channel]);
   const load = useCallback(async () => {
-    if (!premium) return;
+
     try {
-      const [p, l] = await Promise.all([api<Plans>('/billing/plans'), api<typeof list>('/ads/campaigns'), loadVideos()]);
+      const [p, l, billing] = await Promise.all([api<Plans>('/billing/plans'), api<typeof list>('/ads/campaigns'), api<{ advertiserBadge: { active: boolean } }>('/billing/me')]);
+      setBadgeActive(billing.advertiserBadge.active);
+      if (premium || billing.advertiserBadge.active) await loadVideos();
       setPlans(p); setList(l);
       if (l?.business) setForm((f) => ({ ...f, businessName: f.businessName || l.business!.name, registrationNumber: f.registrationNumber || l.business!.registrationNumber || '', country: f.country ?? l.business!.country }));
     } catch (e) { setError((e as Error).message); }
@@ -76,7 +80,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
   }, [working, loadVideos]);
 
   const paid = useCallback((p: Payment) => {
-    if (p.status === 'SUCCEEDED') { setNotice('Paid. Your ad is in review and starts as soon as it is approved.'); setPaying(null); void load(); }
+    if (p.status === 'SUCCEEDED') { setNotice(p.purpose === 'AD_BADGE' ? 'Your 30-day advertiser badge is active.' : 'Paid. Your ad is in review and starts as soon as it is approved.'); setPaying(null); void load(); }
     else setError(p.failureReason ?? 'The payment did not go through.');
   }, [load]);
   const { watch } = usePaymentWatch(paid);
@@ -102,7 +106,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
   const create = async () => {
     setBusy(true); setError(null);
     try {
-      const r = await api<{ campaign: Campaign }>('/ads/campaigns', { body: { businessName: form.businessName, registrationNumber: form.registrationNumber, country: form.country, headline: form.headline, destinationUrl: form.destinationUrl, videoId: form.videoId, days: form.days, targetCountries: form.target ? [form.target] : [], targetVideoIds: form.placements.split(/[,\s]+/).filter(Boolean).map((value) => value.match(/(?:[?&]v=|\/watch\/)([^/?#&]+)/)?.[1] ?? value), targetChannelHandles: form.channels.split(/[,\s]+/).filter(Boolean) } });
+      const r = await api<{ campaign: Campaign }>('/ads/campaigns', { body: { businessName: form.businessName, registrationNumber: form.registrationNumber.trim() || undefined, country: form.country, headline: form.headline, destinationUrl: form.destinationUrl, videoId: form.videoId, days: form.days, targetCountries: form.target ? [form.target] : [], targetVideoIds: form.placements.split(/[,\s]+/).filter(Boolean).map((value) => value.match(/(?:[?&]v=|\/watch\/)([^/?#&]+)/)?.[1] ?? value), targetChannelHandles: form.channels.split(/[,\s]+/).filter(Boolean) } });
       setCreating(false); setPaying(r.campaign); await load();
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
@@ -110,7 +114,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
   /** Administrators can run an ad without payment (tests, partners, Free Me's own ads): it runs at $0 a day. */
   const startFree = async (c: Campaign) => {
     setError(null);
-    try { await api(`/admin/billing/campaigns/${c.id}/review`, { body: { approve: true, free: true } }); setNotice('Running now, without payment. It plays before videos of Spaces in the monetisation programme.'); await load(); }
+    try { await api(`/admin/billing/campaigns/${c.id}/review`, { body: { approve: true, free: true } }); setNotice('Running now, without payment. It plays midway through videos of Spaces in the monetisation programme.'); await load(); }
     catch (e) { setError((e as Error).message); }
   };
   const act = async (c: Campaign, what: 'pause' | 'delete') => {
@@ -118,13 +122,18 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
     try { await api(`/ads/campaigns/${c.id}${what === 'pause' ? '/pause' : ''}`, { method: what === 'pause' ? 'POST' : 'DELETE', body: what === 'pause' ? {} : undefined }); await load(); } catch (e) { setError((e as Error).message); }
   };
 
-  if (!premium) {
+  if (!adAccess) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <section className="flex flex-col items-center gap-4 rounded-[28px] bg-[#071312] px-6 py-10 text-center text-white">
           <span className="grid h-16 w-16 place-items-center rounded-full bg-[#f5b95c] text-[#2a1a02]"><Icon.Megaphone size={32} /></span>
-          <h1 className="font-display text-[30px] font-extrabold">Ad Studio is part of Premium</h1>
-          <p className="max-w-md text-[15px] text-[#c9d6d4]">Upload short video ads, choose the countries, and run them before videos on Free Me by the day. You see how many people saw your ad and visited your site.</p>
+          <h1 className="font-display text-[30px] font-extrabold">Advertise with a badge or Premium</h1>
+          <p className="max-w-md text-[15px] text-[#c9d6d4]">Upload short video ads, choose the countries, and run them midway through eligible videos on Free Me by the day. You see how many people saw your ad and visited your site.</p>
+          {notice && <p role="status">{notice}</p>}
+          {error && <p role="alert">{error}</p>}
+          {plans && <div className="w-full max-w-sm rounded-2xl bg-elevated p-4 text-ink">
+            <PayPanel usdCents={200} plans={plans} label="Buy 30-day advertiser badge" onPaid={paid} start={async (method, phone) => (await api<{ payment: Payment }>('/billing/advertiser-badge', { body: { method, phone } })).payment} />
+          </div>}
           <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />Upgrade</Link>
         </section>
       </div>
@@ -142,7 +151,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex-1">
           <h1 className="flex items-center gap-2 font-display text-[28px] font-extrabold"><Icon.Megaphone size={28} />Ad Studio</h1>
-          <p className="mt-1 max-w-2xl text-[15px] text-muted">Upload a short video ad, then run it before videos. <b className="text-ink">{usd(rate, locale)} a day</b>, paid up front. Never more than {plans.ads.maxAdsPerVideo} ads on a video, and viewers can skip after 5 seconds.</p>
+          <p className="mt-1 max-w-2xl text-[15px] text-muted">Upload a short video ad, then run it midway through eligible videos. <b className="text-ink">{usd(rate, locale)} a day</b>, paid up front. Never more than {plans.ads.maxAdsPerVideo} ads on a video, and viewers can skip after 5 seconds.</p>
         </div>
         {viewer.channel && <button type="button" onClick={() => fileInput.current?.click()} className="flex h-11 items-center gap-2 rounded-2xl bg-surface px-4 text-[14px] font-bold hover:bg-surface-hover"><Icon.Upload size={20} />Upload ad video</button>}
         {viewer.channel && !creating && <button type="button" onClick={() => setCreating(true)} className="flex h-11 items-center gap-2 rounded-2xl bg-brand px-4 text-[14px] font-bold text-on-brand hover:bg-brand-strong"><Icon.Plus size={20} />New ad</button>}
@@ -215,7 +224,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <label className="block"><span className="text-[13px] font-semibold">Business name</span><input className={`mt-1 ${inputClass}`} value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} maxLength={100} /></label>
                 <label className="block"><span className="text-[13px] font-semibold">Business country</span><span className="mt-1 block"><CountrySelect value={form.country} onChange={(country) => setForm({ ...form, country })} emptyLabel="Choose" /></span></label>
-                <label className="block sm:col-span-2"><span className="text-[13px] font-semibold">Business or tax registration number</span><input className={`mt-1 ${inputClass}`} value={form.registrationNumber} onChange={(e) => setForm({ ...form, registrationNumber: e.target.value })} maxLength={80} required /><span className="mt-1 block text-sm text-muted">We review your business registration before the ad goes live.</span></label>
+                <label className="block sm:col-span-2"><span className="text-[13px] font-semibold">RDB registration or tax ID (optional)</span><input className={`mt-1 ${inputClass}`} value={form.registrationNumber} onChange={(e) => setForm({ ...form, registrationNumber: e.target.value })} maxLength={80} /><span className="mt-1 block text-sm text-muted">If you provide a registration number, our team checks it before approving the ad.</span></label>
                 <label className="block sm:col-span-2"><span className="text-[13px] font-semibold">Headline</span><input className={`mt-1 ${inputClass}`} value={form.headline} onChange={(e) => setForm({ ...form, headline: e.target.value })} maxLength={90} placeholder="What you offer, in a few words" /></label>
                 <label className="block sm:col-span-2"><span className="text-[13px] font-semibold">Website (where “Visit” goes)</span><input className={`mt-1 ${inputClass}`} value={form.destinationUrl} onChange={(e) => setForm({ ...form, destinationUrl: e.target.value })} inputMode="url" /></label>
                 <label className="block sm:col-span-2"><span className="text-[13px] font-semibold">Ad video</span>
@@ -236,7 +245,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                   <span className="text-[15px]">{form.days} {form.days === 1 ? 'day' : 'days'} × {usd(rate, locale)} = <b className="font-display text-[20px]">{usd(rate * form.days, locale)}</b></span>
                   <span className="ml-auto flex gap-2">
                     <button type="button" onClick={() => setCreating(false)} className="h-11 rounded-2xl px-4 text-[14px] font-semibold text-muted hover:bg-surface-hover">Cancel</button>
-                    <button type="button" disabled={busy || !form.videoId || !form.country || form.headline.trim().length < 3 || form.businessName.trim().length < 2 || form.registrationNumber.trim().length < 3} onClick={() => void create()} className="h-11 rounded-2xl bg-brand px-5 text-[14px] font-bold text-on-brand disabled:opacity-50">Continue to payment</button>
+                    <button type="button" disabled={busy || !form.videoId || !form.country || form.headline.trim().length < 3 || form.businessName.trim().length < 2 || (!!form.registrationNumber.trim() && form.registrationNumber.trim().length < 3)} onClick={() => void create()} className="h-11 rounded-2xl bg-brand px-5 text-[14px] font-bold text-on-brand disabled:opacity-50">Continue to payment</button>
                   </span>
                 </div>
               </div>
@@ -273,7 +282,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                       </dl>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {c.status === 'DRAFT' && isAdmin && list?.business?.verified && <button type="button" onClick={() => void startFree(c)} className="h-9 rounded-xl border border-brand px-4 text-[13px] font-bold text-brand hover:bg-brand-soft">Start now without payment</button>}
+                      {c.status === 'DRAFT' && isAdmin && (!list?.business?.registrationNumber || list.business.verified) && <button type="button" onClick={() => void startFree(c)} className="h-9 rounded-xl border border-brand px-4 text-[13px] font-bold text-brand hover:bg-brand-soft">Start now without payment</button>}
                       {c.status === 'DRAFT' && <><button type="button" onClick={() => setPaying(c)} className="h-9 rounded-xl bg-brand px-4 text-[13px] font-bold text-on-brand">Pay {usd(c.totalCents, locale)}</button><button type="button" onClick={() => void act(c, 'delete')} className="h-9 rounded-xl px-3 text-[13px] font-semibold text-muted hover:bg-surface">Delete</button></>}
                       {(c.status === 'ACTIVE' || c.status === 'PAUSED') && <button type="button" onClick={() => void act(c, 'pause')} className="h-9 rounded-xl bg-surface px-4 text-[13px] font-semibold hover:bg-surface-hover">{c.status === 'ACTIVE' ? 'Pause' : 'Resume'}</button>}
                     </div>

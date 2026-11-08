@@ -2,7 +2,7 @@ import { BadRequestException, Body, ConflictException, Controller, Delete, Forbi
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
-import { hasPremiumAccess } from '../billing/billing';
+import { hasAdAccess, hasPremiumAccess } from '../billing/billing';
 import { extname } from 'node:path';
 import { APP_CONFIG, type AppConfig } from '../config/config';
 import { PrismaService } from '../database/prisma.service';
@@ -75,7 +75,7 @@ export class UploadsController {
     const partSize = this.config.media.driver === 's3' && body.sizeBytes >= 4 * 1024 ** 3
       ? Math.max(this.config.media.partBytes, 64 * 1024 ** 2)
       : this.config.media.partBytes;
-    if (body.ad && !hasPremiumAccess(auth.user)) throw new ForbiddenException('Ad Studio is part of Premium.');
+    if (body.ad && !hasAdAccess(auth.user)) throw new ForbiddenException('Ad Studio requires Premium or an advertiser badge.');
     const video = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Channel" WHERE id = ${channel.id} FOR UPDATE`;
       const open = await tx.video.count({ where: { channelId: channel.id, status: 'UPLOADING' } });

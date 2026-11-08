@@ -110,6 +110,7 @@ model User {
   lastLoginAt           DateTime?
   /// Premium membership runs until this moment (null or past: not a member).
   premiumUntil          DateTime?
+  adBadgeUntil          DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
@@ -613,6 +614,7 @@ model CreatorEligibility {
   currentWatchHours     Float             @default(0.0)
   approvedAt            DateTime?
   rejectionReason       String?
+  suspendedAt           DateTime?
   updatedAt             DateTime          @updatedAt
 }
 
@@ -851,6 +853,7 @@ enum PaymentStatus {
 }
 
 enum PaymentPurpose {
+  AD_BADGE
   PREMIUM
   AD_CAMPAIGN
 }

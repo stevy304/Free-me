@@ -8,7 +8,7 @@ import { AuditService } from '../common/audit.service';
 import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import type { AppRequest, AuthContext } from '../common/request';
 import { BillingService, paymentView, premiumView } from './billing.controller';
-import { EARNINGS_CURRENCY, isPremium, msisdn, PREMIUM_MONTHS, utcDay } from './billing';
+import { EARNINGS_CURRENCY, hasAdBadge, isPremium, msisdn, PREMIUM_MONTHS, utcDay } from './billing';
 import { MAX_ADS_PER_VIDEO } from './ads.controller';
 
 class PayoutDto {
@@ -27,6 +27,11 @@ class PayoutDecisionDto {
   @ApiPropertyOptional({ description: 'Why (reject)' }) @IsOptional() @IsString() @MaxLength(500) reason?: string;
 }
 class GrantDto { @ApiProperty() @IsEmail() email!: string; @ApiProperty({ enum: PREMIUM_MONTHS }) @IsInt() @Min(1) @Max(12) months!: number }
+
+class SuspendDto {
+  @IsString() @Length(1, 50) handle!: string;
+  @IsString() @Length(5, 500) reason!: string;
+}
 
 class VerificationDto {
   @IsString() @Length(1, 50) handle!: string;
@@ -79,7 +84,7 @@ export class MonetisationController {
     return {
       premium: premiumView(u), joined: !!ch.eligibility?.isEligible, joinedAt: ch.eligibility?.approvedAt ?? null,
       earning: !!ch.eligibility?.isEligible,
-      eligibility: { ...progress, pending: !!ch.eligibility?.appliedForMonetization && !ch.eligibility.isEligible && !ch.eligibility.rejectionReason, rejectionReason: ch.eligibility?.rejectionReason ?? null },
+      eligibility: { ...progress, suspended: !!ch.eligibility?.suspendedAt, pending: !!ch.eligibility?.appliedForMonetization && !ch.eligibility.isEligible && !ch.eligibility.rejectionReason, rejectionReason: ch.eligibility?.rejectionReason ?? null },
       balance: { currency: ch.balance?.currency ?? EARNINGS_CURRENCY, availableCents: Number(ch.balance?.confirmedBalanceCents ?? 0n), lifetimeCents: Number(ch.balance?.lifetimeEarningsCents ?? 0n), withdrawnCents: Number(ch.balance?.withdrawnCents ?? 0n) },
       adsShownLast28Days: impressions,
       earnings: ledger.map((l) => ({ id: l.id, kind: l.sourceType, amountCents: Number(l.creatorShareCents), day: l.referenceId, description: l.description, at: l.createdAt })),
@@ -115,7 +120,7 @@ export class MonetisationController {
     const ch = await this.channel(auth);
     if (ch.eligibility?.isEligible || (ch.eligibility?.appliedForMonetization && !ch.eligibility.rejectionReason)) return this.status(auth);
     const progress = await eligibilityProgress(this.prisma, ch.id, auth.user.id);
-    if (!progress.canApply) throw new ForbiddenException('Meet the audience requirements and resolve any recent content removals before applying.');
+    if (!progress.canApply && !ch.eligibility?.suspendedAt) throw new ForbiddenException('Meet the audience requirements and resolve any recent content removals before applying.');
     await this.prisma.creatorEligibility.upsert({
       where: { channelId: ch.id },
       create: { channelId: ch.id, appliedForMonetization: true, subscribersRequired: REQUIREMENTS.followers, watchHoursRequired: REQUIREMENTS.watchHours },
@@ -175,6 +180,22 @@ export class AdminBillingController {
     };
   }
 
+  @Post('monetisation/suspend')
+  @HttpCode(200)
+  async suspend(@CurrentAuth() auth: AuthContext, @Body() body: SuspendDto, @Req() req: AppRequest) {
+    const handle = body.handle.trim().toLowerCase().replace(/^@/, '');
+    const channel = await this.prisma.channel.findUnique({ where: { handle } });
+    if (!channel) throw new NotFoundException('Channel not found.');
+    if (body.reason.trim().length < 5) throw new BadRequestException('Explain the in-video advertising violation.');
+    const suspended = await this.prisma.creatorEligibility.updateMany({
+      where: { channelId: channel.id, isEligible: true },
+      data: { isEligible: false, suspendedAt: new Date(), appliedForMonetization: false, rejectionReason: body.reason.trim() },
+    });
+    if (!suspended.count) throw new BadRequestException('This channel is not currently monetised.');
+    await this.audit.record({ userId: auth.user.id, action: 'MONETISATION_SUSPENDED', entityType: 'Channel', entityId: channel.id, req, details: { reason: body.reason.trim() } });
+    return { ok: true };
+  }
+
   @Get('applications')
   async applications() {
     return { applications: await this.prisma.creatorEligibility.findMany({
@@ -191,12 +212,12 @@ export class AdminBillingController {
     if (!application) throw new NotFoundException('Application not found.');
     const note = body.note?.trim();
     if (!body.approve && !note) throw new BadRequestException('Enter a reason for declining the application.');
-    if (body.approve && !(await eligibilityProgress(this.prisma, application.channelId, application.channel.userId)).canApply) {
+    if (body.approve && !application.suspendedAt && !(await eligibilityProgress(this.prisma, application.channelId, application.channel.userId)).canApply) {
       throw new BadRequestException('This channel no longer meets the requirements.');
     }
     const reviewed = await this.prisma.creatorEligibility.updateMany({
       where: { id, appliedForMonetization: true, isEligible: false, rejectionReason: null },
-      data: { isEligible: body.approve, approvedAt: body.approve ? new Date() : null, rejectionReason: body.approve ? null : note },
+      data: { isEligible: body.approve, suspendedAt: body.approve ? null : application.suspendedAt, approvedAt: body.approve ? new Date() : null, rejectionReason: body.approve ? null : note },
     });
     if (!reviewed.count) throw new BadRequestException('This application has already been reviewed.');
     await this.audit.record({ userId: auth.user.id, action: body.approve ? 'MONETISATION_APPROVED' : 'MONETISATION_DECLINED', entityType: 'Channel', entityId: application.channelId, req });
@@ -221,12 +242,12 @@ export class AdminBillingController {
     if (free ? c.status !== 'DRAFT' && c.status !== 'PENDING_REVIEW' : c.status !== 'PENDING_REVIEW') throw new BadRequestException(free ? 'Only an ad that is not running yet can be approved without payment.' : 'This campaign is not waiting for review.');
     if (!body.approve && !body.note?.trim()) throw new BadRequestException('Say why it is rejected; the business will see it.');
     const now = new Date();
-    if (body.approve && (!c.advertiser.registrationNumber || (!c.advertiser.isVerified && !body.verifyBusiness))) {
+    if (body.approve && c.advertiser.registrationNumber && !c.advertiser.isVerified && !body.verifyBusiness) {
       throw new BadRequestException('Verify the business registration before approving the campaign.');
     }
     await this.prisma.$transaction(async (tx) => {
       // Match the reviewed registration to avoid approving a stale business profile.
-      if (body.approve) {
+      if (body.approve && c.advertiser.registrationNumber) {
         const verified = await tx.advertiser.updateMany({ where: { id: c.advertiserId, registrationNumber: c.advertiser.registrationNumber, businessName: c.advertiser.businessName, country: c.advertiser.country }, data: { isVerified: true } });
         if (!verified.count) throw new BadRequestException('The business details changed. Review them again.');
       }
@@ -291,7 +312,7 @@ export class AdminBillingController {
     const badge = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${channel.userId} FOR UPDATE`;
       const user = await tx.user.findUniqueOrThrow({ where: { id: channel.userId } });
-      const source = body.verified ? 'ADMIN' : isPremium(user) ? 'PREMIUM' : null;
+      const source = body.verified ? 'ADMIN' : isPremium(user) ? 'PREMIUM' : hasAdBadge(user) ? 'AD_BADGE' : null;
       return tx.channel.update({
         where: { id: channel.id }, data: { isVerified: source !== null, verificationSource: source },
         select: { isVerified: true, verificationSource: true },

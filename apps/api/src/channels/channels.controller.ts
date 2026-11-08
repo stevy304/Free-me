@@ -10,7 +10,7 @@ import { publicChannel } from '../users/serialize';
 import { PUBLIC_VIDEO, videoCard } from '../catalog/serialize';
 import { CreateChannelDto, UpdateChannelDto } from './channels.dto';
 import { MediaUrls } from '../videos/media-urls';
-import { hasPremiumAccess } from '../billing/billing';
+import { hasAdBadge, hasPremiumAccess } from '../billing/billing';
 
 @ApiTags('channels')
 @Controller('channels')
@@ -41,7 +41,7 @@ export class ChannelsController {
     const channel = await this.prisma.$transaction(async (tx) => {
       const c = await tx.channel.create({ data: { userId: auth.user.id, handle, name: body.name.trim(), description: body.description?.trim() || null, country: body.country?.toUpperCase() ?? null, defaultLanguage: body.defaultLanguage?.toLowerCase() ?? null, avatarUrl: (await tx.profile.findUnique({ where: { userId: auth.user.id } }))?.avatarUrl ?? null,
         // Premium members' Spaces carry the verified badge from the start.
-        ...(hasPremiumAccess(auth.user) ? { isVerified: true, verificationSource: 'PREMIUM' } : {}) } });
+        ...(hasPremiumAccess(auth.user) ? { isVerified: true, verificationSource: 'PREMIUM' } : hasAdBadge(auth.user) ? { isVerified: true, verificationSource: 'AD_BADGE' } : {}) } });
       if (!auth.user.roles.includes('CREATOR')) await tx.user.update({ where: { id: auth.user.id }, data: { roles: { set: [...auth.user.roles, 'CREATOR'] } } });
       return c;
     });

@@ -53,7 +53,7 @@ async function creator(email: string, handle: string) {
 
 test('Premium by MTN MoMo: $10 a month charged in RWF, verified badge while it lasts, paid once even if checked twice', async () => {
   const plans = (await request(ctx.http).get('/api/billing/plans').expect(200)).body;
-  expect(plans).toMatchObject({ premium: { usdCents: 1000, months: [1, 3, 6, 12] }, ads: { usdCentsPerDay: 300, maxAdsPerVideo: 2 } });
+  expect(plans).toMatchObject({ premium: { usdCents: 1000, months: [1, 3, 6, 12] }, ads: { usdCentsPerDay: 300, maxAdsPerVideo: 1 } });
   expect(plans.methods).toEqual([{ name: 'mtn_momo', currency: 'RWF', perUsd: 1450 }, { name: 'flutterwave', currency: 'USD', perUsd: 1 }]);
 
   const a = await creator('maker@example.com', 'maker');
@@ -101,6 +101,23 @@ test('Premium by MTN MoMo: $10 a month charged in RWF, verified badge while it l
   expect((await a.get(`/api/billing/payments/${p2.id}`).expect(200)).body.payment).toMatchObject({ status: 'FAILED', failureReason: 'The payment was declined on the phone.' });
 });
 
+test('an advertiser badge costs $2, grants a badge without Premium and expires', async () => {
+  const advertiser = await creator('badge@example.com', 'badge');
+  const payment = (await advertiser.post('/api/billing/advertiser-badge').set('Origin', WEB)
+    .send({ method: 'mtn_momo', phone: '0788123456' }).expect(201)).body.payment;
+  expect(payment).toMatchObject({ purpose: 'AD_BADGE', amount: '2900', status: 'PENDING' });
+  [...momo.values()][0].status = 'SUCCESSFUL';
+  await advertiser.get(`/api/billing/payments/${payment.id}`).expect(200);
+  const { advertiserBadge, premium } = (await advertiser.get('/api/billing/me').expect(200)).body;
+  expect(advertiserBadge.active).toBe(true);
+  expect(premium.active).toBe(false);
+  await advertiser.get(`/api/billing/payments/${payment.id}`).expect(200);
+  expect((await advertiser.get('/api/billing/me').expect(200)).body.advertiserBadge).toEqual(advertiserBadge);
+  expect((await advertiser.get('/api/me').expect(200)).body.channel.isVerified).toBe(true);
+  await new Billing(ctx.prisma as never, ctx.config).expirePremium(new Date(Date.now() + 31 * 86_400_000));
+  expect((await advertiser.get('/api/me').expect(200)).body.channel.isVerified).toBe(false);
+});
+
 test('Premium by card (Flutterwave): checkout link, verified with Flutterwave; the webhook needs its secret', async () => {
   const a = await creator('card@example.com', 'card');
   const pay = (await a.post('/api/billing/premium').set('Origin', WEB).send({ method: 'flutterwave', months: 12 }).expect(201)).body.payment;
@@ -124,7 +141,7 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   await maker.post('/api/hub/monetisation/join').set('Origin', WEB).expect(403);
   const makerCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'maker' } });
   const video = (mins: number, extra: object = {}) => ctx.prisma.video.create({ data: { channelId: makerCh.id, title: `v${mins}`, durationSeconds: mins * 60, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date(), ...extra } });
-  const short = await video(3); const long = await video(20); const moment = await video(1, { isShort: true });
+  const short = await video(8); const long = await video(20); const moment = await video(1, { isShort: true });
 
   const audience = await ctx.prisma.user.createManyAndReturn({
     data: Array.from({ length: 1000 }, (_, i) => ({ email: `audience-${i}@example.com` })),
@@ -170,9 +187,9 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(400);
   await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true, verifyBusiness: true }).expect(200);
 
-  // Serving: one before a short video, two on a long one, none on Moments.
+  // Serving: one midway through a targeted long video, none on Moments.
   const slots = (await request(ctx.http).get(`/api/videos/${short.id}/ads`).expect(200)).body.slots;
-  expect(slots).toEqual([{ at: 0, ad: expect.objectContaining({ campaignId: camp.id, businessName: 'Kigali Shop', headline: 'Fresh coffee in Kigali', skipAfterSeconds: 5, playbackUrl: expect.stringContaining(`${adVideo.id}/hls/master.m3u8`) }) }]);
+  expect(slots).toEqual([{ at: 240, ad: expect.objectContaining({ campaignId: camp.id, businessName: 'Kigali Shop', headline: 'Fresh coffee in Kigali', skipAfterSeconds: 5, playbackUrl: expect.stringContaining(`${adVideo.id}/hls/master.m3u8`) }) }]);
   expect((await request(ctx.http).get(`/api/videos/${moment.id}/ads`).expect(200)).body.slots).toEqual([]);
   // A targeted campaign cannot serve or count impressions outside its selected placements.
   expect((await request(ctx.http).get(`/api/videos/${long.id}/ads`).expect(200)).body.slots).toEqual([]);
@@ -189,6 +206,14 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
 
   const live = (await maker.get('/api/hub/monetisation/earn').expect(200)).body;
   expect(live).toMatchObject({ impressions: 1, activity: [{ campaignId: camp.id, videoId: short.id, impressions: 1 }] });
+
+  await admin.post('/api/admin/billing/monetisation/suspend').set('Origin', WEB)
+    .send({ handle: 'maker', reason: 'In-video advertising violation' }).expect(200);
+  expect((await request(ctx.http).get(`/api/videos/${short.id}/ads`).expect(200)).body.slots).toEqual([]);
+  expect((await maker.post('/api/hub/monetisation/join').set('Origin', WEB).expect(200)).body)
+    .toMatchObject({ earning: false, eligibility: { suspended: true, pending: true } });
+  await admin.post(`/api/admin/billing/applications/${application.id}/review`).set('Origin', WEB).send({ approve: true }).expect(200);
+  expect((await maker.get('/api/hub/monetisation').expect(200)).body).toMatchObject({ earning: true, eligibility: { suspended: false } });
 
   // Settlement: yesterday, the campaign ran all day ($3); the creator pool (60%) goes to the channel that showed it.
   const DAY = 86_400_000;

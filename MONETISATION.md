@@ -5,13 +5,13 @@ Free Me has two sources of income, both paid up front with MTN MoMo or a card. P
 | Income | Price | Who pays | What they get |
 | --- | --- | --- | --- |
 | **Premium** | $10 a month (3, 6 and 12 months too) | Viewers and creators | The verified badge next to their name, Live Studio, the Premium dashboard |
-| **Video ads** | $3 a day | Businesses | A 5–90 second video ad playing before videos of monetised creators, in the countries they choose, with a "Visit" button; uploaded and run from **Ad Studio** (`/studio/ads`, part of Premium), with results (shown, visits, rate) there. Ad videos are kept apart from the Space's videos and never appear in feeds or search. Viewers see the ad full-frame before the video starts, with a small *Sponsored* label, the business card with *Visit*, and *Skip* after 5 seconds; the video does not start until the ad is known (at most 1.5 seconds). Advertisers need Premium, a channel badge and a business registration checked by an administrator before a campaign runs |
+| **Video ads** | $3 a day | Businesses | A 5–90 second video ad playing midway through eligible videos of monetised creators, in the countries they choose, with a "Visit" button; uploaded and run from **Ad Studio** (`/studio/ads`), with results (shown, visits, rate) there. Ad videos are kept apart from the Space's videos and never appear in feeds or search. Viewers see the ad full-frame before the video starts, with a small *Sponsored* label, the business card with *Visit*, and *Skip* after 5 seconds; the video does not start until the ad is known (at most 1.5 seconds). Advertisers need Premium or a $2 advertiser badge valid for 30 days. An RDB registration or tax ID is optional and is reviewed if submitted |
 
 ## The rules for ads
 
 - Ads play **only on public videos of monetised creators** (creators approved after applying).
 - To apply, creators need 1,000 active followers, 10,000 public video views, 50,000 public Moments views, 4,000 public watch hours on regular videos, and 10,000 public Sparks. Activity metrics use the last 90 days. Administrators review applications before ads can run.
-- **At most 2 ads per video**: one before it, and one halfway through videos of 8 minutes or more. Never on Moments.
+- **One mid-roll ad** halfway through eligible public videos of 8 minutes or more. No pre-roll, Moments ads, or ads on content marked for kids.
 - Viewers can skip after 5 seconds. A viewer is counted once per ad and video every 30 minutes, so creators cannot inflate their share by replaying.
 
 ## How the ad money is shared

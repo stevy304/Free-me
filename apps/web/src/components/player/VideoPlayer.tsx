@@ -26,7 +26,6 @@ const label = (h: number, w: number) => `${Math.min(h, w)}p`;
  * called every 10 seconds of playback, on pause, at the end and when the page is left, to remember the position.
  */
 /** How long autoplay waits to learn whether an ad plays first. */
-const ADS_WAIT_MS = 1500;
 
 export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange, storyboard, captions = [], withAds = false }: {
   src: string; poster?: string | null; videoId?: string; durationHint?: number; autoPlay?: boolean; theater?: boolean; onTheater?: () => void; onEnded?: () => void;
@@ -78,24 +77,17 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const [adSlots, setAdSlots] = useState<AdSlot[]>([]);
   const [ad, setAd] = useState<AdSlot | null>(null);
   const adsPlayed = useRef(new Set<number>());
-  // Autoplay waits for this: the ad before the video (if any) plays first, so the video never flashes on before it.
-  // Never more than ADS_WAIT_MS, so a slow answer costs a moment, not the start.
-  const adsReady = useRef<Promise<void>>(Promise.resolve());
-  const preRoll = useRef(false);
   useEffect(() => {
-    setAdSlots([]); setAd(null); adsPlayed.current = new Set(); preRoll.current = false;
-    if (!withAds || !videoId) { adsReady.current = Promise.resolve(); return; }
+    setAdSlots([]); setAd(null); adsPlayed.current = new Set();
+    if (!withAds || !videoId) return;
     let off = false;
-    const fetched = fetch(`/api/videos/${videoId}/ads`, { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : { slots: [] })).then((j: { slots: AdSlot[] }) => {
-      if (off || !j.slots?.length) return;
-      setAdSlots(j.slots);
-      const pre = j.slots.find((x) => x.at === 0);
-      if (pre && (video.current?.currentTime ?? 0) < 3 && !(startAt > 0)) { video.current?.pause(); adsPlayed.current.add(0); preRoll.current = true; setAd(pre); }
-      else if (pre) adsPlayed.current.add(0); // resuming part-way: no ad before
-    }).catch(() => undefined);
-    adsReady.current = Promise.race([fetched, new Promise<void>((done) => setTimeout(done, ADS_WAIT_MS))]);
+    void fetch(`/api/videos/${videoId}/ads`, { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : { slots: [] }))
+      .then((result: { slots: AdSlot[] }) => {
+        if (!off) setAdSlots(result.slots.filter((slot) => slot.at > 0));
+      }).catch(() => undefined);
     return () => { off = true; };
-  }, [videoId, withAds]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [videoId, withAds]);
   const adDone = () => { setAd(null); video.current?.play().catch(() => undefined); };
   useEffect(() => { onPlayingChange?.(playing); }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
   const progressRef = useRef(onProgress);
@@ -166,8 +158,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
         h.loadSource(url); h.attachMedia(el);
       });
     }
-    const start = () => { if (!cancelled && !preRoll.current) el.play().catch(() => { el.muted = true; setMuted(true); el.play().catch(() => undefined); }); };
-    if (autoPlay) { if (withAds) void adsReady.current.then(start); else start(); }
+    const start = () => { if (!cancelled) el.play().catch(() => { el.muted = true; setMuted(true); el.play().catch(() => undefined); }); };
+    if (autoPlay) start();
     return () => { cancelled = true; hls.current?.destroy(); hls.current = null; el.removeAttribute('src'); el.load(); };
   }, [playSrc]); // eslint-disable-line react-hooks/exhaustive-deps
 

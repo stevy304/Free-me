@@ -26,6 +26,7 @@ export function AdminMoney() {
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [verified, setVerified] = useState<Record<string, boolean>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [suspension, setSuspension] = useState({ handle: '', reason: '' });
   const [handle, setHandle] = useState('');
   const [busy, setBusy] = useState(false);
   const [gift, setGift] = useState({ email: '', months: 1 });
@@ -56,6 +57,11 @@ export function AdminMoney() {
 
       <section>
         <h2 className="text-lg font-semibold">Monetisation applications ({applications.length})</h2>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <input aria-label="Channel to suspend" placeholder="@channel" className={`${inputClass} max-w-xs`} value={suspension.handle} onChange={(e) => setSuspension({ ...suspension, handle: e.target.value })} />
+          <input aria-label="Suspension reason" placeholder="In-video advertising violation" maxLength={500} className={`${inputClass} max-w-xs`} value={suspension.reason} onChange={(e) => setSuspension({ ...suspension, reason: e.target.value })} />
+          <button type="button" disabled={busy || !suspension.handle.trim() || suspension.reason.trim().length < 5} className="rounded-xl bg-danger/10 px-4 py-2 text-sm font-semibold text-danger disabled:opacity-50" onClick={() => void run(() => api('/admin/billing/monetisation/suspend', { body: suspension }), 'Monetisation suspended.')}>Suspend monetisation</button>
+        </div>
         {applications.map((application) => (
           <div key={application.id} className="mt-2 flex flex-wrap items-center gap-2 rounded-2xl border border-line p-4">
             <span className="mr-auto font-semibold">{application.channel.name} · @{application.channel.handle}</span>
@@ -78,9 +84,9 @@ export function AdminMoney() {
                 <input className={`${inputClass} max-w-sm`} placeholder="Note (required to reject)" value={notes[r.id] ?? ''} onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })} />
                 <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" disabled={r.businessVerified || !r.registrationNumber} checked={r.businessVerified || !!verified[r.id]} onChange={(e) => setVerified({ ...verified, [r.id]: e.target.checked })} />
-                  Registration checked · {r.registrationNumber ?? 'Missing'}
+                  Registration checked · {r.registrationNumber ?? 'Not submitted'}
                 </label>
-                <button type="button" disabled={busy || !r.registrationNumber || (!r.businessVerified && !verified[r.id])} onClick={() => void run(() => api(`/admin/billing/campaigns/${r.id}/review`, { body: { approve: true, verifyBusiness: !!verified[r.id], note: notes[r.id] || undefined } }), 'Approved: it is running now.')} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand">Approve</button>
+                <button type="button" disabled={busy || (!!r.registrationNumber && !r.businessVerified && !verified[r.id])} onClick={() => void run(() => api(`/admin/billing/campaigns/${r.id}/review`, { body: { approve: true, verifyBusiness: !!verified[r.id], note: notes[r.id] || undefined } }), 'Approved: it is running now.')} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand">Approve</button>
                 <button type="button" onClick={() => void run(() => api(`/admin/billing/campaigns/${r.id}/review`, { body: { approve: false, note: notes[r.id] } }), 'Rejected.')} className="h-10 rounded-xl bg-danger/10 px-4 text-[14px] font-semibold text-danger">Reject</button>
               </div>
             </article>
@@ -99,8 +105,8 @@ export function AdminMoney() {
                 <p className="font-semibold">{r.headline}</p>
                 <p className="text-[13px] text-muted">{r.businessName} · {r.email} · {r.days} {r.days === 1 ? 'day' : 'days'} · {r.video ? `${r.video.title} (${duration(r.video.durationSeconds)})` : 'video missing'}</p>
               </div>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={r.businessVerified || !r.registrationNumber} checked={r.businessVerified || !!verified[r.id]} onChange={(e) => setVerified({ ...verified, [r.id]: e.target.checked })} />Registration checked · {r.registrationNumber ?? 'Missing'}</label>
-              <button type="button" disabled={busy || !r.video || !r.registrationNumber || (!r.businessVerified && !verified[r.id])} onClick={() => void run(() => api(`/admin/billing/campaigns/${r.id}/review`, { body: { approve: true, free: true, verifyBusiness: !!verified[r.id] } }), 'Approved without payment: the ad is running now.')} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Approve without payment</button>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={r.businessVerified || !r.registrationNumber} checked={r.businessVerified || !!verified[r.id]} onChange={(e) => setVerified({ ...verified, [r.id]: e.target.checked })} />Registration checked · {r.registrationNumber ?? 'Not submitted'}</label>
+              <button type="button" disabled={busy || !r.video || (!!r.registrationNumber && !r.businessVerified && !verified[r.id])} onClick={() => void run(() => api(`/admin/billing/campaigns/${r.id}/review`, { body: { approve: true, free: true, verifyBusiness: !!verified[r.id] } }), 'Approved without payment: the ad is running now.')} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Approve without payment</button>
             </article>
           ))}
           {!unpaid.length && <p className="text-[14px] text-muted">None.</p>}

@@ -11,10 +11,10 @@ import { clientIp, type AppRequest, type AuthContext } from '../common/request';
 import { LINKED_VIDEO } from '../catalog/serialize';
 import { MediaUrls } from '../videos/media-urls';
 import { BillingService, PayDto, paymentView } from './billing.controller';
-import { EARNINGS_CURRENCY, hasPremiumAccess } from './billing';
+import { EARNINGS_CURRENCY, hasAdAccess } from './billing';
 
-/** Ads show only on monetised channels: at most two per video (one before it, one halfway through long videos). */
-export const MAX_ADS_PER_VIDEO = 2;
+/** Ads show only on monetised channels: one midway through eligible long videos. */
+export const MAX_ADS_PER_VIDEO = 1;
 /** Videos at least this long also get an ad halfway through. */
 export const MID_ROLL_MIN_SECONDS = 8 * 60;
 export const AD_MIN_SECONDS = 5;
@@ -23,7 +23,7 @@ export const SKIP_AFTER_SECONDS = 5;
 
 class CampaignDto {
   @ApiProperty() @IsString() @Length(2, 100) businessName!: string;
-  @ApiProperty() @IsString() @Length(3, 80) registrationNumber!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(3, 80) registrationNumber?: string;
   @ApiProperty({ description: 'ISO 3166-1 alpha-2' }) @IsString() @Length(2, 2) country!: string;
   @ApiProperty({ description: 'Short line shown with the ad' }) @IsString() @Length(3, 90) headline!: string;
   @ApiProperty({ description: 'Where "Visit" leads (https)' }) @IsUrl({ protocols: ['https'], require_protocol: true }) destinationUrl!: string;
@@ -68,9 +68,9 @@ export class AdsController {
   @ApiOperation({ summary: 'Create an ad campaign (a draft until it is paid)' })
   async create(@CurrentAuth() auth: AuthContext, @Body() body: CampaignDto) {
     await this.limits.consume(`ads:create:${auth.user.id}`, 30, 3600);
-    if (!hasPremiumAccess(auth.user)) throw new ForbiddenException('Ad Studio is part of Premium.');
+    if (!hasAdAccess(auth.user)) throw new ForbiddenException('Ad Studio requires Premium or an advertiser badge.');
     if (!await this.prisma.channel.count({ where: { userId: auth.user.id, isVerified: true } })) throw new ForbiddenException('A verified channel badge is required to advertise.');
-    if (body.registrationNumber.trim().length < 3) throw new BadRequestException('Enter a valid business registration number.');
+    if (body.registrationNumber && body.registrationNumber.trim().length < 3) throw new BadRequestException('Enter a valid business registration number.');
     if (!isCountryCode(body.country)) throw new BadRequestException('Choose your business country from the list.');
     const targets = [...new Set((body.targetCountries ?? []).map((c) => c.toUpperCase()))];
     if (targets.some((c) => !isCountryCode(c))) throw new BadRequestException('Choose target countries from the list.');
@@ -82,7 +82,7 @@ export class AdsController {
     const targetVideoIds = [...new Set(body.targetVideoIds ?? [])];
     const handles = [...new Set((body.targetChannelHandles ?? []).map((h) => h.trim().toLowerCase().replace(/^@/, '')))];
     const [videoCount, channels] = await Promise.all([
-      this.prisma.video.count({ where: { id: { in: targetVideoIds, not: v.id }, ...LINKED_VIDEO, visibility: 'PUBLIC', isAd: false, isShort: false } }),
+      this.prisma.video.count({ where: { id: { in: targetVideoIds, not: v.id }, ...LINKED_VIDEO, visibility: 'PUBLIC', isAd: false, isShort: false, madeForKids: false, durationSeconds: { gte: MID_ROLL_MIN_SECONDS }, channel: { eligibility: { isEligible: true } } } }),
       this.prisma.channel.findMany({ where: { handle: { in: handles } }, select: { id: true } }),
     ]);
     if (videoCount !== targetVideoIds.length || channels.length !== handles.length) {
@@ -90,7 +90,7 @@ export class AdsController {
     }
     const rate = (await this.billing.settings()).adDayUsdCents;
     const c = await this.prisma.$transaction(async (tx) => {
-      const identity = { businessName: body.businessName.trim(), country: body.country.toUpperCase(), registrationNumber: body.registrationNumber.trim() };
+      const identity = { businessName: body.businessName.trim(), country: body.country.toUpperCase(), registrationNumber: body.registrationNumber?.trim() ?? null };
       const adv = await tx.advertiser.upsert({
         where: { userId: auth.user.id }, update: {},
         create: { userId: auth.user.id, ...identity, businessType: 'business', currency: EARNINGS_CURRENCY },
@@ -119,6 +119,7 @@ export class AdsController {
   @ApiOperation({ summary: 'Pay for a draft campaign; once paid it waits for review, then runs for the days bought' })
   async pay(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: PayDto) {
     await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
+    if (!hasAdAccess(auth.user)) throw new ForbiddenException('Renew your advertiser badge or Premium to pay for a campaign.');
     const c = await this.own(auth, id);
     if (c.status !== 'DRAFT') throw new BadRequestException('This campaign is already paid.');
     const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'AD_CAMPAIGN', method: body.method, phone: body.phone, campaignId: c.id, usdCents: c.days * c.dailyRateCents, description: `Free Me ad, ${c.days} ${c.days === 1 ? 'day' : 'days'}`, returnPath: '/studio/ads' }));
@@ -155,14 +156,14 @@ export class AdsController {
   }
 
   @Get('videos/:id/ads')
-  @ApiOperation({ summary: 'Ads to play with this video: none, one before it, or also one halfway (at most two)' })
+  @ApiOperation({ summary: 'Ads to play with this video: one halfway through an eligible video, or none' })
   async forVideo(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
     const v = await this.prisma.video.findFirst({ where: { id, ...LINKED_VIDEO }, include: { channel: { include: { eligibility: true } } } });
     const now = new Date();
-    if (!v || v.visibility !== 'PUBLIC' || v.isShort || v.isAd || !v.channel.eligibility?.isEligible) return { slots: [] };
+    if (!v || v.visibility !== 'PUBLIC' || v.isShort || v.isAd || v.madeForKids || v.durationSeconds < MID_ROLL_MIN_SECONDS || !v.channel.eligibility?.isEligible) return { slots: [] };
     const country = await this.viewerCountry(auth, req);
     const candidates = await this.prisma.campaign.findMany({
-      where: { status: 'ACTIVE', advertiser: { isVerified: true }, startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, AND: [
+      where: { status: 'ACTIVE', advertiser: { OR: [{ registrationNumber: null }, { isVerified: true }] }, startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, AND: [
         country ? { OR: [{ targetCountries: { isEmpty: true } }, { targetCountries: { has: country } }] } : { targetCountries: { isEmpty: true } },
         { OR: [{ targetVideoIds: { isEmpty: true }, targetChannelIds: { isEmpty: true } },
           ...(v.visibility === 'PUBLIC' ? [{ targetVideoIds: { has: id } }, { targetChannelIds: { has: v.channelId } }] : [])] },
@@ -172,7 +173,7 @@ export class AdsController {
     const ads = await this.prisma.video.findMany({ where: { id: { in: candidates.map((c) => c.videoId!).filter(Boolean) }, ...LINKED_VIDEO, mediaLocation: 'PUBLIC' } });
     const byId = new Map(ads.map((a) => [a.id, a]));
     const usable = candidates.filter((c) => c.videoId && byId.has(c.videoId)).sort(() => Math.random() - 0.5);
-    const at = [0, ...(v.durationSeconds >= MID_ROLL_MIN_SECONDS ? [Math.floor(v.durationSeconds / 2)] : [])].slice(0, MAX_ADS_PER_VIDEO);
+    const at = [Math.floor(v.durationSeconds / 2)];
     return {
       slots: at.slice(0, usable.length).map((t, i) => {
         const c = usable[i]; const a = byId.get(c.videoId!)!;
@@ -186,10 +187,10 @@ export class AdsController {
   async impression(@Body() body: ImpressionDto, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
     const who = auth?.user.id ?? clientIp(req) ?? 'unknown';
     await this.limits.consume(`ads:imp:${who}`, 120, 86_400, 'Too many ads today.');
-    const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId }, include: { advertiser: { select: { isVerified: true } } } });
+    const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId }, include: { advertiser: { select: { isVerified: true, registrationNumber: true } } } });
     const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, visibility: 'PUBLIC', isShort: false, isAd: false }, include: { channel: { include: { eligibility: true } } } });
     const now = new Date();
-    if (!c?.advertiser.isVerified || !v || !v.channel.eligibility?.isEligible || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
+    if (!c || (c.advertiser.registrationNumber && !c.advertiser.isVerified) || !v || v.madeForKids || v.durationSeconds < MID_ROLL_MIN_SECONDS || !v.channel.eligibility?.isEligible || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
     if ((c.targetVideoIds.length || c.targetChannelIds.length) &&
         (v.visibility !== 'PUBLIC' || (!c.targetVideoIds.includes(v.id) && !c.targetChannelIds.includes(v.channelId)))) return { impressionId: null };
     const country = await this.viewerCountry(auth, req);

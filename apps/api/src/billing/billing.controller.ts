@@ -9,7 +9,7 @@ import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import { Webhook } from '../common/origin.guard';
 import { RateLimitService } from '../common/rate-limit.service';
 import type { AuthContext } from '../common/request';
-import { Billing, BillingError, isPremium, PREMIUM_MONTHS } from './billing';
+import { AD_BADGE_USD_CENTS, Billing, BillingError, hasAdBadge, isPremium, PREMIUM_MONTHS } from './billing';
 import type { ProviderName } from './providers';
 
 @Injectable()
@@ -50,7 +50,7 @@ export class BillingController {
     const b = await this.billing.settings();
     return {
       premium: { usdCents: b.premiumUsdCents, months: PREMIUM_MONTHS },
-      ads: { usdCentsPerDay: b.adDayUsdCents, maxAdsPerVideo: 2 },
+      ads: { usdCentsPerDay: b.adDayUsdCents, maxAdsPerVideo: 1, badgeUsdCents: AD_BADGE_USD_CENTS },
       payoutMinimumUsdCents: b.payoutMinUsdCents,
       methods: (await this.billing.methods()).map((m) => ({
         ...m, perUsd: m.name === 'mtn_momo' ? b.momo!.perUsd : m.name === 'manual' ? b.manual!.perUsd : 1,
@@ -67,7 +67,7 @@ export class BillingController {
       this.prisma.user.findUniqueOrThrow({ where: { id: auth.user.id } }),
       this.prisma.payment.findMany({ where: { userId: auth.user.id }, orderBy: { createdAt: 'desc' }, take: 30 }),
     ]);
-    return { premium: premiumView(u), payments: payments.map(paymentView) };
+    return { premium: premiumView(u), advertiserBadge: { active: hasAdBadge(u), until: u.adBadgeUntil }, payments: payments.map(paymentView) };
   }
 
   @Post('premium')
@@ -77,6 +77,17 @@ export class BillingController {
     await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
     const usdCents = (await this.billing.settings()).premiumUsdCents * body.months;
     const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'PREMIUM', method: body.method, phone: body.phone, months: body.months, usdCents, description: `Free Me Premium, ${body.months} ${body.months === 1 ? 'month' : 'months'}`, returnPath: '/premium' }));
+    return { payment: paymentView(p) };
+  }
+
+  @Post('advertiser-badge')
+  @RequireAuth()
+  async advertiserBadge(@CurrentAuth() auth: AuthContext, @Body() body: PayDto) {
+    await this.limits.consume(`pay:${auth.user.id}`, 10, 3600);
+    const p = await this.billing.attempt(() => this.billing.start(auth.user, {
+      purpose: 'AD_BADGE', method: body.method, phone: body.phone, usdCents: AD_BADGE_USD_CENTS,
+      description: 'Free Me advertiser badge, 30 days', returnPath: '/studio/ads',
+    }));
     return { payment: paymentView(p) };
   }
 

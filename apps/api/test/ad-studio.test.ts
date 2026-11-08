@@ -50,7 +50,7 @@ test('before payments are switched on, an administrator approves an ad without p
   const makerCh = (await maker.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'maker', name: 'Maker' }).expect(201)).body.channel;
   await ctx.prisma.user.update({ where: { email: 'maker@example.com' }, data: { premiumUntil: new Date(Date.now() + 86_400_000) } });
   await ctx.prisma.creatorEligibility.create({ data: { channelId: makerCh.id, isEligible: true } });
-  const v = await ctx.prisma.video.create({ data: { channelId: makerCh.id, title: 'Hills', durationSeconds: 120, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date() } });
+  const v = await ctx.prisma.video.create({ data: { channelId: makerCh.id, title: 'Hills', durationSeconds: 480, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date() } });
   expect((await maker.agent.get(`/api/videos/${v.id}/ads`).expect(200)).body.slots).toEqual([]); // not approved yet
 
   const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
@@ -62,7 +62,7 @@ test('before payments are switched on, an administrator approves an ad without p
   expect(row).toMatchObject({ status: 'ACTIVE', dailyRateCents: 0, days: 3, reviewNote: 'Approved without payment by Free Me' });
 
   const slots = (await maker.agent.get(`/api/videos/${v.id}/ads`).expect(200)).body.slots;
-  expect(slots).toEqual([expect.objectContaining({ at: 0, ad: expect.objectContaining({ campaignId: camp.id, headline: 'Summer sale' }) })]);
+  expect(slots).toEqual([expect.objectContaining({ at: 240, ad: expect.objectContaining({ campaignId: camp.id, headline: 'Summer sale' }) })]);
   await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true, free: true }).expect(400); // already running
 
   // The day it ran is settled with $0: creators are not paid for money that never came in.

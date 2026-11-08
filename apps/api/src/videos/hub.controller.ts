@@ -1,4 +1,5 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Put, Query, Req } from '@nestjs/common';
+import { MID_ROLL_MIN_SECONDS } from '../billing/ads.controller';
 import { announceVideo } from '../notifications/notify';
 import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
@@ -69,7 +70,7 @@ export class HubController {
       where: { channel: { userId: auth.user.id }, isAd: ads === 'true', ...(status === 'UPLOADING' ? { status: 'UPLOADING' } : {}) },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 31, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), include: { category: true, renditions: { select: { resolution: true, width: true, height: true } } },
     });
-    return { videos: await Promise.all(rows.slice(0, 30).map(async (v) => ({ ...await this.view(v), monetised: !!channel?.eligibility?.isEligible && v.status === 'READY' && v.visibility === 'PUBLIC' && !v.takenDownAt && !v.isAd && !v.isShort }))), nextCursor: rows.length > 30 ? rows[29].id : null };
+    return { videos: await Promise.all(rows.slice(0, 30).map(async (v) => ({ ...await this.view(v), monetised: !!channel?.eligibility?.isEligible && v.status === 'READY' && v.visibility === 'PUBLIC' && !v.takenDownAt && !v.isAd && !v.isShort && !v.madeForKids && v.durationSeconds >= MID_ROLL_MIN_SECONDS }))), nextCursor: rows.length > 30 ? rows[29].id : null };
   }
 
   @Get(':id')

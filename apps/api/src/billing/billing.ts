@@ -32,6 +32,9 @@ export function msisdn(raw: string, currency: string): string | null {
 export const isPremium = (u: Pick<User, 'premiumUntil'>, now = new Date()) => !!u.premiumUntil && u.premiumUntil > now;
 /** Premium features (Live Studio, monetisation): members, and administrators, who can use everything. */
 export const hasPremiumAccess = (u: Pick<User, 'premiumUntil' | 'roles'>, now = new Date()) => isPremium(u, now) || u.roles.includes('ADMIN');
+export const AD_BADGE_USD_CENTS = 200;
+export const hasAdBadge = (user: Pick<User, 'adBadgeUntil'>, now = new Date()) => !!user.adBadgeUntil && user.adBadgeUntil > now;
+export const hasAdAccess = (user: Pick<User, 'premiumUntil' | 'roles' | 'adBadgeUntil'>, now = new Date()) => hasPremiumAccess(user, now) || hasAdBadge(user, now);
 /** Manual payments wait this long for the payer's proof and an administrator's check. */
 const MANUAL_WAIT = 7 * DAY;
 
@@ -62,7 +65,7 @@ export class Billing {
   }
 
   /** Creates a payment and asks the provider to collect it. */
-  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN'; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }) {
+  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'AD_BADGE'; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }) {
     const provider = (await this.providers())[p.method];
     if (!provider) throw new BillingError(p.method === 'mtn_momo' ? 'MTN MoMo payments are not set up on this server yet.' : p.method === 'flutterwave' ? 'Card payments are not set up on this server yet.' : 'This way of paying is not available.');
     let phone: string | undefined;
@@ -122,6 +125,12 @@ export class Billing {
   private async fulfil(tx: Prisma.TransactionClient, p: Payment) {
     if (p.purpose === 'PREMIUM') {
       await this.extendPremium(tx, p.userId, p.months ?? 1);
+    } else if (p.purpose === 'AD_BADGE') {
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${p.userId} FOR UPDATE`;
+      const user = await tx.user.findUniqueOrThrow({ where: { id: p.userId } });
+      const from = hasAdBadge(user) ? user.adBadgeUntil!.getTime() : Date.now();
+      await tx.user.update({ where: { id: p.userId }, data: { adBadgeUntil: new Date(from + MONTH) } });
+      await tx.channel.updateMany({ where: { userId: p.userId, isVerified: false }, data: { isVerified: true, verificationSource: 'AD_BADGE' } });
     } else if (p.campaignId) {
       await tx.campaign.updateMany({ where: { id: p.campaignId, status: 'DRAFT' }, data: { status: 'PENDING_REVIEW' } });
     }
@@ -183,7 +192,7 @@ export class Billing {
         const digits = currencyDigits(payment.currency);
         const raw = payment.amountMinor.toString().padStart(digits + 1, '0');
         const amount = digits ? `${raw.slice(0, -digits)}.${raw.slice(-digits)}` : raw;
-        const item = payment.purpose === 'PREMIUM' ? `Premium (${payment.months ?? 1} month(s))` : 'Ad campaign';
+        const item = payment.purpose === 'PREMIUM' ? `Premium (${payment.months ?? 1} month(s))` : payment.purpose === 'AD_BADGE' ? 'Advertiser badge (30 days)' : 'Ad campaign';
         await mail.send(noticeMail(payment.user.email, 'Your Free Me payment receipt', [
           item, `Amount paid: ${payment.currency} ${amount}`, `Payment date (UTC): ${payment.paidAt!.toISOString().slice(0, 10)}`,
           `Receipt reference: ${payment.id}`,
@@ -207,7 +216,12 @@ export class Billing {
 
   /** Worker: memberships that ended lose the Premium badge (a badge given by administrators stays). */
   async expirePremium(now = new Date()) {
-    const r = await this.prisma.channel.updateMany({ where: { verificationSource: 'PREMIUM', user: { OR: [{ premiumUntil: null }, { premiumUntil: { lte: now } }] } }, data: { isVerified: false, verificationSource: null } });
+    const expiredPremium = { OR: [{ premiumUntil: null }, { premiumUntil: { lte: now } }] };
+    const expiredBadge = { OR: [{ adBadgeUntil: null }, { adBadgeUntil: { lte: now } }] };
+    const r = await this.prisma.channel.updateMany({
+      where: { verificationSource: { in: ['PREMIUM', 'AD_BADGE'] }, user: { AND: [expiredPremium, expiredBadge] } },
+      data: { isVerified: false, verificationSource: null },
+    });
     // Campaigns past their end are done.
     await this.prisma.campaign.updateMany({ where: { status: 'ACTIVE', endDate: { lte: now } }, data: { status: 'COMPLETED' } });
     return r.count;
@@ -241,7 +255,6 @@ export class Billing {
     const split = splitRevenue(gross, PROPOSED_SPLIT);
     const rows = await this.prisma.$queryRaw<Array<{ channelId: string; n: bigint }>>`
       SELECT v."channelId", count(*)::bigint AS n FROM "AdImpression" i JOIN "Video" v ON v.id = i."videoId"
-      JOIN "CreatorEligibility" e ON e."channelId" = v."channelId" AND e."isEligible"
       WHERE i."createdAt" >= ${day.toISOString()}::timestamp AND i."createdAt" < ${end.toISOString()}::timestamp GROUP BY v."channelId"`;
     const shares = allocatePool(rows.length ? split.creatorPool : 0n, Object.fromEntries(rows.map((r) => [r.channelId, r.n])));
     return { gross, split, rows, shares };

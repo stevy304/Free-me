@@ -20,7 +20,7 @@ const PERKS = [
   { icon: Icon.Hub, title: 'Premium dashboard', text: 'Your membership, earnings, withdrawals and tools in one place.' },
 ] as const;
 
-const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Premium', AD_CAMPAIGN: 'Ad campaign' };
+const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Premium', AD_CAMPAIGN: 'Ad campaign', AD_BADGE: 'Advertiser badge' };
 const STATUS: Record<Payment['status'], string> = { PENDING: 'Waiting', SUCCEEDED: 'Paid', FAILED: 'Not paid' };
 
 export function PremiumView({ viewer }: { viewer: Viewer }) {
