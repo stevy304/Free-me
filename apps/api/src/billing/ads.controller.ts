@@ -1,5 +1,5 @@
 import { FileInterceptor } from '@nestjs/platform-express';
-import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, IsUUID, IsUrl, Length, Max, Min } from 'class-validator';
 import type { Advertiser, Campaign, Video } from '@prisma/client';
@@ -69,6 +69,34 @@ export class AdsController {
     const adv = await this.prisma.advertiser.findUnique({ where: { userId: auth.user.id } });
     const rows = adv ? await this.prisma.campaign.findMany({ where: { advertiserId: adv.id }, orderBy: { createdAt: 'desc' }, include: { advertiser: true }, take: 100 }) : [];
     return { business: adv ? { name: adv.businessName, country: adv.country, registrationNumber: adv.registrationNumber, verified: adv.isVerified } : null, campaigns: (await this.withVideos(rows)).map(campaignView) };
+  }
+
+  @Get('ads/placements')
+  @RequireAuth()
+  async placements(@CurrentAuth() auth: AuthContext, @Query('q') query?: string) {
+    if (!hasAdAccess(auth.user)) throw new ForbiddenException('Ad Studio requires Premium or an advertiser badge.');
+    const q = typeof query === 'string' ? query.trim().slice(0, 100) : '';
+    if (q.length < 2) return { videos: [], channels: [] };
+    await this.limits.consume(`ads:placements:${auth.user.id}`, 120, 60);
+    const eligible = {
+      ...LINKED_VIDEO, visibility: 'PUBLIC' as const, adsEnabled: true, isAd: false, isShort: false,
+      madeForKids: false, durationSeconds: { gte: MID_ROLL_MIN_SECONDS },
+      channel: { eligibility: { isEligible: true } },
+    };
+    const match = { contains: q.replace(/^@/, ''), mode: 'insensitive' as const };
+    const [videos, channels] = await Promise.all([
+      this.prisma.video.findMany({
+        where: { ...eligible, title: match },
+        select: { id: true, title: true, durationSeconds: true, channel: { select: { name: true, handle: true } } },
+        orderBy: [{ viewCount: 'desc' }, { id: 'asc' }], take: 10,
+      }),
+      this.prisma.channel.findMany({
+        where: { OR: [{ handle: match }, { name: match }], videos: { some: eligible } },
+        select: { id: true, name: true, handle: true },
+        orderBy: [{ subscriberCount: 'desc' }, { id: 'asc' }], take: 10,
+      }),
+    ]);
+    return { videos, channels };
   }
 
   @Post('ads/campaigns')

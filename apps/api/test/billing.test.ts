@@ -165,6 +165,10 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   // Ad Studio is part of Premium.
   await biz.post('/api/ads/campaigns').set('Origin', WEB).send({}).expect(400);
   await new Billing(ctx.prisma as never, ctx.config).grantPremium((await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'shop@example.com' } })).id, 1);
+  const placements = (await biz.get('/api/ads/placements?q=v8').expect(200)).body;
+  expect(placements.videos.map((placement: { id: string }) => placement.id)).toEqual([short.id]);
+  expect((await biz.get('/api/ads/placements?q=maker').expect(200)).body.channels)
+    .toEqual([expect.objectContaining({ id: makerCh.id, handle: 'maker' })]);
   const shopCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'shop' } });
   const adVideo = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Our shop', durationSeconds: 20, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
   const tooLong = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Long', durationSeconds: 300, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });

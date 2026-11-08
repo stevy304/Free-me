@@ -1,5 +1,6 @@
 'use client';
 
+import { PlacementPicker } from './PlacementPicker';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -244,6 +245,12 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                     {!!spaceVideos.length && <optgroup label="From your Space">{spaceVideos.map((v) => <option key={v.id} value={v.id}>{v.title} ({duration(v.durationSeconds)})</option>)}</optgroup>}
                   </select>
                 </label>
+                <PlacementPicker
+                  videos={form.placements.split(/[,\s]+/)}
+                  channels={form.channels.split(/[,\s]+/).map((handle) => handle.replace(/^@/, '').toLowerCase())}
+                  onVideo={(id) => setForm((previous) => ({ ...previous, placements: [previous.placements.trim(), id].filter(Boolean).join(', ') }))}
+                  onChannel={(handle) => setForm((previous) => ({ ...previous, channels: [previous.channels.trim(), `@${handle}`].filter(Boolean).join(', ') }))}
+                />
                 <label className="block"><span className="text-[13px] font-semibold">Video placements</span><input className={`mt-1 ${inputClass}`} value={form.placements} onChange={(e) => setForm({ ...form, placements: e.target.value })} placeholder="Paste public video links or IDs" maxLength={4000} /></label>
                 <label className="block"><span className="text-[13px] font-semibold">Channel placements</span><input className={`mt-1 ${inputClass}`} value={form.channels} onChange={(e) => setForm({ ...form, channels: e.target.value })} placeholder="@channel, @another-channel" maxLength={1200} /></label>
                 <p className="text-sm text-muted sm:col-span-2">Separate placements with commas. Ads can appear on any selected video or channel, subject to the country filter. Leave both blank to reach all eligible content.</p>
