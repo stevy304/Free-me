@@ -52,7 +52,7 @@ export function HubContent({ handle }: { handle: string }) {
     if (v.status === 'UPLOADING') return <span className="text-muted">Upload not finished</span>;
     if (v.status === 'FLAGGED') return <span className="flex items-start gap-1.5 text-accent" title="Our automatic check asked a moderator to look at this video before it goes live."><Icon.Clock size={15} className="mt-0.5 shrink-0" />Being reviewed before it goes live</span>;
     if (v.status === 'PROCESSING' || v.processingStage !== 'Ready') return <span className="flex items-center gap-1.5 text-muted"><Icon.Spinner size={14} className="animate-spin" />{v.processingStage} {v.processingProgress}%</span>;
-    return <span className="text-muted">{[v.renditions.at(-1), v.isShort ? 'Moment' : null, v.isPodcast ? 'Podcast' : null].filter(Boolean).join(' · ')}</span>;
+    return <span className="text-muted">{[v.renditions.at(-1), v.isShort ? 'Moment' : null, v.isPodcast ? 'Podcast' : null, v.monetised ? 'Monetised' : null].filter(Boolean).join(' · ')}</span>;
   };
 
   return (

@@ -127,12 +127,16 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   const short = await video(3); const long = await video(20); const moment = await video(1, { isShort: true });
 
   const audience = await ctx.prisma.user.createManyAndReturn({
-    data: Array.from({ length: 250 }, (_, i) => ({ email: `audience-${i}@example.com` })),
+    data: Array.from({ length: 1000 }, (_, i) => ({ email: `audience-${i}@example.com` })),
     select: { id: true },
   });
   await ctx.prisma.subscription.createMany({ data: audience.map(({ id }) => ({ userId: id, channelId: makerCh.id })) });
-  await ctx.prisma.like.createMany({ data: audience.slice(0, 100).map(({ id }) => ({ userId: id, videoId: short.id })) });
-  await ctx.prisma.videoDailyStat.create({ data: { videoId: short.id, day: new Date(), views: 2000, watchSeconds: 360000n } });
+  const sparkVideos = [short, ...await Promise.all(Array.from({ length: 9 }, () => video(4)))];
+  for (const sparked of sparkVideos) {
+    await ctx.prisma.like.createMany({ data: audience.map(({ id }) => ({ userId: id, videoId: sparked.id })) });
+  }
+  await ctx.prisma.videoDailyStat.create({ data: { videoId: short.id, day: new Date(), views: 10000, watchSeconds: 14400000n } });
+  await ctx.prisma.videoDailyStat.create({ data: { videoId: moment.id, day: new Date(), views: 50000 } });
   expect((await maker.post('/api/hub/monetisation/join').set('Origin', WEB).expect(200)).body).toMatchObject({ joined: false, eligibility: { pending: true } });
   const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
   const application = await ctx.prisma.creatorEligibility.findUniqueOrThrow({ where: { channelId: makerCh.id } });
@@ -147,7 +151,7 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   const shopCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'shop' } });
   const adVideo = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Our shop', durationSeconds: 20, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
   const tooLong = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Long', durationSeconds: 300, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
-  const form = { businessName: 'Kigali Shop', country: 'RW', headline: 'Fresh coffee in Kigali', destinationUrl: 'https://shop.example.com', days: 7 };
+  const form = { businessName: 'Kigali Shop', registrationNumber: 'RW-123456', country: 'RW', headline: 'Fresh coffee in Kigali', destinationUrl: 'https://shop.example.com', days: 7 };
   expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: tooLong.id }).expect(400)).body.message).toBe('An ad must be between 5 and 90 seconds long.');
   await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: short.id }).expect(400); // not theirs
   const camp = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: adVideo.id, targetVideoIds: [short.id] }).expect(201)).body.campaign;
@@ -163,7 +167,8 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
 
   expect((await admin.get('/api/admin/billing').expect(200)).body).toMatchObject({ premiumMembers: 2, waiting: { adReviews: 1 }, last30Days: { adsUsdCents: 2100 } });
   await maker.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(403);
-  await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(200);
+  await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(400);
+  await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true, verifyBusiness: true }).expect(200);
 
   // Serving: one before a short video, two on a long one, none on Moments.
   const slots = (await request(ctx.http).get(`/api/videos/${short.id}/ads`).expect(200)).body.slots;

@@ -5,12 +5,12 @@ Free Me has two sources of income, both paid up front with MTN MoMo or a card. P
 | Income | Price | Who pays | What they get |
 | --- | --- | --- | --- |
 | **Premium** | $10 a month (3, 6 and 12 months too) | Viewers and creators | The verified badge next to their name, Live Studio, the Premium dashboard |
-| **Video ads** | $3 a day | Businesses | A 5–90 second video ad playing before videos of monetised creators, in the countries they choose, with a "Visit" button; uploaded and run from **Ad Studio** (`/studio/ads`, part of Premium), with results (shown, visits, rate) there. Ad videos are kept apart from the Space's videos and never appear in feeds or search. Viewers see the ad full-frame before the video starts, with a small *Sponsored* label, the business card with *Visit*, and *Skip* after 5 seconds; the video does not start until the ad is known (at most 1.5 seconds). Each campaign is reviewed by an administrator before it runs |
+| **Video ads** | $3 a day | Businesses | A 5–90 second video ad playing before videos of monetised creators, in the countries they choose, with a "Visit" button; uploaded and run from **Ad Studio** (`/studio/ads`, part of Premium), with results (shown, visits, rate) there. Ad videos are kept apart from the Space's videos and never appear in feeds or search. Viewers see the ad full-frame before the video starts, with a small *Sponsored* label, the business card with *Visit*, and *Skip* after 5 seconds; the video does not start until the ad is known (at most 1.5 seconds). Advertisers need Premium, a channel badge and a business registration checked by an administrator before a campaign runs |
 
 ## The rules for ads
 
-- Ads play **only on videos of monetised creators** (creators approved after applying).
-- To apply, creators need 250 active followers, 2,000 public views, 100 public watch hours and 100 public Sparks. Activity metrics use the last 90 days. Administrators review applications before ads can run.
+- Ads play **only on public videos of monetised creators** (creators approved after applying).
+- To apply, creators need 1,000 active followers, 10,000 public video views, 50,000 public Moments views, 4,000 public watch hours on regular videos, and 10,000 public Sparks. Activity metrics use the last 90 days. Administrators review applications before ads can run.
 - **At most 2 ads per video**: one before it, and one halfway through videos of 8 minutes or more. Never on Moments.
 - Viewers can skip after 5 seconds. A viewer is counted once per ad and video every 30 minutes, so creators cannot inflate their share by replaying.
 
@@ -40,3 +40,5 @@ Premium is the steadier income: 1,000 members bring $10,000 a month. That pays f
 **Is $3 a day right?** Video ads in East Africa sell for roughly $2.50–3.50 per 1,000 views (CPM). At $3 a day, a business pays the same as about 1,000 views a day, and with more viewers on Free Me each campaign is worth more to them. When a campaign regularly shows far more than 1,000 times a day, raise the daily price (`AD_PRICE_PER_DAY_USD_CENTS`) or sell more, shorter slots. When creators' share of a day rises, every monetised creator earns more.
 
 The Monetisation tab in Creator Hub has a calculator with the same formula.
+
+Free creators can upload files up to 2 GiB with a 10 GiB original-video allowance. Premium allows up to 100 GiB per file and 500 GiB of original-video storage, subject to the server’s configured file limit. The browser uploader uses up to two parallel parts on Free and six on Premium.

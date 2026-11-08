@@ -63,12 +63,13 @@ export class HubController {
   @Get()
   @ApiOperation({ summary: 'My videos, newest first' })
   async list(@CurrentAuth() auth: AuthContext, @Query('cursor') cursor?: string, @Query('status') status?: string, @Query('ads') ads?: string) {
+    const channel = await this.prisma.channel.findUnique({ where: { userId: auth.user.id }, select: { eligibility: { select: { isEligible: true } } } });
     const rows = await this.prisma.video.findMany({
       // Ads live in Ad Studio (?ads=true), not with the Space's videos.
       where: { channel: { userId: auth.user.id }, isAd: ads === 'true', ...(status === 'UPLOADING' ? { status: 'UPLOADING' } : {}) },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 31, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), include: { category: true, renditions: { select: { resolution: true, width: true, height: true } } },
     });
-    return { videos: await Promise.all(rows.slice(0, 30).map((v) => this.view(v))), nextCursor: rows.length > 30 ? rows[29].id : null };
+    return { videos: await Promise.all(rows.slice(0, 30).map(async (v) => ({ ...await this.view(v), monetised: !!channel?.eligibility?.isEligible && v.status === 'READY' && v.visibility === 'PUBLIC' && !v.takenDownAt && !v.isAd && !v.isShort }))), nextCursor: rows.length > 30 ? rows[29].id : null };
   }
 
   @Get(':id')

@@ -11,7 +11,6 @@ export interface UploadSnapshot {
 }
 
 const INITIAL_PARALLEL = 4;
-const MAX_PARALLEL = 6;
 const SAMPLE_PARTS = 12;
 const URL_BATCH = 20;
 const STORE = 'fm_uploads';
@@ -29,6 +28,7 @@ export class VideoUpload {
   private snap: UploadSnapshot;
   private assembled = false;
   private partSize = 0;
+  private parallelLimit = 2;
   private partCount = 0;
   private done = new Set<number>();
   private completedBytes = 0;
@@ -103,11 +103,12 @@ export class VideoUpload {
         this.transferMs = 0;
         this.retries = 0;
         this.peakParallel = 0;
-        const r = await api<{ videoId: string; title: string; partSize: number; partCount: number }>('/uploads', { body: { fileName: this.file.name, sizeBytes: this.file.size, ...(this.options.ad ? { ad: true } : {}) } });
+        const r = await api<{ videoId: string; title: string; partSize: number; partCount: number; parallelLimit?: number }>('/uploads', { body: { fileName: this.file.name, sizeBytes: this.file.size, ...(this.options.ad ? { ad: true } : {}) } });
         if (this.snap.state === 'cancelled') {
           await api(`/uploads/${r.videoId}`, { method: 'DELETE', body: {} });
           return;
         }
+        this.parallelLimit = r.parallelLimit ?? 2;
         this.partSize = r.partSize; this.partCount = r.partCount;
         if (!this.compressed) remember(this.resumeKey, r.videoId);
         this.set({ videoId: r.videoId, title: r.title });
@@ -122,7 +123,7 @@ export class VideoUpload {
     return n;
   }
   private async restore(id: string) {
-    const state = await api<{ status: string; partSize?: number; sizeBytes?: number; isAd: boolean; assembled?: boolean; parts: Array<{ partNumber: number; size: number }> }>(`/uploads/${id}`).catch((error: unknown) => {
+    const state = await api<{ status: string; partSize?: number; parallelLimit?: number; sizeBytes?: number; isAd: boolean; assembled?: boolean; parts: Array<{ partNumber: number; size: number }> }>(`/uploads/${id}`).catch((error: unknown) => {
       if (error instanceof ApiError && error.status === 404) return null;
       throw error;
     });
@@ -137,6 +138,7 @@ export class VideoUpload {
       return 'done';
     }
     if (state.status !== 'UPLOADING' || state.sizeBytes !== this.file.size || !state.partSize) return 'missing';
+    this.parallelLimit = state.parallelLimit ?? 2;
     this.partSize = state.partSize;
     this.partCount = Math.ceil(this.file.size / this.partSize);
     this.assembled = state.assembled === true;
@@ -197,7 +199,7 @@ export class VideoUpload {
     const started = performance.now();
     const active = new Set<Promise<void>>();
     let next = 0;
-    let parallel = INITIAL_PARALLEL;
+    let parallel = Math.min(INITIAL_PARALLEL, this.parallelLimit);
     let baseline = 0;
     let settled = false;
     let sampleStart = started;
@@ -226,7 +228,7 @@ export class VideoUpload {
       if (baseline && rate < baseline * 1.1) {
         parallel--;
         settled = true;
-      } else if (parallel < MAX_PARALLEL) {
+      } else if (parallel < this.parallelLimit) {
         parallel++;
         baseline = rate;
       } else {

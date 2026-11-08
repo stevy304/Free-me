@@ -67,15 +67,25 @@ export class UploadsController {
     const ext = extname(body.fileName).toLowerCase();
     const type = VIDEO_TYPES[ext];
     if (!type) throw new BadRequestException(`This file type is not supported. Upload ${Object.keys(VIDEO_TYPES).map((e) => e.slice(1).toUpperCase()).join(', ')}.`);
-    if (body.sizeBytes > this.config.media.maxUploadBytes) throw new BadRequestException(`Videos can be up to ${Math.floor(this.config.media.maxUploadBytes / 1024 ** 3)} GB.`);
-    const open = await this.prisma.video.count({ where: { channelId: channel.id, status: 'UPLOADING' } });
-    if (open >= 20) throw new ConflictException('Finish or cancel your unfinished uploads first.');
+    const premium = hasPremiumAccess(auth.user);
+    const maxFileBytes = Math.min(this.config.media.maxUploadBytes, (premium ? 100 : 2) * 1024 ** 3);
+    const maxStorageBytes = BigInt(premium ? 500 : 10) * 1024n ** 3n;
+    if (body.sizeBytes > maxFileBytes) throw new BadRequestException(`Your plan allows up to ${maxFileBytes / 1024 ** 3} GiB per video.`);
     const title = body.fileName.slice(0, body.fileName.length - ext.length).replace(/[_]+/g, ' ').trim().slice(0, 100) || 'Untitled video';
     const partSize = this.config.media.driver === 's3' && body.sizeBytes >= 4 * 1024 ** 3
       ? Math.max(this.config.media.partBytes, 64 * 1024 ** 2)
       : this.config.media.partBytes;
     if (body.ad && !hasPremiumAccess(auth.user)) throw new ForbiddenException('Ad Studio is part of Premium.');
-    const video = await this.prisma.video.create({ data: { channelId: channel.id, title, status: 'UPLOADING', visibility: body.ad ? 'UNLISTED' : 'PRIVATE', isAd: !!body.ad, sourceSizeBytes: BigInt(body.sizeBytes), uploadPartBytes: BigInt(partSize), processingStage: 'Uploading' } });
+    const video = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Channel" WHERE id = ${channel.id} FOR UPDATE`;
+      const open = await tx.video.count({ where: { channelId: channel.id, status: 'UPLOADING' } });
+      if (open >= (premium ? 20 : 3)) throw new ConflictException('Finish or cancel your unfinished uploads first.');
+      const usage = await tx.video.aggregate({ where: { channelId: channel.id }, _sum: { sourceSizeBytes: true } });
+      if ((usage._sum.sourceSizeBytes ?? 0n) + BigInt(body.sizeBytes) > maxStorageBytes) {
+        throw new BadRequestException(`Your ${premium ? 500 : 10} GiB original-video storage allowance is full.`);
+      }
+      return tx.video.create({ data: { channelId: channel.id, title, status: 'UPLOADING', visibility: body.ad ? 'UNLISTED' : 'PRIVATE', isAd: !!body.ad, sourceSizeBytes: BigInt(body.sizeBytes), uploadPartBytes: BigInt(partSize), processingStage: 'Uploading' } });
+    });
     const key = sourceKey(video.id, ext);
     let uploadId: string | undefined;
     try {
@@ -87,7 +97,7 @@ export class UploadsController {
       throw error;
     }
     await this.audit.record({ userId: auth.user.id, action: 'UPLOAD_STARTED', entityType: 'Video', entityId: video.id, req, details: { sizeBytes: body.sizeBytes, ext } });
-    return { videoId: video.id, title, partSize, partCount: Math.ceil(body.sizeBytes / partSize) };
+    return { videoId: video.id, title, partSize, parallelLimit: premium ? 6 : 2, partCount: Math.ceil(body.sizeBytes / partSize) };
   }
 
   @Get(':id')
@@ -101,7 +111,7 @@ export class UploadsController {
       throw error;
     });
     const assembled = parts.length === 0 && (await this.storage.head(key))?.size === Number(v.sourceSizeBytes);
-    return { videoId: v.id, status: v.status, isAd: v.isAd, assembled, sizeBytes: Number(v.sourceSizeBytes), partSize: Number(v.uploadPartBytes ?? this.config.media.partBytes), parts };
+    return { videoId: v.id, status: v.status, isAd: v.isAd, assembled, parallelLimit: hasPremiumAccess(auth.user) ? 6 : 2, sizeBytes: Number(v.sourceSizeBytes), partSize: Number(v.uploadPartBytes ?? this.config.media.partBytes), parts };
   }
 
   @Post(':id/parts')

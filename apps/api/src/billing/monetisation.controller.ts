@@ -16,6 +16,7 @@ class PayoutDto {
   @ApiProperty() @IsString() @Length(2, 100) accountHolderName!: string;
 }
 class ReviewDto {
+  @IsOptional() @IsBoolean() verifyBusiness?: boolean;
   @ApiProperty() @IsBoolean() approve!: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) note?: string;
   @ApiPropertyOptional({ description: 'Approve an unpaid ad without payment (a test, a partner or Free Me itself). It runs at $0 a day, so it adds nothing to the revenue shared with creators.' }) @IsOptional() @IsBoolean() free?: boolean;
@@ -34,18 +35,19 @@ class VerificationDto {
 
 const payoutView = (p: Payout) => ({ id: p.id, amountCents: Number(p.amountCents), currency: p.currency, method: p.method, account: p.accountIdentifier, accountHolderName: p.accountHolderName, status: p.status, reference: p.referenceTransactionId, rejectionReason: p.rejectionReason, requestedAt: p.requestedAt, processedAt: p.processedAt });
 
-const REQUIREMENTS = { followers: 250, views: 2_000, watchHours: 100, sparks: 100 };
+const REQUIREMENTS = { followers: 1_000, views: 10_000, momentViews: 50_000, watchHours: 4_000, sparks: 10_000 };
 
 async function eligibilityProgress(prisma: PrismaService, channelId: string, userId: string) {
   const since = new Date(Date.now() - 90 * 86_400_000);
   const publicVideo = { channelId, status: 'READY' as const, visibility: 'PUBLIC' as const, takenDownAt: null, isAd: false };
-  const [followers, stats, sparks, removals] = await Promise.all([
+  const [followers, stats, moments, sparks, removals] = await Promise.all([
     prisma.subscription.count({ where: { channelId, userId: { not: userId }, user: { status: 'ACTIVE' } } }),
-    prisma.videoDailyStat.aggregate({ where: { day: { gte: utcDay(since) }, video: publicVideo }, _sum: { views: true, watchSeconds: true } }),
+    prisma.videoDailyStat.aggregate({ where: { day: { gte: utcDay(since) }, video: { ...publicVideo, isShort: false } }, _sum: { views: true, watchSeconds: true } }),
+    prisma.videoDailyStat.aggregate({ where: { day: { gte: utcDay(since) }, video: { ...publicVideo, isShort: true } }, _sum: { views: true } }),
     prisma.like.count({ where: { createdAt: { gte: since }, isLike: true, userId: { not: userId }, user: { status: 'ACTIVE' }, video: publicVideo } }),
     prisma.video.count({ where: { channelId, takenDownAt: { gt: since } } }),
   ]);
-  const current = { followers, views: stats._sum.views ?? 0, watchHours: Number(stats._sum.watchSeconds ?? 0n) / 3600, sparks };
+  const current = { followers, views: stats._sum.views ?? 0, momentViews: moments._sum.views ?? 0, watchHours: Number(stats._sum.watchSeconds ?? 0n) / 3600, sparks };
   return { current, required: REQUIREMENTS, canApply: !removals && Object.entries(REQUIREMENTS).every(([key, minimum]) => current[key as keyof typeof current] >= minimum), recentRemovals: removals };
 }
 
@@ -206,24 +208,35 @@ export class AdminBillingController {
   async campaigns(@Query('status') status = 'PENDING_REVIEW') {
     const rows = await this.prisma.campaign.findMany({ where: status === 'all' ? {} : { status: status as never }, orderBy: { createdAt: 'desc' }, take: 100, include: { advertiser: { include: { user: { select: { email: true } } } } } });
     const videos = new Map((await this.prisma.video.findMany({ where: { id: { in: rows.map((r) => r.videoId!).filter(Boolean) } }, select: { id: true, title: true, durationSeconds: true } })).map((v) => [v.id, v]));
-    return { campaigns: rows.map((c) => ({ id: c.id, status: c.status, businessName: c.advertiser.businessName, email: c.advertiser.user.email, country: c.advertiser.country, headline: c.headline, destinationUrl: c.destinationUrl, days: c.days, totalCents: c.days * c.dailyRateCents, targetCountries: c.targetCountries, video: c.videoId ? videos.get(c.videoId) ?? null : null, impressions: Number(c.impressionsCount), clicks: Number(c.clicksCount), reviewNote: c.reviewNote, createdAt: c.createdAt })) };
+    return { campaigns: rows.map((c) => ({ id: c.id, status: c.status, businessName: c.advertiser.businessName, registrationNumber: c.advertiser.registrationNumber, businessVerified: c.advertiser.isVerified, email: c.advertiser.user.email, country: c.advertiser.country, headline: c.headline, destinationUrl: c.destinationUrl, days: c.days, totalCents: c.days * c.dailyRateCents, targetCountries: c.targetCountries, video: c.videoId ? videos.get(c.videoId) ?? null : null, impressions: Number(c.impressionsCount), clicks: Number(c.clicksCount), reviewNote: c.reviewNote, createdAt: c.createdAt })) };
   }
 
   @Post('campaigns/:id/review')
   @HttpCode(200)
   @ApiOperation({ summary: 'Approve (it starts now and runs for the days bought) or reject a paid campaign; or, with free, approve an unpaid one without payment' })
   async review(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: ReviewDto, @Req() req: AppRequest) {
-    const c = await this.prisma.campaign.findUnique({ where: { id } });
+    const c = await this.prisma.campaign.findUnique({ where: { id }, include: { advertiser: true } });
     if (!c) throw new NotFoundException('Campaign not found.');
     const free = body.free === true && body.approve;
     if (free ? c.status !== 'DRAFT' && c.status !== 'PENDING_REVIEW' : c.status !== 'PENDING_REVIEW') throw new BadRequestException(free ? 'Only an ad that is not running yet can be approved without payment.' : 'This campaign is not waiting for review.');
     if (!body.approve && !body.note?.trim()) throw new BadRequestException('Say why it is rejected; the business will see it.');
     const now = new Date();
-    await this.prisma.campaign.update({ where: { id }, data: body.approve
+    if (body.approve && (!c.advertiser.registrationNumber || (!c.advertiser.isVerified && !body.verifyBusiness))) {
+      throw new BadRequestException('Verify the business registration before approving the campaign.');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      // Match the reviewed registration to avoid approving a stale business profile.
+      if (body.approve) {
+        const verified = await tx.advertiser.updateMany({ where: { id: c.advertiserId, registrationNumber: c.advertiser.registrationNumber, businessName: c.advertiser.businessName, country: c.advertiser.country }, data: { isVerified: true } });
+        if (!verified.count) throw new BadRequestException('The business details changed. Review them again.');
+      }
+      const result = await tx.campaign.updateMany({ where: { id, status: c.status }, data: body.approve
       ? { status: 'ACTIVE', reviewedAt: now, startDate: now, endDate: new Date(now.getTime() + c.days * 86_400_000), reviewNote: body.note?.trim() || (free ? 'Approved without payment by Free Me' : null),
         // Unpaid: $0 a day, so no revenue (and nothing for creators) is counted for money that never came in.
         ...(free && c.status === 'DRAFT' ? { dailyRateCents: 0 } : {}) }
       : { status: 'REJECTED', reviewedAt: now, reviewNote: body.note!.trim() } });
+      if (!result.count) throw new BadRequestException('The campaign status changed. Refresh and try again.');
+    });
     await this.audit.record({ userId: auth.user.id, action: free ? 'AD_APPROVED_FREE' : body.approve ? 'AD_APPROVED' : 'AD_REJECTED', entityType: 'Campaign', entityId: id, req, details: { note: body.note ?? null } });
     return { ok: true };
   }

@@ -9,8 +9,10 @@ test('large S3 uploads keep the negotiated part size when the server configurati
   const video = { id: 'video', updatedAt: new Date(), uploadId: 'multipart', sourceFileS3Key: 'source' };
   const create = jest.fn(async ({ data }) => Object.assign(video, data));
   const prisma = {
+    $queryRaw: jest.fn(),
+    $transaction: async (fn: (tx: unknown) => unknown) => fn(prisma),
     channel: { findUnique: async () => ({ id: 'channel' }) },
-    video: { count: async () => 0, create, update: jest.fn(), findFirst: async () => video },
+    video: { count: async () => 0, aggregate: async () => ({ _sum: { sourceSizeBytes: 0n } }), create, update: jest.fn(), findFirst: async () => video },
   };
   const storage = {
     createMultipart: async () => 'multipart',
@@ -19,7 +21,8 @@ test('large S3 uploads keep the negotiated part size when the server configurati
     partUrl: async () => 'https://storage.test/part',
   };
   const uploads = new UploadsController(prisma as never, { record: jest.fn() } as never, { consume: jest.fn() } as never, {} as never, storage as never, config);
-  const auth = { user: { id: 'creator', createdAt: new Date(0) } } as AuthContext;
+  const auth = { user: { id: 'creator', createdAt: new Date(0), roles: [], premiumUntil: new Date(Date.now() + 3600000) } } as unknown as AuthContext;
+  await expect(uploads.start({ ...auth, user: { ...auth.user, premiumUntil: null } }, { fileName: 'video.mp4', sizeBytes }, {} as AppRequest)).rejects.toThrow('2 GiB per video');
   const start = await uploads.start(auth, { fileName: 'video.mp4', sizeBytes }, {} as AppRequest);
   expect(start).toMatchObject({ partSize: 64 * MiB, partCount: 1600 });
 
@@ -41,7 +44,7 @@ test('finalization leaves incorrectly sized parts available for retry', async ()
     completeMultipart: jest.fn(),
   };
   const uploads = new UploadsController(prisma as never, {} as never, {} as never, {} as never, storage as never, {} as AppConfig);
-  const auth = { user: { id: 'creator' } } as AuthContext;
+  const auth = { user: { id: 'creator' } } as unknown as AuthContext;
   await expect(uploads.complete(auth, video.id, {}, {} as AppRequest)).rejects.toThrow('Upload all 2 parts first.');
   expect(storage.completeMultipart).not.toHaveBeenCalled();
   expect(prisma.$transaction).not.toHaveBeenCalled();

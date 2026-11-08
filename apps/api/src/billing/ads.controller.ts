@@ -23,6 +23,7 @@ export const SKIP_AFTER_SECONDS = 5;
 
 class CampaignDto {
   @ApiProperty() @IsString() @Length(2, 100) businessName!: string;
+  @ApiProperty() @IsString() @Length(3, 80) registrationNumber!: string;
   @ApiProperty({ description: 'ISO 3166-1 alpha-2' }) @IsString() @Length(2, 2) country!: string;
   @ApiProperty({ description: 'Short line shown with the ad' }) @IsString() @Length(3, 90) headline!: string;
   @ApiProperty({ description: 'Where "Visit" leads (https)' }) @IsUrl({ protocols: ['https'], require_protocol: true }) destinationUrl!: string;
@@ -59,7 +60,7 @@ export class AdsController {
   async mine(@CurrentAuth() auth: AuthContext) {
     const adv = await this.prisma.advertiser.findUnique({ where: { userId: auth.user.id } });
     const rows = adv ? await this.prisma.campaign.findMany({ where: { advertiserId: adv.id }, orderBy: { createdAt: 'desc' }, include: { advertiser: true }, take: 100 }) : [];
-    return { business: adv ? { name: adv.businessName, country: adv.country } : null, campaigns: (await this.withVideos(rows)).map(campaignView) };
+    return { business: adv ? { name: adv.businessName, country: adv.country, registrationNumber: adv.registrationNumber, verified: adv.isVerified } : null, campaigns: (await this.withVideos(rows)).map(campaignView) };
   }
 
   @Post('ads/campaigns')
@@ -68,6 +69,8 @@ export class AdsController {
   async create(@CurrentAuth() auth: AuthContext, @Body() body: CampaignDto) {
     await this.limits.consume(`ads:create:${auth.user.id}`, 30, 3600);
     if (!hasPremiumAccess(auth.user)) throw new ForbiddenException('Ad Studio is part of Premium.');
+    if (!await this.prisma.channel.count({ where: { userId: auth.user.id, isVerified: true } })) throw new ForbiddenException('A verified channel badge is required to advertise.');
+    if (body.registrationNumber.trim().length < 3) throw new BadRequestException('Enter a valid business registration number.');
     if (!isCountryCode(body.country)) throw new BadRequestException('Choose your business country from the list.');
     const targets = [...new Set((body.targetCountries ?? []).map((c) => c.toUpperCase()))];
     if (targets.some((c) => !isCountryCode(c))) throw new BadRequestException('Choose target countries from the list.');
@@ -87,10 +90,14 @@ export class AdsController {
     }
     const rate = (await this.billing.settings()).adDayUsdCents;
     const c = await this.prisma.$transaction(async (tx) => {
+      const identity = { businessName: body.businessName.trim(), country: body.country.toUpperCase(), registrationNumber: body.registrationNumber.trim() };
       const adv = await tx.advertiser.upsert({
-        where: { userId: auth.user.id }, update: { businessName: body.businessName.trim(), country: body.country.toUpperCase() },
-        create: { userId: auth.user.id, businessName: body.businessName.trim(), country: body.country.toUpperCase(), businessType: 'business', currency: EARNINGS_CURRENCY },
+        where: { userId: auth.user.id }, update: {},
+        create: { userId: auth.user.id, ...identity, businessType: 'business', currency: EARNINGS_CURRENCY },
       });
+      if (adv.businessName !== identity.businessName || adv.country !== identity.country || adv.registrationNumber !== identity.registrationNumber) {
+        await tx.advertiser.update({ where: { id: adv.id }, data: { ...identity, isVerified: false } });
+      }
       if (!auth.user.roles.includes('ADVERTISER')) await tx.user.update({ where: { id: auth.user.id }, data: { roles: { set: [...auth.user.roles, 'ADVERTISER'] } } });
       const now = new Date();
       return tx.campaign.create({ data: {
@@ -152,10 +159,10 @@ export class AdsController {
   async forVideo(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
     const v = await this.prisma.video.findFirst({ where: { id, ...LINKED_VIDEO }, include: { channel: { include: { eligibility: true } } } });
     const now = new Date();
-    if (!v || v.isShort || v.isAd || !v.channel.eligibility?.isEligible) return { slots: [] };
+    if (!v || v.visibility !== 'PUBLIC' || v.isShort || v.isAd || !v.channel.eligibility?.isEligible) return { slots: [] };
     const country = await this.viewerCountry(auth, req);
     const candidates = await this.prisma.campaign.findMany({
-      where: { status: 'ACTIVE', startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, AND: [
+      where: { status: 'ACTIVE', advertiser: { isVerified: true }, startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, AND: [
         country ? { OR: [{ targetCountries: { isEmpty: true } }, { targetCountries: { has: country } }] } : { targetCountries: { isEmpty: true } },
         { OR: [{ targetVideoIds: { isEmpty: true }, targetChannelIds: { isEmpty: true } },
           ...(v.visibility === 'PUBLIC' ? [{ targetVideoIds: { has: id } }, { targetChannelIds: { has: v.channelId } }] : [])] },
@@ -179,10 +186,10 @@ export class AdsController {
   async impression(@Body() body: ImpressionDto, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
     const who = auth?.user.id ?? clientIp(req) ?? 'unknown';
     await this.limits.consume(`ads:imp:${who}`, 120, 86_400, 'Too many ads today.');
-    const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId } });
-    const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, isShort: false, isAd: false }, include: { channel: { include: { eligibility: true } } } });
+    const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId }, include: { advertiser: { select: { isVerified: true } } } });
+    const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, visibility: 'PUBLIC', isShort: false, isAd: false }, include: { channel: { include: { eligibility: true } } } });
     const now = new Date();
-    if (!c || !v || !v.channel.eligibility?.isEligible || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
+    if (!c?.advertiser.isVerified || !v || !v.channel.eligibility?.isEligible || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
     if ((c.targetVideoIds.length || c.targetChannelIds.length) &&
         (v.visibility !== 'PUBLIC' || (!c.targetVideoIds.includes(v.id) && !c.targetChannelIds.includes(v.channelId)))) return { impressionId: null };
     const country = await this.viewerCountry(auth, req);

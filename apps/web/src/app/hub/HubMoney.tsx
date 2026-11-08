@@ -7,8 +7,8 @@ import { api } from '@/lib/client-api';
 import { usd } from '@/lib/money';
 import { useShell } from '@/components/shell/ShellContext';
 
-type Metric = 'followers' | 'views' | 'watchHours' | 'sparks';
-const metrics: Record<Metric, string> = { followers: 'Followers', views: 'Public views', watchHours: 'Public watch hours', sparks: 'Sparks' };
+type Metric = 'followers' | 'views' | 'momentViews' | 'watchHours' | 'sparks';
+const metrics: Record<Metric, string> = { followers: 'Followers', views: 'Public video views', momentViews: 'Public Moments views', watchHours: 'Public watch hours', sparks: 'Sparks' };
 
 interface Money {
   eligibility: { current: Record<Metric, number>; required: Record<Metric, number>; canApply: boolean; pending: boolean; recentRemovals: number; rejectionReason: string | null };

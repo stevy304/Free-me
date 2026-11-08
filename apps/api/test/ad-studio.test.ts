@@ -41,14 +41,15 @@ test('before payments are switched on, an administrator approves an ad without p
   const shopCh = (await shop.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'shop', name: 'Shop' }).expect(201)).body.channel;
   await ctx.prisma.user.update({ where: { email: 'shop@example.com' }, data: { premiumUntil: new Date(Date.now() + 86_400_000) } });
   const ad = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Summer sale', isAd: true, durationSeconds: 15, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date() } });
-  const camp = (await shop.agent.post('/api/ads/campaigns').set('Origin', WEB).send({ businessName: 'Shop', country: 'RW', headline: 'Summer sale', destinationUrl: 'https://shop.example.com', videoId: ad.id, days: 3, targetCountries: [] }).expect(201)).body.campaign;
+  await ctx.prisma.channel.update({ where: { id: shopCh.id }, data: { isVerified: true } });
+  const camp = (await shop.agent.post('/api/ads/campaigns').set('Origin', WEB).send({ businessName: 'Shop', registrationNumber: 'RW-123456', country: 'RW', headline: 'Summer sale', destinationUrl: 'https://shop.example.com', videoId: ad.id, days: 3, targetCountries: [] }).expect(201)).body.campaign;
   expect(camp.status).toBe('DRAFT');
 
   // A creator in the monetisation programme, with a video.
   const maker = await signIn(ctx.http, ctx.mail, 'maker@example.com');
   const makerCh = (await maker.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'maker', name: 'Maker' }).expect(201)).body.channel;
   await ctx.prisma.user.update({ where: { email: 'maker@example.com' }, data: { premiumUntil: new Date(Date.now() + 86_400_000) } });
-  await maker.agent.post('/api/hub/monetisation/join').set('Origin', WEB).expect(200);
+  await ctx.prisma.creatorEligibility.create({ data: { channelId: makerCh.id, isEligible: true } });
   const v = await ctx.prisma.video.create({ data: { channelId: makerCh.id, title: 'Hills', durationSeconds: 120, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date() } });
   expect((await maker.agent.get(`/api/videos/${v.id}/ads`).expect(200)).body.slots).toEqual([]); // not approved yet
 
@@ -56,7 +57,7 @@ test('before payments are switched on, an administrator approves an ad without p
   await shop.agent.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true, free: true }).expect(403);
   await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(400); // unpaid: only "without payment"
   expect((await admin.get('/api/admin/billing/campaigns?status=DRAFT').expect(200)).body.campaigns.map((c: any) => c.id)).toEqual([camp.id]);
-  await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true, free: true }).expect(200);
+  await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true, free: true, verifyBusiness: true }).expect(200);
   const row = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: camp.id } });
   expect(row).toMatchObject({ status: 'ACTIVE', dailyRateCents: 0, days: 3, reviewNote: 'Approved without payment by Free Me' });
 
