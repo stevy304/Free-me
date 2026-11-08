@@ -1,0 +1,3 @@
+ALTER TABLE "Campaign"
+ADD COLUMN "targetVideoIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+ADD COLUMN "targetChannelIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

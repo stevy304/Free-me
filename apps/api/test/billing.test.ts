@@ -137,7 +137,7 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   const form = { businessName: 'Kigali Shop', country: 'RW', headline: 'Fresh coffee in Kigali', destinationUrl: 'https://shop.example.com', days: 7 };
   expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: tooLong.id }).expect(400)).body.message).toBe('An ad must be between 5 and 90 seconds long.');
   await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: short.id }).expect(400); // not theirs
-  const camp = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: adVideo.id }).expect(201)).body.campaign;
+  const camp = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: adVideo.id, targetVideoIds: [short.id] }).expect(201)).body.campaign;
   expect(camp).toMatchObject({ status: 'DRAFT', days: 7, dailyRateCents: 300, totalCents: 2100 });
 
   // Paid by MoMo (21 USD → 30,450 RWF), then waits for review.
@@ -157,8 +157,9 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   const slots = (await request(ctx.http).get(`/api/videos/${short.id}/ads`).expect(200)).body.slots;
   expect(slots).toEqual([{ at: 0, ad: expect.objectContaining({ campaignId: camp.id, businessName: 'Kigali Shop', headline: 'Fresh coffee in Kigali', skipAfterSeconds: 5, playbackUrl: expect.stringContaining(`${adVideo.id}/hls/master.m3u8`) }) }]);
   expect((await request(ctx.http).get(`/api/videos/${moment.id}/ads`).expect(200)).body.slots).toEqual([]);
-  // Only one campaign runs, so the long video gets one; a second campaign fills the halfway slot.
-  expect((await request(ctx.http).get(`/api/videos/${long.id}/ads`).expect(200)).body.slots.map((s: any) => s.at)).toEqual([0]);
+  // A targeted campaign cannot serve or count impressions outside its selected placements.
+  expect((await request(ctx.http).get(`/api/videos/${long.id}/ads`).expect(200)).body.slots).toEqual([]);
+  expect((await request(ctx.http).post('/api/ads/impressions').set('Origin', WEB).send({ campaignId: camp.id, videoId: long.id }).expect(201)).body.impressionId).toBeNull();
 
   // Impressions count once per viewer, campaign and video; a click is counted once.
   const viewer = request.agent(ctx.http);
@@ -168,6 +169,9 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   await viewer.post(`/api/ads/impressions/${imp}/events`).set('Origin', WEB).send({ type: 'CLICK', ms: 3000 }).expect(200);
   await viewer.post(`/api/ads/impressions/${imp}/events`).set('Origin', WEB).send({ type: 'CLICK', ms: 3500 }).expect(200);
   expect((await biz.get('/api/ads/campaigns').expect(200)).body.campaigns[0]).toMatchObject({ status: 'ACTIVE', impressions: 1, clicks: 1 });
+
+  const live = (await maker.get('/api/hub/monetisation/earn').expect(200)).body;
+  expect(live).toMatchObject({ impressions: 1, activity: [{ campaignId: camp.id, videoId: short.id, impressions: 1 }] });
 
   // Settlement: yesterday, the campaign ran all day ($3); the creator pool (60%) goes to the channel that showed it.
   const DAY = 86_400_000;

@@ -42,7 +42,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
   const [adVideos, setAdVideos] = useState<HubVideo[]>([]);
   const [spaceVideos, setSpaceVideos] = useState<HubVideo[]>([]);
   const [uploads, setUploads] = useState<Array<{ key: number; upload: VideoUpload; snap: UploadSnapshot }>>([]);
-  const [form, setForm] = useState({ businessName: '', country: viewer.profile?.country ?? null as string | null, headline: '', destinationUrl: 'https://', videoId: '', days: 7, target: null as string | null });
+  const [form, setForm] = useState({ businessName: '', country: viewer.profile?.country ?? null as string | null, headline: '', destinationUrl: 'https://', videoId: '', days: 7, placements: '', channels: '', target: null as string | null });
   const [creating, setCreating] = useState(false);
   const [paying, setPaying] = useState<Campaign | null>(null);
   const [busy, setBusy] = useState(false);
@@ -102,7 +102,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
   const create = async () => {
     setBusy(true); setError(null);
     try {
-      const r = await api<{ campaign: Campaign }>('/ads/campaigns', { body: { businessName: form.businessName, country: form.country, headline: form.headline, destinationUrl: form.destinationUrl, videoId: form.videoId, days: form.days, targetCountries: form.target ? [form.target] : [] } });
+      const r = await api<{ campaign: Campaign }>('/ads/campaigns', { body: { businessName: form.businessName, country: form.country, headline: form.headline, destinationUrl: form.destinationUrl, videoId: form.videoId, days: form.days, targetCountries: form.target ? [form.target] : [], targetVideoIds: form.placements.split(/[,\s]+/).filter(Boolean).map((value) => value.match(/\/watch\/([^/?#]+)/)?.[1] ?? value), targetChannelHandles: form.channels.split(/[,\s]+/).filter(Boolean) } });
       setCreating(false); setPaying(r.campaign); await load();
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
@@ -224,6 +224,9 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                     {!!spaceVideos.length && <optgroup label="From your Space">{spaceVideos.map((v) => <option key={v.id} value={v.id}>{v.title} ({duration(v.durationSeconds)})</option>)}</optgroup>}
                   </select>
                 </label>
+                <label className="block"><span className="text-[13px] font-semibold">Video placements</span><input className={`mt-1 ${inputClass}`} value={form.placements} onChange={(e) => setForm({ ...form, placements: e.target.value })} placeholder="Paste public video links or IDs" maxLength={4000} /></label>
+                <label className="block"><span className="text-[13px] font-semibold">Channel placements</span><input className={`mt-1 ${inputClass}`} value={form.channels} onChange={(e) => setForm({ ...form, channels: e.target.value })} placeholder="@channel, @another-channel" maxLength={1200} /></label>
+                <p className="text-sm text-muted sm:col-span-2">Separate placements with commas. Ads can appear on any selected video or channel, subject to the country filter. Leave both blank to reach all eligible content.</p>
                 <label className="block"><span className="text-[13px] font-semibold">Show it in</span><span className="mt-1 block"><CountrySelect value={form.target} onChange={(target) => setForm({ ...form, target })} emptyLabel="Every country" /></span></label>
                 <label className="block"><span className="text-[13px] font-semibold">Days: {form.days}</span>
                   <input type="range" min={1} max={90} value={form.days} onChange={(e) => setForm({ ...form, days: Number(e.target.value) })} className="mt-3 w-full accent-[var(--brand)]" />

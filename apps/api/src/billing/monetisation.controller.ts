@@ -69,6 +69,26 @@ export class MonetisationController {
     };
   }
 
+  @Get('earn')
+  async earn(@CurrentAuth() auth: AuthContext) {
+    const ch = await this.channel(auth);
+    const day = utcDay(new Date());
+    const [estimate, activity] = await Promise.all([
+      this.billing.adDayShares(day),
+      this.prisma.$queryRaw<Array<{ campaignId: string; campaign: string; videoId: string; video: string; impressions: bigint }>>`
+        SELECT c.id AS "campaignId", c.headline AS campaign, v.id AS "videoId", v.title AS video, count(*)::bigint AS impressions
+        FROM "AdImpression" i JOIN "Campaign" c ON c.id = i."campaignId" JOIN "Video" v ON v.id = i."videoId"
+        WHERE v."channelId" = ${ch.id} AND i."createdAt" >= ${day.toISOString()}::timestamp
+        GROUP BY c.id, v.id ORDER BY impressions DESC, c.id, v.id LIMIT 20`,
+    ]);
+    return {
+      day: day.toISOString().slice(0, 10),
+      estimatedCents: Number(estimate.shares[ch.id] ?? 0n),
+      impressions: Number(estimate.rows.find((row) => row.channelId === ch.id)?.n ?? 0n),
+      activity: activity.map((row) => ({ ...row, impressions: Number(row.impressions) })),
+    };
+  }
+
   @Post('join')
   @HttpCode(200)
   @ApiOperation({ summary: 'Join the monetisation programme (Premium members with no recent removals)' })

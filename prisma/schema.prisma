@@ -525,6 +525,8 @@ model Campaign {
   budgetAmountCents     BigInt            // minor units of `currency`
   spentAmountCents      BigInt            @default(0)
   targetCountries       String[]          // ISO 3166-1 alpha-2; empty = worldwide
+  targetVideoIds        String[]          @default([])
+  targetChannelIds      String[]          @default([])
   cpmRateCents          Int               @default(0) // cost per 1,000 impressions, minor units (0: priced per day)
   adCreativeUrl         String?           // Video or banner asset URL
   /// The ad itself: one of the business's own videos (public or unlisted, ready).
