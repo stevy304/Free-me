@@ -16,12 +16,20 @@ interface Money {
   payouts: Array<{ id: string; amountCents: number; account: string; status: string; reference: string | null; rejectionReason: string | null; requestedAt: string }>;
   programme: { creatorShareBps: number; adDayUsdCents: number; maxAdsPerVideo: number; payoutMinimumUsdCents: number; premiumUsdCents: number };
 }
+interface Earn {
+  day: string;
+  estimatedCents: number;
+  impressions: number;
+  activity: Array<{ campaignId: string; campaign: string; videoId: string; video: string; impressions: number }>;
+}
+
 const PAYOUT: Record<string, string> = { REQUESTED: 'On its way', UNDER_REVIEW: 'On its way', APPROVED: 'On its way', PAID: 'Sent', REJECTED: 'Returned to balance' };
 
 /** Creator Hub → Monetisation: joining (Premium members), balance, daily earnings, withdrawals to MoMo, and how the money is shared. */
 export function HubMoney() {
   const { locale } = useShell();
   const [m, setM] = useState<Money | null>(null);
+  const [earn, setEarn] = useState<Earn | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [phone, setPhone] = useState('');
@@ -32,6 +40,22 @@ export function HubMoney() {
 
   const load = useCallback(async () => { try { setM(await api<Money>('/hub/monetisation')); } catch (e) { setError((e as Error).message); } }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!m?.joined) return;
+    let active = true;
+    const refresh = async () => {
+      if (document.visibilityState === 'hidden') return;
+      try {
+        const next = await api<Earn>('/hub/monetisation/earn');
+        if (active) setEarn(next);
+      } catch {
+        if (active) setEarn(null);
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 15_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [m?.joined]);
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); setError(null); try { await fn(); await load(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
 
   if (!m) return error ? <p role="alert" className="mt-6 rounded-xl bg-danger/10 px-4 py-3 text-danger">{error}</p> : <Icon.Spinner className="mx-auto mt-10 animate-spin text-muted" />;
@@ -63,6 +87,24 @@ export function HubMoney() {
       ) : (
         <>
           {!m.earning && <p className="rounded-2xl bg-accent-soft px-4 py-3 text-[14px] text-on-accent-soft">Your Premium membership has ended, so ads are not playing on your videos. <Link href="/premium" className="font-bold underline">Renew Premium</Link> to earn again; your balance stays yours.</p>}
+          <section className="rounded-3xl border border-line bg-elevated p-5 sm:p-6" aria-labelledby="earn-heading">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 id="earn-heading" className="font-display text-xl font-bold">Earn</h3>
+              {earn && <span className="rounded-full bg-brand/10 px-3 py-1 text-sm font-semibold text-brand">Live estimate</span>}
+            </div>
+            {earn ? (
+              <>
+                <p className="mt-3 font-display text-3xl font-extrabold tabular-nums">{usd(earn.estimatedCents, locale)}</p>
+                <p className="text-sm text-muted">Estimated ad earnings · {earn.impressions.toLocaleString(locale)} ads shown · {earn.day} UTC</p>
+                <p className="mt-1 text-sm text-muted">Your estimate uses today’s {pct}% creator pool and can change before daily settlement.</p>
+                <h4 className="mt-5 font-semibold">Campaign activity</h4>
+                {earn.activity.length ? <div className="overflow-x-auto"><table className="mt-2 w-full text-left text-sm">
+                  <thead className="text-muted"><tr><th scope="col" className="py-2 pr-3">Campaign</th><th scope="col" className="py-2 pr-3">Video placement</th><th scope="col" className="py-2 text-right">Ads shown</th></tr></thead>
+                  <tbody className="divide-y divide-line">{earn.activity.map((row) => <tr key={`${row.campaignId}:${row.videoId}`}><td className="py-2 pr-3">{row.campaign}</td><td className="py-2 pr-3">{row.video}</td><td className="py-2 text-right tabular-nums">{row.impressions.toLocaleString(locale)}</td></tr>)}</tbody>
+                </table></div> : <p className="mt-1 text-sm text-muted">No ad activity today.</p>}
+              </>
+            ) : <p className="mt-2 text-sm text-muted">Live earnings are currently unavailable.</p>}
+          </section>
           <div className="grid gap-3 sm:grid-cols-4">
             {[['Available', m.balance.availableCents], ['Earned in total', m.balance.lifetimeCents], ['Withdrawn', m.balance.withdrawnCents]].map(([l, v]) => (
               <div key={l as string} className="rounded-3xl border border-line bg-elevated p-5"><p className="text-[13px] text-muted">{l}</p><p className="font-display text-[26px] font-extrabold tabular-nums">{usd(v as number, locale)}</p></div>

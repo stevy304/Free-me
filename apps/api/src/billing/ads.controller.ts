@@ -29,13 +29,15 @@ class CampaignDto {
   @ApiProperty({ description: 'One of your own videos, public or unlisted, 5–90 seconds' }) @IsUUID() videoId!: string;
   @ApiProperty({ minimum: 1, maximum: 90 }) @IsInt() @Min(1) @Max(90) days!: number;
   @ApiPropertyOptional({ description: 'Countries to show it in; empty = everywhere' }) @IsOptional() @IsArray() @ArrayMaxSize(50) @IsString({ each: true }) targetCountries?: string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsUUID(undefined, { each: true }) targetVideoIds?: string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @Length(1, 50, { each: true }) targetChannelHandles?: string[];
 }
 class ImpressionDto { @ApiProperty() @IsUUID() campaignId!: string; @ApiProperty() @IsUUID() videoId!: string }
 class AdEventDto { @ApiProperty({ enum: ['COMPLETE', 'SKIP', 'CLICK'] }) @IsIn(['COMPLETE', 'SKIP', 'CLICK']) type!: string; @ApiProperty() @IsInt() @Min(0) @Max(3_600_000) ms!: number }
 
 const campaignView = (c: Campaign & { advertiser: Advertiser; video?: Pick<Video, 'id' | 'title' | 'durationSeconds'> | null }) => ({
   id: c.id, status: c.status, businessName: c.advertiser.businessName, headline: c.headline, destinationUrl: c.destinationUrl, days: c.days,
-  dailyRateCents: c.dailyRateCents, totalCents: c.days * c.dailyRateCents, currency: c.currency, targetCountries: c.targetCountries,
+  dailyRateCents: c.dailyRateCents, totalCents: c.days * c.dailyRateCents, currency: c.currency, targetCountries: c.targetCountries, targetVideoIds: c.targetVideoIds, targetChannelIds: c.targetChannelIds,
   startDate: c.reviewedAt ? c.startDate : null, endDate: c.reviewedAt ? c.endDate : null, reviewNote: c.reviewNote,
   impressions: Number(c.impressionsCount), clicks: Number(c.clicksCount), video: c.video ? { id: c.video.id, title: c.video.title, durationSeconds: c.video.durationSeconds } : null, createdAt: c.createdAt,
 });
@@ -74,6 +76,15 @@ export class AdsController {
     if (v.status !== 'READY' || v.takenDownAt) throw new BadRequestException('The ad video must have finished processing.');
     if (v.visibility === 'PRIVATE') throw new BadRequestException('Make the ad video Unlisted (or Public) so viewers can play it.');
     if (v.durationSeconds < AD_MIN_SECONDS || v.durationSeconds > AD_MAX_SECONDS) throw new BadRequestException(`An ad must be between ${AD_MIN_SECONDS} and ${AD_MAX_SECONDS} seconds long.`);
+    const targetVideoIds = [...new Set(body.targetVideoIds ?? [])];
+    const handles = [...new Set((body.targetChannelHandles ?? []).map((h) => h.trim().toLowerCase().replace(/^@/, '')))];
+    const [videoCount, channels] = await Promise.all([
+      this.prisma.video.count({ where: { id: { in: targetVideoIds, not: v.id }, ...LINKED_VIDEO, visibility: 'PUBLIC', isAd: false, isShort: false } }),
+      this.prisma.channel.findMany({ where: { handle: { in: handles } }, select: { id: true } }),
+    ]);
+    if (videoCount !== targetVideoIds.length || channels.length !== handles.length) {
+      throw new BadRequestException('Choose existing public videos and valid channel handles for ad placements.');
+    }
     const rate = (await this.billing.settings()).adDayUsdCents;
     const c = await this.prisma.$transaction(async (tx) => {
       const adv = await tx.advertiser.upsert({
@@ -84,7 +95,7 @@ export class AdsController {
       const now = new Date();
       return tx.campaign.create({ data: {
         advertiserId: adv.id, name: body.headline.trim(), headline: body.headline.trim(), destinationUrl: body.destinationUrl, videoId: v.id, days: body.days, dailyRateCents: rate,
-        currency: EARNINGS_CURRENCY, budgetAmountCents: BigInt(rate * body.days), targetCountries: targets, startDate: now, endDate: now,
+        currency: EARNINGS_CURRENCY, budgetAmountCents: BigInt(rate * body.days), targetCountries: targets, targetVideoIds, targetChannelIds: channels.map((ch) => ch.id), startDate: now, endDate: now,
       }, include: { advertiser: true } });
     });
     return { campaign: campaignView({ ...c, video: v }) };
@@ -130,17 +141,25 @@ export class AdsController {
     return { deleted: true };
   }
 
+  private async viewerCountry(auth: AuthContext | null, req: AppRequest) {
+    const profile = auth ? await this.prisma.profile.findUnique({ where: { userId: auth.user.id }, select: { country: true } }) : null;
+    const header = req.headers['cf-ipcountry'];
+    return (profile?.country ?? (typeof header === 'string' && /^[A-Z]{2}$/.test(header) ? header : null))?.toUpperCase() ?? null;
+  }
+
   @Get('videos/:id/ads')
   @ApiOperation({ summary: 'Ads to play with this video: none, one before it, or also one halfway (at most two)' })
   async forVideo(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
     const v = await this.prisma.video.findFirst({ where: { id, ...LINKED_VIDEO }, include: { channel: { include: { eligibility: true, user: { select: { premiumUntil: true, roles: true } } } } } });
     const now = new Date();
-    if (!v || v.isShort || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now)) return { slots: [] };
-    const profile = auth ? await this.prisma.profile.findUnique({ where: { userId: auth.user.id }, select: { country: true } }) : null;
-    const header = req.headers['cf-ipcountry'];
-    const country = (profile?.country ?? (typeof header === 'string' && /^[A-Z]{2}$/.test(header) ? header : null))?.toUpperCase() ?? null;
+    if (!v || v.isShort || v.isAd || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now)) return { slots: [] };
+    const country = await this.viewerCountry(auth, req);
     const candidates = await this.prisma.campaign.findMany({
-      where: { status: 'ACTIVE', startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, ...(country ? { OR: [{ targetCountries: { isEmpty: true } }, { targetCountries: { has: country } }] } : { targetCountries: { isEmpty: true } }) },
+      where: { status: 'ACTIVE', startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, AND: [
+        country ? { OR: [{ targetCountries: { isEmpty: true } }, { targetCountries: { has: country } }] } : { targetCountries: { isEmpty: true } },
+        { OR: [{ targetVideoIds: { isEmpty: true }, targetChannelIds: { isEmpty: true } },
+          ...(v.visibility === 'PUBLIC' ? [{ targetVideoIds: { has: id } }, { targetChannelIds: { has: v.channelId } }] : [])] },
+      ] },
       include: { advertiser: true }, take: 50,
     });
     const ads = await this.prisma.video.findMany({ where: { id: { in: candidates.map((c) => c.videoId!).filter(Boolean) }, ...LINKED_VIDEO, mediaLocation: 'PUBLIC' } });
@@ -161,14 +180,18 @@ export class AdsController {
     const who = auth?.user.id ?? clientIp(req) ?? 'unknown';
     await this.limits.consume(`ads:imp:${who}`, 120, 86_400, 'Too many ads today.');
     const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId } });
-    const v = await this.prisma.video.findUnique({ where: { id: body.videoId }, select: { id: true } });
+    const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, isShort: false, isAd: false }, include: { channel: { include: { eligibility: true, user: true } } } });
     const now = new Date();
-    if (!c || !v || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
+    if (!c || !v || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now) || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
+    if ((c.targetVideoIds.length || c.targetChannelIds.length) &&
+        (v.visibility !== 'PUBLIC' || (!c.targetVideoIds.includes(v.id) && !c.targetChannelIds.includes(v.channelId)))) return { impressionId: null };
+    const country = await this.viewerCountry(auth, req);
+    if (c.targetCountries.length && (!country || !c.targetCountries.includes(country))) return { impressionId: null };
     const { count } = await this.redis.hit(`ads:seen:${who}:${c.id}:${v.id}`, 1800);
     if (count > 1) return { impressionId: null };
     const imp = await this.prisma.$transaction(async (tx) => {
       await tx.campaign.update({ where: { id: c.id }, data: { impressionsCount: { increment: 1 } } });
-      return tx.adImpression.create({ data: { campaignId: c.id, videoId: v.id, viewerCountry: null, watchedDurationMs: 0, currency: c.currency, costChargedCents: 0, creatorShareCents: 0, platformShareCents: 0, reinvestShareCents: 0 } });
+      return tx.adImpression.create({ data: { campaignId: c.id, videoId: v.id, viewerCountry: country, watchedDurationMs: 0, currency: c.currency, costChargedCents: 0, creatorShareCents: 0, platformShareCents: 0, reinvestShareCents: 0 } });
     });
     return { impressionId: imp.id };
   }

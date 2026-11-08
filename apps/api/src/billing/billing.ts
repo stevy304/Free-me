@@ -230,7 +230,7 @@ export class Billing {
     return settled;
   }
 
-  private async settleDay(day: Date) {
+  async adDayShares(day: Date) {
     const end = new Date(day.getTime() + DAY);
     const campaigns = await this.prisma.campaign.findMany({ where: { reviewedAt: { not: null }, status: { in: ['ACTIVE', 'COMPLETED', 'PAUSED'] }, startDate: { lt: end }, endDate: { gt: day } } });
     let gross = 0n;
@@ -242,8 +242,13 @@ export class Billing {
     const rows = await this.prisma.$queryRaw<Array<{ channelId: string; n: bigint }>>`
       SELECT v."channelId", count(*)::bigint AS n FROM "AdImpression" i JOIN "Video" v ON v.id = i."videoId"
       JOIN "CreatorEligibility" e ON e."channelId" = v."channelId" AND e."isEligible"
-      WHERE i."createdAt" >= ${day} AND i."createdAt" < ${end} GROUP BY v."channelId"`;
+      WHERE i."createdAt" >= ${day.toISOString()}::timestamp AND i."createdAt" < ${end.toISOString()}::timestamp GROUP BY v."channelId"`;
     const shares = allocatePool(rows.length ? split.creatorPool : 0n, Object.fromEntries(rows.map((r) => [r.channelId, r.n])));
+    return { gross, split, rows, shares };
+  }
+
+  private async settleDay(day: Date) {
+    const { gross, split, rows, shares } = await this.adDayShares(day);
     const label = day.toISOString().slice(0, 10);
     await this.prisma.$transaction(async (tx) => {
       await tx.adDaySettlement.create({ data: {
