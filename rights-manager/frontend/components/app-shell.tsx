@@ -7,17 +7,22 @@ import { Bell, LogOut, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { when } from "@/components/shared";
+import { UploadTray } from "@/components/upload-tray";
 import { api, type Notification } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useData } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/dashboard", label: "Dashboard" },
+  { href: "/go-live", label: "Go Live" },
   { href: "/upload", label: "Upload" },
+  { href: "/studio/videos", label: "Videos" },
+  { href: "/dashboard", label: "Protect" },
+  { href: "/check", label: "Check" },
   { href: "/matches", label: "Matches" },
   { href: "/disputes", label: "Disputes" },
 ];
+const ADMIN_NAV = [{ href: "/admin", label: "Admin" }];
 
 function Notifications() {
   const [open, setOpen] = useState(false);
@@ -62,6 +67,17 @@ function Notifications() {
   );
 }
 
+/** Pages that need an account and draw their own frame (the live control room). */
+export function RequireAuth({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+  useEffect(() => {
+    if (!loading && !user) router.replace("/login");
+  }, [loading, user, router]);
+  if (loading || !user) return <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-sm text-zinc-400">Loading…</div>;
+  return <>{children}</>;
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading, signOut } = useAuth();
   const path = usePathname();
@@ -83,11 +99,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <ShieldCheck className="h-5 w-5 text-primary" /> <span className="hidden sm:inline">Rights Manager</span>
           </Link>
           <nav className="flex flex-1 items-center gap-1 overflow-x-auto">
-            {NAV.map((n) => (
+            {[...NAV, ...(user.role === "admin" ? ADMIN_NAV : [])].map((n) => (
               <Link
                 key={n.href}
                 href={n.href}
-                className={cn("rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground", path.startsWith(n.href) && "bg-secondary text-foreground")}
+                className={cn("rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground", (path === n.href || path.startsWith(n.href + "/")) && "bg-secondary text-foreground")}
               >
                 {n.label}
               </Link>
@@ -102,6 +118,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <main className="container py-8">{children}</main>
+      <UploadTray />
     </div>
   );
 }

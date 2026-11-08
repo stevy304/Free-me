@@ -16,6 +16,10 @@ opencv-python-headless==4.10.0.84
 pytesseract==0.3.13
 pydantic-settings==2.6.1
 email-validator==2.2.0
+boto3==1.43.126
+pyzmq==27.3.0
+psutil==7.2.2
+requests==2.34.2
+httpx==0.28.1
 # tests
 pytest==8.3.4
-httpx==0.28.1

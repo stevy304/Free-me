@@ -1,0 +1,9 @@
+{
+  "name": "platform-rtmp",
+  "private": true,
+  "version": "1.0.0",
+  "description": "RTMP ingest (Node-Media-Server). Every publish is checked by the API before it is accepted.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "node-media-server": "2.7.4" }
+}

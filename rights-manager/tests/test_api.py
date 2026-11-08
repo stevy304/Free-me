@@ -38,9 +38,9 @@ def add_reference(c, h, path, policy="Block", title="Original"):
 
 def check(c, h, path, title="My video"):
     with open(path, "rb") as f:
-        r = c.post("/api/uploads", headers=h, data={"title": title}, files={"file": (path.name, f, "video/mp4")})
+        r = c.post("/api/checks", headers=h, data={"title": title}, files={"file": (path.name, f, "video/mp4")})
     assert r.status_code == 202, r.text
-    up = c.get(f"/api/uploads/{r.json()['id']}", headers=h).json()  # what the page polls every 2 s
+    up = c.get(f"/api/checks/{r.json()['id']}", headers=h).json()  # what the page polls every 2 s
     assert up["status"] != "Processing"
     return up
 
@@ -67,12 +67,12 @@ def test_reference_is_fingerprinted_and_listed(client, videos):
 
 def test_file_type_and_size_limits(client, videos):
     h = account(client, "maker")
-    assert client.post("/api/uploads", headers=h, files={"file": ("a.avi", b"x" * 10, "video/x-msvideo")}).status_code == 415
+    assert client.post("/api/checks", headers=h, files={"file": ("a.avi", b"x" * 10, "video/x-msvideo")}).status_code == 415
     s = get_settings()
     before, s.max_upload_mb = s.max_upload_mb, 0
     try:
         with open(videos["original"], "rb") as f:
-            assert client.post("/api/uploads", headers=h, files={"file": ("a.mp4", f, "video/mp4")}).status_code == 413
+            assert client.post("/api/checks", headers=h, files={"file": ("a.mp4", f, "video/mp4")}).status_code == 413
     finally:
         s.max_upload_mb = before
     bad = check(client, h, _broken(videos))
@@ -133,7 +133,7 @@ def test_flag_policy_goes_to_admin_review(client, videos):
     assert [q["upload_id"] for q in queue] == [up["id"]]
     assert client.post(f"/api/matches/{queue[0]['id']}/review", headers=owner, json={"action": "approve"}).status_code == 403
     assert client.post(f"/api/matches/{queue[0]['id']}/review", headers=admin, json={"action": "approve", "note": "Licensed"}).status_code == 200
-    assert client.get(f"/api/uploads/{up['id']}", headers=u).json()["status"] == "Approved"
+    assert client.get(f"/api/checks/{up['id']}", headers=u).json()["status"] == "Approved"
     assert client.get("/api/matches/review", headers=admin).json() == []
 
 
@@ -162,7 +162,7 @@ def test_dispute_released_by_creator(client, videos):
     assert client.post(f"/api/disputes/{d['id']}/respond", headers=u, json={"action": "release", "response": "Not mine to release"}).status_code == 403
     r = client.post(f"/api/disputes/{d['id']}/respond", headers=owner, json={"action": "release", "response": "Yes, they have a licence."}).json()
     assert r["status"] == "Approved"
-    assert client.get(f"/api/uploads/{up['id']}", headers=u).json()["status"] == "Approved"
+    assert client.get(f"/api/checks/{up['id']}", headers=u).json()["status"] == "Approved"
     assert [x["action"] for x in client.get(f"/api/disputes/{d['id']}/log", headers=u).json()] == ["opened", "creator_released"]
 
 
@@ -178,7 +178,7 @@ def test_dispute_upheld_then_admin_decides(client, videos):
     assert [x["id"] for x in client.get("/api/disputes?status=Pending", headers=admin).json()] == [d["id"]]
     r = client.post(f"/api/disputes/{d['id']}/decide", headers=admin, json={"approve": False, "admin_note": "Full copy, no commentary."}).json()
     assert r["status"] == "Rejected" and r["admin_note"] == "Full copy, no commentary."
-    assert client.get(f"/api/uploads/{up['id']}", headers=u).json()["status"] == "Blocked"
+    assert client.get(f"/api/checks/{up['id']}", headers=u).json()["status"] == "Blocked"
     assert client.post(f"/api/disputes/{d['id']}/decide", headers=admin, json={"approve": True, "admin_note": "Changed my mind"}).status_code == 409
     log = client.get(f"/api/disputes/{d['id']}/log", headers=owner).json()
     assert [(x["action"], x["actor"]) for x in log] == [("opened", "uploader"), ("creator_upheld", "maker"), ("admin_rejected", "boss")]
@@ -193,4 +193,4 @@ def test_admin_approves_dispute(client, videos):
     up = check(client, u, videos["copy"])
     d = client.post("/api/disputes", headers=u, json={"match_id": up["match_id"], "reason": "I am the original author."}).json()
     client.post(f"/api/disputes/{d['id']}/decide", headers=admin, json={"approve": True, "admin_note": "Proof of authorship provided."})
-    assert client.get(f"/api/uploads/{up['id']}", headers=u).json()["status"] == "Approved"
+    assert client.get(f"/api/checks/{up['id']}", headers=u).json()["status"] == "Approved"

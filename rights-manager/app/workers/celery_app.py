@@ -3,7 +3,7 @@ from celery import Celery
 from app.config import get_settings
 
 s = get_settings()
-celery = Celery("rights_manager", broker=s.redis_url, backend=s.redis_url, include=["app.workers.tasks"])
+celery = Celery("rights_manager", broker=s.redis_url, backend=s.redis_url, include=["app.workers.tasks", "app.workers.upload_tasks", "app.workers.transcode_tasks"])
 celery.conf.update(
     task_acks_late=True,  # a worker that dies mid-video gives the job back
     worker_prefetch_multiplier=1,  # videos are long jobs: take one at a time
