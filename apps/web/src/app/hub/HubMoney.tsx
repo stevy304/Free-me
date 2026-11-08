@@ -1,15 +1,17 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import * as Icon from '@/components/icons';
 import { inputClass } from '@/components/Pickers';
-import { VerifiedBadge } from '@/components/VerifiedBadge';
 import { api } from '@/lib/client-api';
 import { usd } from '@/lib/money';
 import { useShell } from '@/components/shell/ShellContext';
 
+type Metric = 'followers' | 'views' | 'watchHours' | 'sparks';
+const metrics: Record<Metric, string> = { followers: 'Followers', views: 'Public views', watchHours: 'Public watch hours', sparks: 'Sparks' };
+
 interface Money {
+  eligibility: { current: Record<Metric, number>; required: Record<Metric, number>; canApply: boolean; pending: boolean; recentRemovals: number; rejectionReason: string | null };
   premium: { active: boolean; until: string | null }; joined: boolean; joinedAt: string | null; earning: boolean;
   balance: { currency: string; availableCents: number; lifetimeCents: number; withdrawnCents: number }; adsShownLast28Days: number;
   earnings: Array<{ id: string; kind: string; amountCents: number; day: string | null; description: string; at: string }>;
@@ -25,7 +27,7 @@ interface Earn {
 
 const PAYOUT: Record<string, string> = { REQUESTED: 'On its way', UNDER_REVIEW: 'On its way', APPROVED: 'On its way', PAID: 'Sent', REJECTED: 'Returned to balance' };
 
-/** Creator Hub → Monetisation: joining (Premium members), balance, daily earnings, withdrawals to MoMo, and how the money is shared. */
+/** Creator Hub → Monetisation: eligibility and applications, balance, daily earnings, withdrawals to MoMo, and how the money is shared. */
 export function HubMoney() {
   const { locale } = useShell();
   const [m, setM] = useState<Money | null>(null);
@@ -67,26 +69,27 @@ export function HubMoney() {
   return (
     <div className="mt-6 space-y-6">
       {error && <p role="alert" className="rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
-      {!m.premium.active ? (
-        <section className="flex flex-col gap-4 rounded-3xl bg-[#071312] p-6 text-white sm:flex-row sm:items-center">
-          <VerifiedBadge size={52} />
-          <div className="flex-1"><p className="font-display text-[22px] font-extrabold">Monetisation is part of Premium</p><p className="text-[15px] text-[#c9d6d4]">For {usd(p.premiumUsdCents, locale)} a month you get the verified badge and start earning from ads on your videos.</p></div>
-          <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />Upgrade</Link>
-        </section>
-      ) : !m.joined ? (
-        <section className="rounded-3xl border-2 border-brand bg-elevated p-6">
-          <p className="font-display text-[22px] font-extrabold">Start earning from your videos</p>
-          <ul className="mt-3 space-y-1.5 text-[15px] text-muted">
-            <li className="flex gap-2"><Icon.Check size={20} className="shrink-0 text-brand" />Ads play on your videos: one before each video, and one halfway through videos of 8 minutes or more. Never more than {p.maxAdsPerVideo}. No ads on Moments.</li>
-            <li className="flex gap-2"><Icon.Check size={20} className="shrink-0 text-brand" />Each day, {pct}% of what businesses paid for ads is shared between monetised creators, by how many ads played on their videos.</li>
-            <li className="flex gap-2"><Icon.Check size={20} className="shrink-0 text-brand" />Withdraw to MTN Mobile Money from {usd(p.payoutMinimumUsdCents, locale)}.</li>
-            <li className="flex gap-2"><Icon.Check size={20} className="shrink-0 text-brand" />Keep Premium active and follow the Community Guidelines (no removed videos in the last 90 days).</li>
-          </ul>
-          <button type="button" disabled={busy} onClick={() => void run(() => api('/hub/monetisation/join', { body: {} }))} className="mt-4 h-11 rounded-2xl bg-brand px-5 text-[14px] font-bold text-on-brand disabled:opacity-50">Join monetisation</button>
+      {!m.joined ? (
+        <section className="rounded-3xl border border-line bg-elevated p-6">
+          <h3 className="font-display text-xl font-bold">Monetisation eligibility</h3>
+          <p className="mt-1 text-sm text-muted">Build your audience to apply. Views, watch time and Sparks use the last 90 days.</p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            {(Object.keys(metrics) as Metric[]).map((key) => {
+              const current = m.eligibility.current[key];
+              const required = m.eligibility.required[key];
+              return <div key={key}>
+                <div className="flex justify-between gap-2 text-sm"><span>{metrics[key]}</span><span className="tabular-nums">{Math.floor(current).toLocaleString(locale)} / {required.toLocaleString(locale)}</span></div>
+                <progress aria-label={metrics[key]} value={Math.min(current, required)} max={required} className="mt-2 w-full accent-[var(--brand)]" />
+              </div>;
+            })}
+          </div>
+          {m.eligibility.recentRemovals > 0 && <p className="mt-3 text-sm text-muted">You can apply 90 days after your most recent content removal.</p>}
+          {m.eligibility.rejectionReason && <p className="mt-3 text-sm text-muted">{m.eligibility.rejectionReason}</p>}
+          {m.eligibility.pending ? <p className="mt-4 font-semibold text-brand">Application under review</p> :
+            <button type="button" disabled={busy || !m.eligibility.canApply} onClick={() => void run(() => api('/hub/monetisation/join', { body: {} }))} className="mt-4 h-11 rounded-2xl bg-brand px-5 text-sm font-bold text-on-brand disabled:opacity-50">Apply for monetisation</button>}
         </section>
       ) : (
         <>
-          {!m.earning && <p className="rounded-2xl bg-accent-soft px-4 py-3 text-[14px] text-on-accent-soft">Your Premium membership has ended, so ads are not playing on your videos. <Link href="/premium" className="font-bold underline">Renew Premium</Link> to earn again; your balance stays yours.</p>}
           <section className="rounded-3xl border border-line bg-elevated p-5 sm:p-6" aria-labelledby="earn-heading">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 id="earn-heading" className="font-display text-xl font-bold">Earn</h3>

@@ -20,6 +20,7 @@ interface Payout { id: string; amountCents: number; account: string; accountHold
 export function AdminMoney() {
   const { locale } = useShell();
   const [s, setS] = useState<Summary | null>(null);
+  const [applications, setApplications] = useState<Array<{ id: string; channel: { name: string; handle: string } }>>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [unpaid, setUnpaid] = useState<Review[]>([]);
   const [payouts, setPayouts] = useState<Payout[]>([]);
@@ -32,8 +33,8 @@ export function AdminMoney() {
 
   const load = useCallback(async () => {
     try {
-      const [a, b, c, d] = await Promise.all([api<Summary>('/admin/billing'), api<{ campaigns: Review[] }>('/admin/billing/campaigns'), api<{ payouts: Payout[] }>('/admin/billing/payouts'), api<{ campaigns: Review[] }>('/admin/billing/campaigns?status=DRAFT')]);
-      setS(a); setReviews(b.campaigns); setPayouts(c.payouts); setUnpaid(d.campaigns);
+      const [a, b, c, d, e] = await Promise.all([api<Summary>('/admin/billing'), api<{ campaigns: Review[] }>('/admin/billing/campaigns'), api<{ payouts: Payout[] }>('/admin/billing/payouts'), api<{ campaigns: Review[] }>('/admin/billing/campaigns?status=DRAFT'), api<{ applications: typeof applications }>('/admin/billing/applications')]);
+      setS(a); setReviews(b.campaigns); setPayouts(c.payouts); setUnpaid(d.campaigns); setApplications(e.applications);
     } catch (e) { setError((e as Error).message); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -51,6 +52,18 @@ export function AdminMoney() {
           <div key={l} className="rounded-2xl border border-line p-4"><p className="text-[13px] text-muted">{l}</p><p className="font-display text-[24px] font-extrabold tabular-nums">{v}</p></div>
         ))}
       </div>
+
+      <section>
+        <h2 className="text-lg font-semibold">Monetisation applications ({applications.length})</h2>
+        {applications.map((application) => (
+          <div key={application.id} className="mt-2 flex flex-wrap items-center gap-2 rounded-2xl border border-line p-4">
+            <span className="mr-auto font-semibold">{application.channel.name} · @{application.channel.handle}</span>
+            <input aria-label="Reason for declining" placeholder="Reason for declining" maxLength={500} className="rounded-xl border border-line bg-surface px-3 py-2" value={notes[application.id] ?? ''} onChange={(e) => setNotes({ ...notes, [application.id]: e.target.value })} />
+            <button type="button" disabled={busy} className="rounded-xl bg-brand px-4 py-2 font-semibold text-on-brand" onClick={() => void run(() => api(`/admin/billing/applications/${application.id}/review`, { body: { approve: true } }), 'Creator approved.')}>Approve</button>
+            <button type="button" disabled={busy || !notes[application.id]?.trim()} className="rounded-xl bg-danger/10 px-4 py-2 font-semibold text-danger disabled:opacity-50" onClick={() => void run(() => api(`/admin/billing/applications/${application.id}/review`, { body: { approve: false, note: notes[application.id] } }), 'Application declined.')}>Decline</button>
+          </div>
+        ))}
+      </section>
 
       <section>
         <h2 className="text-[18px] font-semibold">Ads waiting for review ({reviews.length})</h2>

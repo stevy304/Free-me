@@ -116,15 +116,28 @@ test('Premium by card (Flutterwave): checkout link, verified with Flutterwave; t
 });
 
 test('ads: a business pays $3 a day, an administrator approves, monetised Premium creators show at most two per video and share 60% of the day', async () => {
-  // A creator joins the monetisation programme: Premium first.
+  // Premium alone cannot qualify a creator.
   const maker = await creator('maker@example.com', 'maker');
   await maker.post('/api/hub/monetisation/join').set('Origin', WEB).expect(403);
   const makerUser = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'maker@example.com' } });
   await new Billing(ctx.prisma as never, ctx.config).grantPremium(makerUser.id, 1);
-  expect((await maker.post('/api/hub/monetisation/join').set('Origin', WEB).expect(200)).body).toMatchObject({ joined: true, earning: true });
+  await maker.post('/api/hub/monetisation/join').set('Origin', WEB).expect(403);
   const makerCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'maker' } });
   const video = (mins: number, extra: object = {}) => ctx.prisma.video.create({ data: { channelId: makerCh.id, title: `v${mins}`, durationSeconds: mins * 60, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date(), ...extra } });
   const short = await video(3); const long = await video(20); const moment = await video(1, { isShort: true });
+
+  const audience = await ctx.prisma.user.createManyAndReturn({
+    data: Array.from({ length: 250 }, (_, i) => ({ email: `audience-${i}@example.com` })),
+    select: { id: true },
+  });
+  await ctx.prisma.subscription.createMany({ data: audience.map(({ id }) => ({ userId: id, channelId: makerCh.id })) });
+  await ctx.prisma.like.createMany({ data: audience.slice(0, 100).map(({ id }) => ({ userId: id, videoId: short.id })) });
+  await ctx.prisma.videoDailyStat.create({ data: { videoId: short.id, day: new Date(), views: 2000, watchSeconds: 360000n } });
+  expect((await maker.post('/api/hub/monetisation/join').set('Origin', WEB).expect(200)).body).toMatchObject({ joined: false, eligibility: { pending: true } });
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  const application = await ctx.prisma.creatorEligibility.findUniqueOrThrow({ where: { channelId: makerCh.id } });
+  await admin.post(`/api/admin/billing/applications/${application.id}/review`).set('Origin', WEB).send({ approve: true }).expect(200);
+  expect((await maker.get('/api/hub/monetisation').expect(200)).body).toMatchObject({ joined: true, earning: true });
 
   // A business: its ad is one of its own short videos.
   const biz = await creator('shop@example.com', 'shop');
@@ -148,7 +161,6 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   expect((await biz.get('/api/ads/campaigns').expect(200)).body.campaigns[0].status).toBe('PENDING_REVIEW');
   expect((await request(ctx.http).get(`/api/videos/${short.id}/ads`).expect(200)).body.slots).toEqual([]);
 
-  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
   expect((await admin.get('/api/admin/billing').expect(200)).body).toMatchObject({ premiumMembers: 2, waiting: { adReviews: 1 }, last30Days: { adsUsdCents: 2100 } });
   await maker.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(403);
   await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(200);

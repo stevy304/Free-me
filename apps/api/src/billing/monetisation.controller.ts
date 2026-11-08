@@ -8,7 +8,7 @@ import { AuditService } from '../common/audit.service';
 import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import type { AppRequest, AuthContext } from '../common/request';
 import { BillingService, paymentView, premiumView } from './billing.controller';
-import { EARNINGS_CURRENCY, hasPremiumAccess, isPremium, msisdn, PREMIUM_MONTHS, utcDay } from './billing';
+import { EARNINGS_CURRENCY, isPremium, msisdn, PREMIUM_MONTHS, utcDay } from './billing';
 import { MAX_ADS_PER_VIDEO } from './ads.controller';
 
 class PayoutDto {
@@ -34,6 +34,21 @@ class VerificationDto {
 
 const payoutView = (p: Payout) => ({ id: p.id, amountCents: Number(p.amountCents), currency: p.currency, method: p.method, account: p.accountIdentifier, accountHolderName: p.accountHolderName, status: p.status, reference: p.referenceTransactionId, rejectionReason: p.rejectionReason, requestedAt: p.requestedAt, processedAt: p.processedAt });
 
+const REQUIREMENTS = { followers: 250, views: 2_000, watchHours: 100, sparks: 100 };
+
+async function eligibilityProgress(prisma: PrismaService, channelId: string, userId: string) {
+  const since = new Date(Date.now() - 90 * 86_400_000);
+  const publicVideo = { channelId, status: 'READY' as const, visibility: 'PUBLIC' as const, takenDownAt: null, isAd: false };
+  const [followers, stats, sparks, removals] = await Promise.all([
+    prisma.subscription.count({ where: { channelId, userId: { not: userId }, user: { status: 'ACTIVE' } } }),
+    prisma.videoDailyStat.aggregate({ where: { day: { gte: utcDay(since) }, video: publicVideo }, _sum: { views: true, watchSeconds: true } }),
+    prisma.like.count({ where: { createdAt: { gte: since }, isLike: true, userId: { not: userId }, user: { status: 'ACTIVE' }, video: publicVideo } }),
+    prisma.video.count({ where: { channelId, takenDownAt: { gt: since } } }),
+  ]);
+  const current = { followers, views: stats._sum.views ?? 0, watchHours: Number(stats._sum.watchSeconds ?? 0n) / 3600, sparks };
+  return { current, required: REQUIREMENTS, canApply: !removals && Object.entries(REQUIREMENTS).every(([key, minimum]) => current[key as keyof typeof current] >= minimum), recentRemovals: removals };
+}
+
 @ApiTags('monetisation')
 @Controller('hub/monetisation')
 @RequireAuth()
@@ -52,15 +67,17 @@ export class MonetisationController {
     const ch = await this.channel(auth);
     const u = await this.prisma.user.findUniqueOrThrow({ where: { id: auth.user.id } });
     const since = new Date(utcDay(new Date()).getTime() - 27 * 86_400_000);
-    const [ledger, payouts, impressions] = await Promise.all([
+    const [ledger, payouts, progress, impressions] = await Promise.all([
       this.prisma.revenueLedger.findMany({ where: { channelId: ch.id }, orderBy: { createdAt: 'desc' }, take: 60 }),
       this.prisma.payout.findMany({ where: { channelId: ch.id }, orderBy: { requestedAt: 'desc' }, take: 30 }),
+      eligibilityProgress(this.prisma, ch.id, auth.user.id),
       this.prisma.adImpression.count({ where: { video: { channelId: ch.id }, createdAt: { gte: since } } }),
     ]);
     const b = await this.billing.settings();
     return {
       premium: premiumView(u), joined: !!ch.eligibility?.isEligible, joinedAt: ch.eligibility?.approvedAt ?? null,
-      earning: !!ch.eligibility?.isEligible && hasPremiumAccess(u),
+      earning: !!ch.eligibility?.isEligible,
+      eligibility: { ...progress, pending: !!ch.eligibility?.appliedForMonetization && !ch.eligibility.isEligible && !ch.eligibility.rejectionReason, rejectionReason: ch.eligibility?.rejectionReason ?? null },
       balance: { currency: ch.balance?.currency ?? EARNINGS_CURRENCY, availableCents: Number(ch.balance?.confirmedBalanceCents ?? 0n), lifetimeCents: Number(ch.balance?.lifetimeEarningsCents ?? 0n), withdrawnCents: Number(ch.balance?.withdrawnCents ?? 0n) },
       adsShownLast28Days: impressions,
       earnings: ledger.map((l) => ({ id: l.id, kind: l.sourceType, amountCents: Number(l.creatorShareCents), day: l.referenceId, description: l.description, at: l.createdAt })),
@@ -91,18 +108,18 @@ export class MonetisationController {
 
   @Post('join')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Join the monetisation programme (Premium members with no recent removals)' })
+  @ApiOperation({ summary: 'Apply for creator monetisation after meeting the audience requirements' })
   async join(@CurrentAuth() auth: AuthContext, @Req() req: AppRequest) {
     const ch = await this.channel(auth);
-    const u = await this.prisma.user.findUniqueOrThrow({ where: { id: auth.user.id } });
-    if (!hasPremiumAccess(u)) throw new ForbiddenException('Monetisation is part of Premium. Upgrade to start earning from ads on your videos.');
-    const strikes = await this.prisma.video.count({ where: { channelId: ch.id, takenDownAt: { gt: new Date(Date.now() - 90 * 86_400_000) } } });
-    if (strikes) throw new ForbiddenException('A video of yours was removed in the last 90 days. You can join once 90 days have passed since the last removal.');
+    if (ch.eligibility?.isEligible || (ch.eligibility?.appliedForMonetization && !ch.eligibility.rejectionReason)) return this.status(auth);
+    const progress = await eligibilityProgress(this.prisma, ch.id, auth.user.id);
+    if (!progress.canApply) throw new ForbiddenException('Meet the audience requirements and resolve any recent content removals before applying.');
     await this.prisma.creatorEligibility.upsert({
-      where: { channelId: ch.id }, create: { channelId: ch.id, isEligible: true, appliedForMonetization: true, approvedAt: new Date(), subscribersRequired: 0, watchHoursRequired: 0 },
-      update: { isEligible: true, appliedForMonetization: true, approvedAt: new Date(), rejectionReason: null },
+      where: { channelId: ch.id },
+      create: { channelId: ch.id, appliedForMonetization: true, subscribersRequired: REQUIREMENTS.followers, watchHoursRequired: REQUIREMENTS.watchHours },
+      update: { appliedForMonetization: true, rejectionReason: null },
     });
-    await this.audit.record({ userId: auth.user.id, action: 'MONETISATION_JOINED', entityType: 'Channel', entityId: ch.id, req });
+    await this.audit.record({ userId: auth.user.id, action: 'MONETISATION_APPLIED', entityType: 'Channel', entityId: ch.id, req });
     return this.status(auth);
   }
 
@@ -154,6 +171,34 @@ export class AdminBillingController {
       settlements: days.map((d) => ({ day: d.day.toISOString().slice(0, 10), grossCents: Number(d.grossCents), creatorPoolCents: Number(d.creatorPoolCents), paidToCreatorsCents: Number(d.allocatedCents), impressions: d.impressions, channels: d.channels })),
       methods: await this.billing.methods(),
     };
+  }
+
+  @Get('applications')
+  async applications() {
+    return { applications: await this.prisma.creatorEligibility.findMany({
+      where: { appliedForMonetization: true, isEligible: false, rejectionReason: null },
+      include: { channel: { select: { id: true, handle: true, name: true } } },
+      orderBy: { updatedAt: 'asc' }, take: 100,
+    }) };
+  }
+
+  @Post('applications/:id/review')
+  @HttpCode(200)
+  async reviewApplication(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: ReviewDto, @Req() req: AppRequest) {
+    const application = await this.prisma.creatorEligibility.findUnique({ where: { id }, include: { channel: true } });
+    if (!application) throw new NotFoundException('Application not found.');
+    const note = body.note?.trim();
+    if (!body.approve && !note) throw new BadRequestException('Enter a reason for declining the application.');
+    if (body.approve && !(await eligibilityProgress(this.prisma, application.channelId, application.channel.userId)).canApply) {
+      throw new BadRequestException('This channel no longer meets the requirements.');
+    }
+    const reviewed = await this.prisma.creatorEligibility.updateMany({
+      where: { id, appliedForMonetization: true, isEligible: false, rejectionReason: null },
+      data: { isEligible: body.approve, approvedAt: body.approve ? new Date() : null, rejectionReason: body.approve ? null : note },
+    });
+    if (!reviewed.count) throw new BadRequestException('This application has already been reviewed.');
+    await this.audit.record({ userId: auth.user.id, action: body.approve ? 'MONETISATION_APPROVED' : 'MONETISATION_DECLINED', entityType: 'Channel', entityId: application.channelId, req });
+    return { ok: true };
   }
 
   @Get('campaigns')

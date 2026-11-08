@@ -150,9 +150,9 @@ export class AdsController {
   @Get('videos/:id/ads')
   @ApiOperation({ summary: 'Ads to play with this video: none, one before it, or also one halfway (at most two)' })
   async forVideo(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
-    const v = await this.prisma.video.findFirst({ where: { id, ...LINKED_VIDEO }, include: { channel: { include: { eligibility: true, user: { select: { premiumUntil: true, roles: true } } } } } });
+    const v = await this.prisma.video.findFirst({ where: { id, ...LINKED_VIDEO }, include: { channel: { include: { eligibility: true } } } });
     const now = new Date();
-    if (!v || v.isShort || v.isAd || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now)) return { slots: [] };
+    if (!v || v.isShort || v.isAd || !v.channel.eligibility?.isEligible) return { slots: [] };
     const country = await this.viewerCountry(auth, req);
     const candidates = await this.prisma.campaign.findMany({
       where: { status: 'ACTIVE', startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, AND: [
@@ -180,9 +180,9 @@ export class AdsController {
     const who = auth?.user.id ?? clientIp(req) ?? 'unknown';
     await this.limits.consume(`ads:imp:${who}`, 120, 86_400, 'Too many ads today.');
     const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId } });
-    const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, isShort: false, isAd: false }, include: { channel: { include: { eligibility: true, user: true } } } });
+    const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, isShort: false, isAd: false }, include: { channel: { include: { eligibility: true } } } });
     const now = new Date();
-    if (!c || !v || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now) || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
+    if (!c || !v || !v.channel.eligibility?.isEligible || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
     if ((c.targetVideoIds.length || c.targetChannelIds.length) &&
         (v.visibility !== 'PUBLIC' || (!c.targetVideoIds.includes(v.id) && !c.targetChannelIds.includes(v.channelId)))) return { impressionId: null };
     const country = await this.viewerCountry(auth, req);
