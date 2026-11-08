@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:local": "node scripts/dev.mjs --local",
     "setup": "bash scripts/dev-setup.sh",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",

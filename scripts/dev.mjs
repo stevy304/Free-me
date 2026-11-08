@@ -41,7 +41,10 @@ env.NODE_ENV ||= 'development';
 env.API_INTERNAL_URL ||= `http://localhost:${env.PORT || 4000}`;
 // Codespaces: the browser reaches the app at a forwarded https address; cookies, redirects and the
 // request-origin check must use it. Plain http://localhost:3000 still works for requests made inside.
-if (env.CODESPACE_NAME && env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN && /^http:\/\/localhost(:\d+)?$/.test(env.APP_URL || 'http://localhost:3000')) {
+if (process.argv.includes('--local')) {
+  env.APP_URL = 'http://localhost:3000';
+  env.API_INTERNAL_URL = `http://127.0.0.1:${env.PORT || 4000}`;
+} else if (env.CODESPACE_NAME && env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN && /^http:\/\/localhost(:\d+)?$/.test(env.APP_URL || 'http://localhost:3000')) {
   env.APP_URL = `https://${env.CODESPACE_NAME}-3000.${env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`;
   env.EXTRA_ORIGINS = [env.EXTRA_ORIGINS, 'http://localhost:3000'].filter(Boolean).join(',');
 }
