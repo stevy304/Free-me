@@ -88,7 +88,7 @@ export class ChannelsController {
     if (!channel) throw new NotFoundException('This channel does not exist.');
     if (channel.userId === auth.user.id) throw new BadRequestException('You cannot follow your own channel.');
     const count = await this.prisma.$transaction(async (tx) => {
-      const r = await tx.subscription.createMany({ data: [{ userId: auth.user.id, channelId: channel.id }], skipDuplicates: true });
+      const r = await tx.subscription.createMany({ data: [{ userId: auth.user.id, channelId: channel.id, createdAt: new Date() }], skipDuplicates: true });
       const c = r.count ? await tx.channel.update({ where: { id: channel.id }, data: { subscriberCount: { increment: 1 } } }) : channel;
       return c.subscriberCount;
     });

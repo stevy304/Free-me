@@ -95,7 +95,9 @@ export class QueueChunks implements ChunkRunner {
   constructor(private readonly queue: Queue, private readonly events: QueueEvents) {}
 
   async runAll(tasks: ChunkTask[], onDone: (finished: number) => void, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     await this.events.waitUntilReady();
+    signal?.throwIfAborted();
     const jobs: Job[] = await this.queue.addBulk(tasks.map((t) => ({
       name: 'chunk', data: t,
       opts: {
@@ -105,21 +107,26 @@ export class QueueChunks implements ChunkRunner {
       },
     })));
     const cancel = () => { for (const j of jobs) void j.remove().catch(() => undefined); };
-    signal?.addEventListener('abort', cancel, { once: true });
+    let rejectAbort: (reason: unknown) => void = () => undefined;
+    const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
+    const onAbort = () => rejectAbort(signal?.reason);
     let finished = 0;
     try {
-      const aborted = new Promise<never>((_, reject) => {
-        if (signal?.aborted) reject(signal.reason);
-        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
-      });
-      aborted.catch(() => undefined); // an abort after the pieces are done is not an error here
-      const all = Promise.all(jobs.map(async (j) => { const r = (await j.waitUntilFinished(this.events)) as ChunkResult; onDone(++finished); return r; }));
-      all.catch(() => undefined); // after an abort nobody waits for it
+      // Cancellation can arrive while addBulk is in flight. The catch cleans up the jobs it returned.
+      signal?.throwIfAborted();
+      signal?.addEventListener('abort', onAbort, { once: true });
+      const all = Promise.all(jobs.map(async (job) => {
+        const result = (await job.waitUntilFinished(this.events)) as ChunkResult;
+        if (!signal?.aborted) onDone(++finished);
+        return result;
+      }));
       return await Promise.race([all, aborted]);
     } catch (e) {
       if (!signal?.aborted) this.log.warn(`pieces of ${tasks[0]?.videoId} failed: ${(e as Error).message.slice(0, 300)}`);
       cancel();
       throw e instanceof Error ? e : new Error(String(e));
-    } finally { signal?.removeEventListener('abort', cancel); }
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+    }
   }
 }
