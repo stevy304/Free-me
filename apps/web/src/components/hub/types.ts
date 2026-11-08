@@ -1,5 +1,7 @@
 export interface HubVideo {
   monetised?: boolean;
+  adsEnabled?: boolean;
+  adBreakSeconds?: number | null;
   id: string; title: string; description: string | null; visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE'; status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED' | 'FLAGGED' | 'SUSPENDED';
   madeForKids: boolean; isShort: boolean; isPodcast?: boolean; isAd?: boolean; language: string | null; category: { slug: string; name: string } | null; tags: string[];
   durationSeconds: number; width: number | null; height: number | null; processingProgress: number; processingStage: string | null; processingError: string | null;

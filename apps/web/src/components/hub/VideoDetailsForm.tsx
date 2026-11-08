@@ -51,6 +51,11 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
   const [language, setLanguage] = useState<string | null>(video.language);
   const [kids, setKids] = useState<boolean | null>(video.publishedAt || video.madeForKids ? video.madeForKids : null);
   const [comments, setComments] = useState(video.commentsEnabled);
+  const [adsEnabled, setAdsEnabled] = useState(!!video.adsEnabled);
+  const [adBreak, setAdBreak] = useState(video.adBreakSeconds == null ? '' : String(video.adBreakSeconds));
+  const [adTouched, setAdTouched] = useState(false);
+  const [advertiserSafe, setAdvertiserSafe] = useState(false);
+  const canSetBreak = video.durationSeconds >= 480 && !video.isAd && !video.isShort;
   const [thumb, setThumb] = useState<number | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [busy, setBusy] = useState(false);
@@ -61,10 +66,14 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
 
   const save = async () => {
     if (kids === null) { setMessage({ ok: false, text: 'Choose whether this video is made for kids.' }); return; }
+    if (adTouched && adsEnabled && !kids && !advertiserSafe) {
+      setMessage({ ok: false, text: 'Confirm ad suitability before enabling ads.' }); return;
+    }
     setBusy(true); setMessage(null);
     try {
       const r = await api<{ video: HubVideo }>(`/hub/videos/${video.id}`, { method: 'PATCH', body: {
         title, description, visibility, category: category || null, language, madeForKids: kids, commentsEnabled: comments,
+        ...(adTouched ? { adsEnabled: adsEnabled && !kids, advertiserSafe, adBreakSeconds: adBreak !== '' ? Number(adBreak) : null } : {}),
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean), ...(thumb !== null ? { thumbnail: thumb } : {}),
       } });
       setMessage({ ok: true, text: visibility === 'PRIVATE' ? 'Saved' : video.status === 'READY' ? 'Published' : 'Saved. It goes live when processing finishes.' });
@@ -138,6 +147,22 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
         <input type="checkbox" checked={comments && !kids} disabled={!!kids} onChange={(e) => setComments(e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
         <span><span className="flex items-center gap-1.5 text-[14px] font-medium"><Icon.Comment size={15} />Allow comments</span><span className="text-[12px] text-muted">{kids ? 'Comments are always off on videos made for kids.' : 'Viewers can comment and reply. You can remove or pin comments.'}</span></span>
       </label>
+      {canSetBreak && (
+        <fieldset disabled={!!kids} className="space-y-3 rounded-2xl border border-line p-4 disabled:opacity-60">
+          <legend className={label}>Monetisation</legend>
+          <p className="text-sm text-muted">Approved creators can place one mid-roll ad on this video once it is public.</p>
+          <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={adsEnabled && !kids} onChange={(e) => { setAdsEnabled(e.target.checked); setAdTouched(true); }} /> Enable ads on this video</label>
+          {adsEnabled && !kids && <>
+            <label className="block text-sm font-semibold">Ad break time in seconds
+              <input type="number" min={60} max={video.durationSeconds - 60} step={1} value={adBreak} placeholder={`Automatic · ${Math.floor(video.durationSeconds / 2)}s`} onChange={(e) => { setAdBreak(e.target.value); setAdTouched(true); }} className={`${inputClass} mt-1`} />
+              <span className="mt-1 block font-normal text-muted">Leave blank to use the midpoint. Pick a natural pause at least 60 seconds from either end.</span>
+            </label>
+            <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={advertiserSafe} onChange={(e) => { setAdvertiserSafe(e.target.checked); setAdTouched(true); }} />
+              <span>I confirm this video is suitable for ads and contains no embedded commercial promotions, graphic violence, explicit sexual material, or hateful content.</span>
+            </label>
+          </>}
+        </fieldset>
+      )}
       <fieldset>
         <legend className={label}>Visibility</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-3">

@@ -14,6 +14,10 @@ Free Me has two sources of income, both paid up front with MTN MoMo or a card. P
 - **One mid-roll ad** halfway through eligible public videos of 8 minutes or more. No pre-roll, Moments ads, or ads on content marked for kids.
 - Viewers can skip after 5 seconds. A viewer is counted once per ad and video every 30 minutes, so creators cannot inflate their share by replaying.
 
+## Video controls
+
+In Creator Hub, open a video’s details and enable ads under Monetisation. New uploads start with ads off. Confirm the video’s suitability, then leave the break on automatic or select a point at least 60 seconds from either end. Existing videos retain their prior ad setting. Ads still require an approved channel, public visibility and an eligible video.
+
 ## How the ad money is shared
 
 Each day, everything businesses paid for that day is split **60 / 30 / 10**:

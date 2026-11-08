@@ -266,6 +266,8 @@ model Video {
   /// An ad uploaded in Ad Studio: unlisted, never in feeds, search or the Space's videos.
   isAd                  Boolean           @default(false)
   madeForKids           Boolean           @default(false)
+  adsEnabled            Boolean           @default(false)
+  adBreakSeconds        Int?
   processingProgress    Int               @default(0)   // 0-100
   processingStage       String?           // "Uploading", "SD ready", "HD processing", ...
   processingError       String?

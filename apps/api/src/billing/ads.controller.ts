@@ -18,6 +18,13 @@ import { EARNINGS_CURRENCY, hasAdAccess } from './billing';
 export const MAX_ADS_PER_VIDEO = 1;
 /** Videos at least this long also get an ad halfway through. */
 export const MID_ROLL_MIN_SECONDS = 8 * 60;
+export const AD_BREAK_MARGIN_SECONDS = 60;
+export function midRollAt(video: Pick<Video, 'adsEnabled' | 'durationSeconds' | 'adBreakSeconds'>) {
+  if (!video.adsEnabled || video.durationSeconds < MID_ROLL_MIN_SECONDS) return null;
+  const manual = video.adBreakSeconds;
+  return manual !== null && manual >= AD_BREAK_MARGIN_SECONDS && manual <= video.durationSeconds - AD_BREAK_MARGIN_SECONDS
+    ? manual : Math.floor(video.durationSeconds / 2);
+}
 export const AD_MIN_SECONDS = 5;
 export const AD_MAX_SECONDS = 90;
 export const SKIP_AFTER_SECONDS = 5;
@@ -83,7 +90,7 @@ export class AdsController {
     const targetVideoIds = [...new Set(body.targetVideoIds ?? [])];
     const handles = [...new Set((body.targetChannelHandles ?? []).map((h) => h.trim().toLowerCase().replace(/^@/, '')))];
     const [videoCount, channels] = await Promise.all([
-      this.prisma.video.count({ where: { id: { in: targetVideoIds, not: v.id }, ...LINKED_VIDEO, visibility: 'PUBLIC', isAd: false, isShort: false, madeForKids: false, durationSeconds: { gte: MID_ROLL_MIN_SECONDS }, channel: { eligibility: { isEligible: true } } } }),
+      this.prisma.video.count({ where: { id: { in: targetVideoIds, not: v.id }, ...LINKED_VIDEO, visibility: 'PUBLIC', isAd: false, isShort: false, madeForKids: false, adsEnabled: true, durationSeconds: { gte: MID_ROLL_MIN_SECONDS }, channel: { eligibility: { isEligible: true } } } }),
       this.prisma.channel.findMany({ where: { handle: { in: handles } }, select: { id: true } }),
     ]);
     if (videoCount !== targetVideoIds.length || channels.length !== handles.length) {
@@ -182,7 +189,7 @@ export class AdsController {
   async forVideo(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
     const v = await this.prisma.video.findFirst({ where: { id, ...LINKED_VIDEO }, include: { channel: { include: { eligibility: true } } } });
     const now = new Date();
-    if (!v || v.visibility !== 'PUBLIC' || v.isShort || v.isAd || v.madeForKids || v.durationSeconds < MID_ROLL_MIN_SECONDS || !v.channel.eligibility?.isEligible) return { slots: [] };
+    if (!v || v.visibility !== 'PUBLIC' || v.isShort || v.isAd || v.madeForKids || midRollAt(v) === null || !v.channel.eligibility?.isEligible) return { slots: [] };
     const country = await this.viewerCountry(auth, req);
     const candidates = await this.prisma.campaign.findMany({
       where: { status: 'ACTIVE', advertiser: { OR: [{ registrationNumber: null, certificate: null }, { isVerified: true }] }, startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, AND: [
@@ -195,7 +202,7 @@ export class AdsController {
     const ads = await this.prisma.video.findMany({ where: { id: { in: candidates.map((c) => c.videoId!).filter(Boolean) }, ...LINKED_VIDEO, mediaLocation: 'PUBLIC' } });
     const byId = new Map(ads.map((a) => [a.id, a]));
     const usable = candidates.filter((c) => c.videoId && byId.has(c.videoId)).sort(() => Math.random() - 0.5);
-    const at = [Math.floor(v.durationSeconds / 2)];
+    const at = [midRollAt(v)!];
     return {
       slots: at.slice(0, usable.length).map((t, i) => {
         const c = usable[i]; const a = byId.get(c.videoId!)!;
@@ -212,7 +219,7 @@ export class AdsController {
     const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId }, include: { advertiser: { select: { isVerified: true, registrationNumber: true, certificate: { select: { advertiserId: true } } } } } });
     const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, visibility: 'PUBLIC', isShort: false, isAd: false }, include: { channel: { include: { eligibility: true } } } });
     const now = new Date();
-    if (!c || ((c.advertiser.registrationNumber || c.advertiser.certificate) && !c.advertiser.isVerified) || !v || v.madeForKids || v.durationSeconds < MID_ROLL_MIN_SECONDS || !v.channel.eligibility?.isEligible || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
+    if (!c || ((c.advertiser.registrationNumber || c.advertiser.certificate) && !c.advertiser.isVerified) || !v || v.madeForKids || midRollAt(v) === null || !v.channel.eligibility?.isEligible || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
     if ((c.targetVideoIds.length || c.targetChannelIds.length) &&
         (v.visibility !== 'PUBLIC' || (!c.targetVideoIds.includes(v.id) && !c.targetChannelIds.includes(v.channelId)))) return { impressionId: null };
     const country = await this.viewerCountry(auth, req);

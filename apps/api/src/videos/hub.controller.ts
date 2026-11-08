@@ -1,5 +1,5 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Put, Query, Req } from '@nestjs/common';
-import { MID_ROLL_MIN_SECONDS } from '../billing/ads.controller';
+import { AD_BREAK_MARGIN_SECONDS, MID_ROLL_MIN_SECONDS, midRollAt } from '../billing/ads.controller';
 import { announceVideo } from '../notifications/notify';
 import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
@@ -23,6 +23,9 @@ class UpdateVideoDto {
   @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsString() language?: string | null;
   @ApiPropertyOptional() @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
   @ApiPropertyOptional({ description: 'Made for kids: personalised features and comments are limited' }) @IsOptional() @IsBoolean() madeForKids?: boolean;
+  @IsOptional() @IsBoolean() adsEnabled?: boolean;
+  @IsOptional() @IsBoolean() advertiserSafe?: boolean;
+  @IsOptional() @IsInt() @Min(AD_BREAK_MARGIN_SECONDS) adBreakSeconds?: number | null;
   @ApiPropertyOptional({ description: 'Allow comments (always off for videos made for kids)' }) @IsOptional() @IsBoolean() commentsEnabled?: boolean;
   @ApiPropertyOptional({ description: 'Choose a generated thumbnail (0, 1 or 2)' }) @IsOptional() @IsInt() @Min(0) thumbnail?: number;
 }
@@ -45,10 +48,15 @@ export class HubController {
     return v;
   }
 
-  private async view(v: Video & { category?: { slug: string; name: string } | null; tags?: Array<{ tag: { name: string } }>; renditions?: Array<{ resolution: string; height: number; width: number }> }) {
+  private async view(v: Video & { category?: { slug: string; name: string } | null; tags?: Array<{ tag: { name: string } }>; renditions?: Array<{ resolution: string; height: number; width: number }> }, approved?: boolean) {
+    const monetisable = v.status === 'READY' && v.visibility === 'PUBLIC' && !v.takenDownAt && !v.isAd && !v.isShort && !v.madeForKids && midRollAt(v) !== null;
+    const monetised = monetisable && (approved ?? !!(await this.prisma.creatorEligibility.findUnique({
+      where: { channelId: v.channelId }, select: { isEligible: true },
+    }))?.isEligible);
     return {
       id: v.id, title: v.title, description: v.description, visibility: v.visibility, status: v.status, madeForKids: v.madeForKids, isShort: v.isShort, isPodcast: v.isPodcast, isAd: v.isAd,
       language: v.language, category: v.category ? { slug: v.category.slug, name: v.category.name } : null, tags: v.tags?.map((t) => t.tag.name) ?? [],
+      monetised, adsEnabled: v.adsEnabled, adBreakSeconds: v.adBreakSeconds,
       durationSeconds: v.durationSeconds, width: v.width, height: v.height, processingProgress: v.processingProgress, processingStage: v.processingStage,
       processingError: v.processingError, viewCount: v.viewCount.toString(), likeCount: v.likeCount, dislikeCount: v.dislikeCount, commentCount: v.commentCount, commentsEnabled: v.commentsEnabled,
       takenDownAt: v.takenDownAt, takedownReason: v.takedownReason,
@@ -70,7 +78,7 @@ export class HubController {
       where: { channel: { userId: auth.user.id }, isAd: ads === 'true', ...(status === 'UPLOADING' ? { status: 'UPLOADING' } : {}) },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 31, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), include: { category: true, renditions: { select: { resolution: true, width: true, height: true } } },
     });
-    return { videos: await Promise.all(rows.slice(0, 30).map(async (v) => ({ ...await this.view(v), monetised: !!channel?.eligibility?.isEligible && v.status === 'READY' && v.visibility === 'PUBLIC' && !v.takenDownAt && !v.isAd && !v.isShort && !v.madeForKids && v.durationSeconds >= MID_ROLL_MIN_SECONDS }))), nextCursor: rows.length > 30 ? rows[29].id : null };
+    return { videos: await Promise.all(rows.slice(0, 30).map((v) => this.view(v, !!channel?.eligibility?.isEligible))), nextCursor: rows.length > 30 ? rows[29].id : null };
   }
 
   @Get(':id')
@@ -90,6 +98,21 @@ export class HubController {
       else { const c = await this.prisma.category.findUnique({ where: { slug: body.category } }); if (!c) throw new BadRequestException('Choose a category from the list.'); data.categoryId = c.id; }
     }
     if (body.madeForKids !== undefined) data.madeForKids = body.madeForKids;
+    if (body.adsEnabled === true) {
+      const eligibility = await this.prisma.creatorEligibility.findUnique({ where: { channelId: v.channelId } });
+      if (!eligibility?.isEligible || v.isAd || v.isShort || (body.madeForKids ?? v.madeForKids) || v.takenDownAt || (v.durationSeconds > 0 && v.durationSeconds < MID_ROLL_MIN_SECONDS)) {
+        throw new BadRequestException('Ads require approved monetisation and suitable video content.');
+      }
+      if (body.advertiserSafe !== true) throw new BadRequestException('Confirm ad suitability before enabling ads.');
+    }
+    if (body.adsEnabled !== undefined) data.adsEnabled = body.adsEnabled;
+    if (body.advertiserSafe === false || body.madeForKids === true) data.adsEnabled = false;
+    if (body.adBreakSeconds !== undefined) {
+      if (body.adBreakSeconds !== null && (v.durationSeconds < MID_ROLL_MIN_SECONDS || body.adBreakSeconds > v.durationSeconds - AD_BREAK_MARGIN_SECONDS)) {
+        throw new BadRequestException('The ad break must be at least 60 seconds from both ends of a video of eight minutes or more.');
+      }
+      data.adBreakSeconds = body.adBreakSeconds;
+    }
     if (body.commentsEnabled !== undefined) data.commentsEnabled = body.commentsEnabled;
     if (body.thumbnail !== undefined) {
       const key = v.thumbnailCandidates[body.thumbnail];

@@ -140,7 +140,7 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   await new Billing(ctx.prisma as never, ctx.config).grantPremium(makerUser.id, 1);
   await maker.post('/api/hub/monetisation/join').set('Origin', WEB).expect(403);
   const makerCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'maker' } });
-  const video = (mins: number, extra: object = {}) => ctx.prisma.video.create({ data: { channelId: makerCh.id, title: `v${mins}`, durationSeconds: mins * 60, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date(), ...extra } });
+  const video = (mins: number, extra: object = {}) => ctx.prisma.video.create({ data: { channelId: makerCh.id, title: `v${mins}`, adsEnabled: true, durationSeconds: mins * 60, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date(), ...extra } });
   const short = await video(8); const long = await video(20); const moment = await video(1, { isShort: true });
 
   const audience = await ctx.prisma.user.createManyAndReturn({
@@ -194,6 +194,14 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   // A targeted campaign cannot serve or count impressions outside its selected placements.
   expect((await request(ctx.http).get(`/api/videos/${long.id}/ads`).expect(200)).body.slots).toEqual([]);
   expect((await request(ctx.http).post('/api/ads/impressions').set('Origin', WEB).send({ campaignId: camp.id, videoId: long.id }).expect(201)).body.impressionId).toBeNull();
+
+  await maker.patch(`/api/hub/videos/${short.id}`).set('Origin', WEB)
+    .send({ adsEnabled: true, advertiserSafe: true, adBreakSeconds: 180 }).expect(200);
+  expect((await request(ctx.http).get(`/api/videos/${short.id}/ads`).expect(200)).body.slots[0].at).toBe(180);
+  await maker.patch(`/api/hub/videos/${short.id}`).set('Origin', WEB).send({ adsEnabled: false }).expect(200);
+  expect((await request(ctx.http).get(`/api/videos/${short.id}/ads`).expect(200)).body.slots).toEqual([]);
+  await maker.patch(`/api/hub/videos/${short.id}`).set('Origin', WEB).send({ adsEnabled: true }).expect(400);
+  await maker.patch(`/api/hub/videos/${short.id}`).set('Origin', WEB).send({ adsEnabled: true, advertiserSafe: true }).expect(200);
 
   // Impressions count once per viewer, campaign and video; a click is counted once.
   const viewer = request.agent(ctx.http);

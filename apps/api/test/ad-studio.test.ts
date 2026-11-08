@@ -55,7 +55,7 @@ test('before payments are switched on, an administrator approves an ad without p
   const makerCh = (await maker.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'maker', name: 'Maker' }).expect(201)).body.channel;
   await ctx.prisma.user.update({ where: { email: 'maker@example.com' }, data: { premiumUntil: new Date(Date.now() + 86_400_000) } });
   await ctx.prisma.creatorEligibility.create({ data: { channelId: makerCh.id, isEligible: true } });
-  const v = await ctx.prisma.video.create({ data: { channelId: makerCh.id, title: 'Hills', durationSeconds: 480, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date() } });
+  const v = await ctx.prisma.video.create({ data: { channelId: makerCh.id, title: 'Hills', adsEnabled: true, durationSeconds: 480, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date() } });
   expect((await maker.agent.get(`/api/videos/${v.id}/ads`).expect(200)).body.slots).toEqual([]); // not approved yet
 
   const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
