@@ -1,7 +1,7 @@
 """Creates and configures the three Hetzner Object Storage buckets:
 
   <HETZNER_BUCKET>-originals  private   uploaded originals (browser uploads straight into it)
-  <HETZNER_BUCKET>-stream     public    HLS, MP4 qualities, DASH (Cloudflare in front)
+  <HETZNER_BUCKET>-stream     per-video HLS, MP4 qualities, DASH (public objects via Cloudflare)
   <HETZNER_BUCKET>-thumbs     public    thumbnails and seek-bar sprites (Cloudflare in front)
 
 CORS lets the browser PUT parts directly (and read ETag), lifecycle drops unfinished multipart uploads after a day.
@@ -54,7 +54,18 @@ def main() -> None:
         if kind == "originals":
             rules.append({"ID": "expire-speedtests", "Status": "Enabled", "Filter": {"Prefix": "speedtest/"}, "Expiration": {"Days": 1}})
         c.put_bucket_lifecycle_configuration(Bucket=name, LifecycleConfiguration={"Rules": rules})
-        if kind != "originals":
+        if kind == "stream":
+            # Migrate buckets configured by the earlier setup script. Leave custom policies for an operator to review.
+            try:
+                policy = json.loads(c.get_bucket_policy(Bucket=name)["Policy"])
+            except ClientError as e:
+                if e.response["Error"]["Code"] != "NoSuchBucketPolicy":
+                    raise
+            else:
+                if policy != json.loads(public_read_policy(name)):
+                    sys.exit(f"Review the custom policy on {name}; stream objects must be private by default.")
+                c.delete_bucket_policy(Bucket=name)
+        elif kind == "thumbs":
             try:
                 c.put_bucket_policy(Bucket=name, Policy=public_read_policy(name))
             except ClientError as e:  # some S3 servers only support object ACLs; files are also uploaded public-read

@@ -14,9 +14,11 @@ GB = 1024 ** 3
 
 @pytest.fixture(scope="module")
 def plat():
-    p = Platform().start()
-    yield p
-    p.stop()
+    p = Platform()
+    try:
+        yield p.start()
+    finally:
+        p.stop()
 
 
 @pytest.fixture(scope="module")
@@ -128,3 +130,14 @@ def test_corrupt_file_is_rejected_and_cancel_cleans_up(plat):
     assert all(v["id"] != t["video_id"] for v in c.get("/api/videos/mine").json())
     ups = s3(plat).list_multipart_uploads(Bucket="videos-test-originals").get("Uploads", [])
     assert not any(t["upload_id"] in u["Key"] for u in ups)
+
+
+def test_stream_bucket_keeps_private_objects_private(plat):
+    endpoint = plat.env["HETZNER_ENDPOINT"]
+    bucket = "videos-test-stream"
+    s3 = boto3.client("s3", endpoint_url=endpoint, region_name="fsn1",
+                      aws_access_key_id="test", aws_secret_access_key="test")
+    s3.put_object(Bucket=bucket, Key="private.m3u8", Body=b"#EXTM3U")
+    s3.put_object(Bucket=bucket, Key="published.m3u8", Body=b"#EXTM3U", ACL="public-read")
+    assert httpx.get(f"{endpoint}/{bucket}/private.m3u8").status_code == 403
+    assert httpx.get(f"{endpoint}/{bucket}/published.m3u8").status_code == 200

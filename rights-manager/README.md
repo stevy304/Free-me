@@ -68,6 +68,36 @@ If you prefer containers for PostgreSQL and Redis only, run `docker-compose up -
 
 Make an existing account an administrator: `python -m app.make_admin <username or email>`.
 
+## Platform checkpoint
+
+The FastAPI app in this directory owns the RTMP studio and Hetzner upload routes. Its frontend is in
+`frontend/`; the root Free Me application uses a separate API and frontend.
+
+Set `HETZNER_ENDPOINT`, `HETZNER_REGION`, `HETZNER_BUCKET`, `HETZNER_ACCESS_KEY` and
+`HETZNER_SECRET_KEY` in `.env`, then run `python -m scripts.setup_hetzner`. The stream bucket uses
+object-level access. Keep draft variants private and expose only published objects through the CDN.
+The setup command removes the bucket-wide public policy installed by the previous version of the script.
+
+Set `RTMP_HOOK_SECRET` to a random secret in the same file. With the API running and FFmpeg built with
+the `zmq` filter, start the ingest server from this directory:
+
+```bash
+npm ci --prefix rtmp
+node --env-file=.env rtmp/server.js
+```
+
+The live and upload tests start local RTMP, API and S3-compatible processes. Use a dedicated test
+database because the harness drops and recreates its tables:
+
+```bash
+pip install "moto[server]==5.2.5"
+TEST_DATABASE_URL=postgresql+psycopg://rights:rights@127.0.0.1:5432/rights_test \
+  pytest tests/test_live.py tests/test_upload.py
+```
+
+The checkpoint stores uploads and stream replays. Its video processing entry point is a placeholder
+for the next phase.
+
 ## API
 
 | Method | Path | Who |
@@ -75,7 +105,7 @@ Make an existing account an administrator: `python -m app.make_admin <username o
 | POST | `/api/auth/register`, `/api/auth/login`; GET `/api/auth/me` | anyone / signed in |
 | POST, GET | `/api/references` (multipart: `file`, `title`, `policy`) | creator |
 | GET, PATCH (policy), DELETE | `/api/references/{id}` | owner |
-| POST, GET | `/api/uploads`; GET `/api/uploads/{id}` (the page polls this every 2 s) | signed in |
+| POST, GET | `/api/checks`; GET `/api/checks/{id}` (the page polls this every 2 s) | signed in |
 | GET | `/api/matches?status=&q=` | owner (own originals) / admin (all) |
 | GET | `/api/matches/review`; POST `/api/matches/{id}/review` `{action: approve or block}` | admin |
 | POST, GET | `/api/disputes`; GET `/api/disputes/{id}`, `/api/disputes/{id}/log` | uploader, owner, admin |

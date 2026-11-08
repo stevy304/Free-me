@@ -18,9 +18,11 @@ pytestmark = pytest.mark.skipif(not shutil.which("node"), reason="needs Node.js 
 
 @pytest.fixture(scope="module")
 def plat():
-    p = Platform().start()
-    yield p
-    p.stop()
+    p = Platform()
+    try:
+        yield p.start()
+    finally:
+        p.stop()
 
 
 def until(fn, timeout=30.0, every=0.5, what="condition"):
