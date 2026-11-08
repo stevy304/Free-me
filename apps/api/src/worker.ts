@@ -1,3 +1,4 @@
+import { sendDueMail } from './mail/outbox';
 import { MailService } from './mail/mail.service';
 import 'reflect-metadata';
 import { ConsoleLogger, Logger } from '@nestjs/common';
@@ -77,7 +78,7 @@ async function main() {
         await media.add('caption', { name: 'caption', videoId: id }, { ...jobOptions({ name: 'caption', videoId: id }), jobId: `caption-${id}`, priority: 100, attempts: 3 });
       }
     }
-    else if (job.name === 'billing-receipts') await billing.sendReceipts(mail);
+    else if (job.name === 'billing-receipts') { await billing.sendReceipts(mail); await sendDueMail(prisma, mail, config.appUrl); }
     else if (job.name === 'billing-payments') await billing.reconcile();
     else if (job.name === 'billing-daily') { await billing.expirePremium(); const n = await billing.settleAds(); if (n) log.log(`Settled ${n} day(s) of ad revenue`); }
     else if (job.name === 'recover-stuck') {

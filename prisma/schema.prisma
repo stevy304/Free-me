@@ -511,6 +511,7 @@ model Advertiser {
   updatedAt             DateTime          @updatedAt
 
   campaigns             Campaign[]
+  certificate           BusinessCertificate?
 
   @@index([businessName])
 }
@@ -942,4 +943,23 @@ model AppSetting {
   value                 Json
   updatedBy             String?
   updatedAt             DateTime          @updatedAt
+}
+
+model TransactionalMail {
+  id         String    @id @default(uuid())
+  recipient  String
+  subject    String
+  paragraphs String[]
+  actionPath String
+  attempts   Int       @default(0)
+  dueAt      DateTime  @default(now())
+  sentAt     DateTime?
+
+  @@index([sentAt, dueAt])
+}
+
+model BusinessCertificate {
+  advertiserId String     @id
+  advertiser   Advertiser @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+  pdf          Bytes
 }

@@ -18,7 +18,7 @@ export class MailService {
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {
     const s = config.mail.smtp;
     this.transporter = config.mail.transport === 'smtp' && s
-      ? nodemailer.createTransport({ host: s.host, port: s.port, secure: s.secure, auth: s.user ? { user: s.user, pass: s.pass } : undefined })
+      ? nodemailer.createTransport({ host: s.host, port: s.port, secure: s.secure, connectionTimeout: 15_000, socketTimeout: 60_000, auth: s.user ? { user: s.user, pass: s.pass } : undefined })
       : null;
   }
 
@@ -31,29 +31,30 @@ export class MailService {
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
-/** The sign-in code email: the code first, how long it lasts, and what to do if it was not you. */
-export function signInCodeMail(to: string, code: string, minutes: number): OutgoingMail {
-  const text = `Your Free Me sign-in code is ${code}\n\nIt expires in ${minutes} minutes and works once. If you did not try to sign in, you can ignore this email; nobody can sign in without the code.`;
-  const html = `<!doctype html><html><body style="margin:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#18181b">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:440px;background:#fff;border-radius:16px;padding:32px">
-<tr><td style="font-size:18px;font-weight:700;color:#0c827e">Free Me</td></tr>
-<tr><td style="padding-top:20px;font-size:15px">Your sign-in code:</td></tr>
-<tr><td style="padding:12px 0 4px;font-size:34px;font-weight:700;letter-spacing:8px">${esc(code)}</td></tr>
-<tr><td style="font-size:13px;color:#52525b;padding-top:8px">It expires in ${minutes} minutes and works once. If you did not try to sign in, ignore this email: nobody can sign in without the code.</td></tr>
+function brandedMail(title: string, preview: string, content: string) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;background:#eef4f1;font-family:Arial,Helvetica,sans-serif;color:#102620">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(preview)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border:1px solid #d9e5de;border-radius:20px">
+<tr><td style="background:#102620;color:#a6f3bd;border-radius:20px 20px 0 0;padding:22px 28px;font-size:23px;font-weight:700">Free Me</td></tr>
+<tr><td style="padding:28px"><h1 style="margin:0 0 16px;font-size:25px;line-height:32px;color:#102620">${esc(title)}</h1>${content}</td></tr>
+<tr><td style="padding:16px 28px;border-top:1px solid #d9e5de;color:#40594e;font-size:13px;line-height:20px">Free Me · Account and activity updates</td></tr>
 </table></td></tr></table></body></html>`;
+}
+
+export function signInCodeMail(to: string, code: string, minutes: number): OutgoingMail {
+  const help = `It expires in ${minutes} minutes and works once. If you did not try to sign in, you can ignore this email; nobody can sign in without the code.`;
+  const text = `Your Free Me sign-in code is ${code}\n\n${help}`;
+  const html = brandedMail('Your sign-in code', 'Use this one-time code to sign in to Free Me.',
+    `<p style="margin:0 0 16px;padding:14px;background:#eaf7ee;border-radius:12px;font-size:32px;font-weight:700;letter-spacing:6px;text-align:center">${esc(code)}</p><p style="margin:0;font-size:15px;line-height:23px">${esc(help)}</p>`);
   return { to, subject: `${code} is your Free Me sign-in code`, text, html };
 }
 
-/** A plain notice (moderation decisions, copyright notices): short paragraphs and an optional button. */
 export function noticeMail(to: string, subject: string, paragraphs: string[], action?: { label: string; url: string }): OutgoingMail {
-  const text = [...paragraphs, ...(action ? [`${action.label}: ${action.url}`] : [])].join('\n\n');
-  const html = `<!doctype html><html><body style="margin:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#18181b">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#fff;border-radius:16px;padding:32px">
-<tr><td style="font-size:18px;font-weight:700;color:#0c827e;padding-bottom:12px">Free Me</td></tr>
-${paragraphs.map((p) => `<tr><td style="font-size:14px;line-height:21px;padding-top:10px;white-space:pre-line">${esc(p)}</td></tr>`).join('\n')}
-${action ? `<tr><td style="padding-top:22px"><a href="${esc(action.url)}" style="display:inline-block;background:#0c827e;color:#fff;text-decoration:none;font-weight:700;font-size:14px;padding:11px 20px;border-radius:999px">${esc(action.label)}</a></td></tr>` : ''}
-</table></td></tr></table></body></html>`;
-  return { to, subject, text, html };
+  const safeAction = action && /^https?:\/\//i.test(action.url) ? action : undefined;
+  const text = [...paragraphs, ...(safeAction ? [`${safeAction.label}: ${safeAction.url}`] : [])].join('\n\n');
+  const content = paragraphs.map((p) => `<p style="margin:0 0 14px;font-size:15px;line-height:23px">${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+  const button = safeAction ? `<a href="${esc(safeAction.url)}" style="display:inline-block;margin-top:8px;background:#145b39;color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:10px">${esc(safeAction.label)}</a>` : '';
+  return { to, subject, text, html: brandedMail(subject, 'An update from Free Me.', content + button) };
 }

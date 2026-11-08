@@ -8,6 +8,7 @@ export const REPORT_REASONS = [
   { code: 'DANGEROUS_ACTS', label: 'Harmful or dangerous acts', hint: 'Self-harm, dangerous challenges or instructions to hurt others.' },
   { code: 'MISINFORMATION', label: 'Misleading information', hint: 'False claims that can cause real harm.' },
   { code: 'SPAM_OR_SCAM', label: 'Spam or scam', hint: 'Misleading links, fraud or repetitive content.' },
+  { code: 'IN_VIDEO_ADVERTISING', label: 'In-video advertising', hint: 'Report an embedded commercial promotion. Include the time it appears.' },
   { code: 'PRIVACY', label: 'Privacy violation', hint: 'Shares personal information or images of someone without consent.' },
   { code: 'IMPERSONATION', label: 'Impersonation', hint: 'Pretends to be another person or organisation.' },
   { code: 'OTHER', label: 'Something else', hint: 'Tell us what is wrong.' },

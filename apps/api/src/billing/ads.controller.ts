@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, IsUUID, IsUrl, Length, Max, Min } from 'class-validator';
 import type { Advertiser, Campaign, Video } from '@prisma/client';
@@ -114,6 +115,27 @@ export class AdsController {
     return c;
   }
 
+  @Post('ads/campaigns/:id/business-certificate')
+  @RequireAuth()
+  @UseInterceptors(FileInterceptor('certificate', { limits: { fileSize: 2 * 1024 * 1024, files: 1, fields: 0 } }))
+  async submitCertificate(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @UploadedFile() file?: { buffer: Buffer; mimetype: string }) {
+    await this.limits.consume(`ads:certificate:${auth.user.id}`, 10, 3600);
+    if (!hasAdAccess(auth.user)) throw new ForbiddenException('Renew your advertising access first.');
+    const c = await this.own(auth, id);
+    if (c.status !== 'DRAFT') throw new ConflictException('Upload the certificate before submitting the campaign.');
+    if (!file || file.mimetype !== 'application/pdf' || file.buffer.subarray(0, 5).toString('ascii') !== '%PDF-') {
+      throw new BadRequestException('Choose a PDF certificate up to 2 MiB.');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.advertiser.update({ where: { id: c.advertiserId }, data: { isVerified: false } });
+      const current = await tx.campaign.findUniqueOrThrow({ where: { id }, select: { status: true } });
+      if (current.status !== 'DRAFT') throw new ConflictException('The campaign is already submitted.');
+      const pdf = new Uint8Array(file.buffer);
+      await tx.businessCertificate.upsert({ where: { advertiserId: c.advertiserId }, create: { advertiserId: c.advertiserId, pdf }, update: { pdf } });
+    });
+    return { ok: true };
+  }
+
   @Post('ads/campaigns/:id/pay')
   @RequireAuth()
   @ApiOperation({ summary: 'Pay for a draft campaign; once paid it waits for review, then runs for the days bought' })
@@ -163,7 +185,7 @@ export class AdsController {
     if (!v || v.visibility !== 'PUBLIC' || v.isShort || v.isAd || v.madeForKids || v.durationSeconds < MID_ROLL_MIN_SECONDS || !v.channel.eligibility?.isEligible) return { slots: [] };
     const country = await this.viewerCountry(auth, req);
     const candidates = await this.prisma.campaign.findMany({
-      where: { status: 'ACTIVE', advertiser: { OR: [{ registrationNumber: null }, { isVerified: true }] }, startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, AND: [
+      where: { status: 'ACTIVE', advertiser: { OR: [{ registrationNumber: null, certificate: null }, { isVerified: true }] }, startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, AND: [
         country ? { OR: [{ targetCountries: { isEmpty: true } }, { targetCountries: { has: country } }] } : { targetCountries: { isEmpty: true } },
         { OR: [{ targetVideoIds: { isEmpty: true }, targetChannelIds: { isEmpty: true } },
           ...(v.visibility === 'PUBLIC' ? [{ targetVideoIds: { has: id } }, { targetChannelIds: { has: v.channelId } }] : [])] },
@@ -187,10 +209,10 @@ export class AdsController {
   async impression(@Body() body: ImpressionDto, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
     const who = auth?.user.id ?? clientIp(req) ?? 'unknown';
     await this.limits.consume(`ads:imp:${who}`, 120, 86_400, 'Too many ads today.');
-    const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId }, include: { advertiser: { select: { isVerified: true, registrationNumber: true } } } });
+    const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId }, include: { advertiser: { select: { isVerified: true, registrationNumber: true, certificate: { select: { advertiserId: true } } } } } });
     const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, visibility: 'PUBLIC', isShort: false, isAd: false }, include: { channel: { include: { eligibility: true } } } });
     const now = new Date();
-    if (!c || (c.advertiser.registrationNumber && !c.advertiser.isVerified) || !v || v.madeForKids || v.durationSeconds < MID_ROLL_MIN_SECONDS || !v.channel.eligibility?.isEligible || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
+    if (!c || ((c.advertiser.registrationNumber || c.advertiser.certificate) && !c.advertiser.isVerified) || !v || v.madeForKids || v.durationSeconds < MID_ROLL_MIN_SECONDS || !v.channel.eligibility?.isEligible || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
     if ((c.targetVideoIds.length || c.targetChannelIds.length) &&
         (v.visibility !== 'PUBLIC' || (!c.targetVideoIds.includes(v.id) && !c.targetChannelIds.includes(v.channelId)))) return { impressionId: null };
     const country = await this.viewerCountry(auth, req);

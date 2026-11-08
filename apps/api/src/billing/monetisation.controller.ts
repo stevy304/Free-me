@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Header, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req, StreamableFile } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsEmail, IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
 import type { Payout } from '@prisma/client';
@@ -187,11 +187,15 @@ export class AdminBillingController {
     const channel = await this.prisma.channel.findUnique({ where: { handle } });
     if (!channel) throw new NotFoundException('Channel not found.');
     if (body.reason.trim().length < 5) throw new BadRequestException('Explain the in-video advertising violation.');
-    const suspended = await this.prisma.creatorEligibility.updateMany({
-      where: { channelId: channel.id, isEligible: true },
-      data: { isEligible: false, suspendedAt: new Date(), appliedForMonetization: false, rejectionReason: body.reason.trim() },
+    await this.prisma.$transaction(async (tx) => {
+      const suspended = await tx.creatorEligibility.updateMany({
+        where: { channelId: channel.id, isEligible: true },
+        data: { isEligible: false, suspendedAt: new Date(), appliedForMonetization: false, rejectionReason: body.reason.trim() },
+      });
+      if (!suspended.count) throw new BadRequestException('This channel is not currently monetised.');
+      const user = await tx.user.findUniqueOrThrow({ where: { id: channel.userId }, select: { email: true } });
+      await tx.transactionalMail.create({ data: { recipient: user.email, subject: 'Monetisation suspended', paragraphs: [body.reason.trim(), 'You can request restoration in Creator Hub after addressing the issue.'], actionPath: '/hub' } });
     });
-    if (!suspended.count) throw new BadRequestException('This channel is not currently monetised.');
     await this.audit.record({ userId: auth.user.id, action: 'MONETISATION_SUSPENDED', entityType: 'Channel', entityId: channel.id, req, details: { reason: body.reason.trim() } });
     return { ok: true };
   }
@@ -215,11 +219,15 @@ export class AdminBillingController {
     if (body.approve && !application.suspendedAt && !(await eligibilityProgress(this.prisma, application.channelId, application.channel.userId)).canApply) {
       throw new BadRequestException('This channel no longer meets the requirements.');
     }
-    const reviewed = await this.prisma.creatorEligibility.updateMany({
-      where: { id, appliedForMonetization: true, isEligible: false, rejectionReason: null },
-      data: { isEligible: body.approve, suspendedAt: body.approve ? null : application.suspendedAt, approvedAt: body.approve ? new Date() : null, rejectionReason: body.approve ? null : note },
+    await this.prisma.$transaction(async (tx) => {
+      const reviewed = await tx.creatorEligibility.updateMany({
+        where: { id, appliedForMonetization: true, isEligible: false, rejectionReason: null },
+        data: { isEligible: body.approve, suspendedAt: body.approve ? null : application.suspendedAt, approvedAt: body.approve ? new Date() : null, rejectionReason: body.approve ? null : note },
+      });
+      if (!reviewed.count) throw new BadRequestException('This application has already been reviewed.');
+      const user = await tx.user.findUniqueOrThrow({ where: { id: application.channel.userId }, select: { email: true } });
+      await tx.transactionalMail.create({ data: { recipient: user.email, subject: body.approve ? (application.suspendedAt ? 'Monetisation restored' : 'Monetisation approved') : 'Monetisation request declined', paragraphs: [body.approve ? 'Your eligible public videos can now earn from Free Me ads.' : note!], actionPath: '/hub' } });
     });
-    if (!reviewed.count) throw new BadRequestException('This application has already been reviewed.');
     await this.audit.record({ userId: auth.user.id, action: body.approve ? 'MONETISATION_APPROVED' : 'MONETISATION_DECLINED', entityType: 'Channel', entityId: application.channelId, req });
     return { ok: true };
   }
@@ -227,28 +235,37 @@ export class AdminBillingController {
   @Get('campaigns')
   @ApiOperation({ summary: 'Ad campaigns (default: waiting for review)' })
   async campaigns(@Query('status') status = 'PENDING_REVIEW') {
-    const rows = await this.prisma.campaign.findMany({ where: status === 'all' ? {} : { status: status as never }, orderBy: { createdAt: 'desc' }, take: 100, include: { advertiser: { include: { user: { select: { email: true } } } } } });
+    const rows = await this.prisma.campaign.findMany({ where: status === 'all' ? {} : { status: status as never }, orderBy: { createdAt: 'desc' }, take: 100, include: { advertiser: { include: { user: { select: { email: true } }, certificate: { select: { advertiserId: true } } } } } });
     const videos = new Map((await this.prisma.video.findMany({ where: { id: { in: rows.map((r) => r.videoId!).filter(Boolean) } }, select: { id: true, title: true, durationSeconds: true } })).map((v) => [v.id, v]));
-    return { campaigns: rows.map((c) => ({ id: c.id, status: c.status, businessName: c.advertiser.businessName, registrationNumber: c.advertiser.registrationNumber, businessVerified: c.advertiser.isVerified, email: c.advertiser.user.email, country: c.advertiser.country, headline: c.headline, destinationUrl: c.destinationUrl, days: c.days, totalCents: c.days * c.dailyRateCents, targetCountries: c.targetCountries, video: c.videoId ? videos.get(c.videoId) ?? null : null, impressions: Number(c.impressionsCount), clicks: Number(c.clicksCount), reviewNote: c.reviewNote, createdAt: c.createdAt })) };
+    return { campaigns: rows.map((c) => ({ id: c.id, status: c.status, businessName: c.advertiser.businessName, registrationNumber: c.advertiser.registrationNumber, businessVerified: c.advertiser.isVerified, hasCertificate: !!c.advertiser.certificate, email: c.advertiser.user.email, country: c.advertiser.country, headline: c.headline, destinationUrl: c.destinationUrl, days: c.days, totalCents: c.days * c.dailyRateCents, targetCountries: c.targetCountries, video: c.videoId ? videos.get(c.videoId) ?? null : null, impressions: Number(c.impressionsCount), clicks: Number(c.clicksCount), reviewNote: c.reviewNote, createdAt: c.createdAt })) };
+  }
+
+  @Get('campaigns/:id/business-certificate')
+  @Header('Cache-Control', 'private, no-store')
+  async businessCertificate(@Param('id', ParseUUIDPipe) id: string) {
+    const campaign = await this.prisma.campaign.findUnique({ where: { id }, select: { advertiserId: true } });
+    const certificate = campaign && await this.prisma.businessCertificate.findUnique({ where: { advertiserId: campaign.advertiserId } });
+    if (!certificate) throw new NotFoundException('Certificate not found.');
+    return new StreamableFile(Buffer.from(certificate.pdf), { type: 'application/pdf', disposition: 'attachment; filename="business-certificate.pdf"' });
   }
 
   @Post('campaigns/:id/review')
   @HttpCode(200)
   @ApiOperation({ summary: 'Approve (it starts now and runs for the days bought) or reject a paid campaign; or, with free, approve an unpaid one without payment' })
   async review(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: ReviewDto, @Req() req: AppRequest) {
-    const c = await this.prisma.campaign.findUnique({ where: { id }, include: { advertiser: true } });
+    const c = await this.prisma.campaign.findUnique({ where: { id }, include: { advertiser: { include: { certificate: { select: { advertiserId: true } } } } } });
     if (!c) throw new NotFoundException('Campaign not found.');
     const free = body.free === true && body.approve;
     if (free ? c.status !== 'DRAFT' && c.status !== 'PENDING_REVIEW' : c.status !== 'PENDING_REVIEW') throw new BadRequestException(free ? 'Only an ad that is not running yet can be approved without payment.' : 'This campaign is not waiting for review.');
     if (!body.approve && !body.note?.trim()) throw new BadRequestException('Say why it is rejected; the business will see it.');
     const now = new Date();
-    if (body.approve && c.advertiser.registrationNumber && !c.advertiser.isVerified && !body.verifyBusiness) {
+    if (body.approve && (c.advertiser.registrationNumber || c.advertiser.certificate) && !c.advertiser.isVerified && !body.verifyBusiness) {
       throw new BadRequestException('Verify the business registration before approving the campaign.');
     }
     await this.prisma.$transaction(async (tx) => {
       // Match the reviewed registration to avoid approving a stale business profile.
-      if (body.approve && c.advertiser.registrationNumber) {
-        const verified = await tx.advertiser.updateMany({ where: { id: c.advertiserId, registrationNumber: c.advertiser.registrationNumber, businessName: c.advertiser.businessName, country: c.advertiser.country }, data: { isVerified: true } });
+      if (body.approve && (c.advertiser.registrationNumber || c.advertiser.certificate)) {
+        const verified = await tx.advertiser.updateMany({ where: { id: c.advertiserId, registrationNumber: c.advertiser.registrationNumber, businessName: c.advertiser.businessName, country: c.advertiser.country, updatedAt: c.advertiser.updatedAt }, data: { isVerified: true } });
         if (!verified.count) throw new BadRequestException('The business details changed. Review them again.');
       }
       const result = await tx.campaign.updateMany({ where: { id, status: c.status }, data: body.approve
@@ -257,6 +274,13 @@ export class AdminBillingController {
         ...(free && c.status === 'DRAFT' ? { dailyRateCents: 0 } : {}) }
       : { status: 'REJECTED', reviewedAt: now, reviewNote: body.note!.trim() } });
       if (!result.count) throw new BadRequestException('The campaign status changed. Refresh and try again.');
+      const user = await tx.user.findUniqueOrThrow({ where: { id: c.advertiser.userId }, select: { email: true } });
+      await tx.transactionalMail.create({ data: {
+        recipient: user.email, subject: body.approve ? 'Your ad campaign is approved' : 'Your ad campaign was declined',
+        paragraphs: [c.headline, body.approve ? 'Your campaign can now appear on eligible videos in its selected placements.' : body.note!.trim()],
+        actionPath: '/studio/ads',
+      } });
+
     });
     await this.audit.record({ userId: auth.user.id, action: free ? 'AD_APPROVED_FREE' : body.approve ? 'AD_APPROVED' : 'AD_REJECTED', entityType: 'Campaign', entityId: id, req, details: { note: body.note ?? null } });
     return { ok: true };

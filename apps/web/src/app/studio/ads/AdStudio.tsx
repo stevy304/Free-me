@@ -117,6 +117,16 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
     try { await api(`/admin/billing/campaigns/${c.id}/review`, { body: { approve: true, free: true } }); setNotice('Running now, without payment. It plays midway through videos of Spaces in the monetisation programme.'); await load(); }
     catch (e) { setError((e as Error).message); }
   };
+  const uploadCertificate = (campaign: Campaign, file: File) => {
+    const body = new FormData();
+    body.append('certificate', file);
+    setBusy(true); setError(null);
+    void api(`/ads/campaigns/${campaign.id}/business-certificate`, { body })
+      .then(() => { setNotice('Certificate received. Only administrators can download it for review.'); })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false));
+  };
+
   const act = async (c: Campaign, what: 'pause' | 'delete') => {
     setError(null);
     try { await api(`/ads/campaigns/${c.id}${what === 'pause' ? '/pause' : ''}`, { method: what === 'pause' ? 'POST' : 'DELETE', body: what === 'pause' ? {} : undefined }); await load(); } catch (e) { setError((e as Error).message); }
@@ -255,7 +265,10 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
           {paying && (
             <section className="mt-6 rounded-3xl border-2 border-brand bg-elevated p-5 sm:p-6">
               <div className="flex items-start gap-3"><div className="flex-1"><h2 className="font-display text-[20px] font-bold">Pay for “{paying.headline}”</h2><p className="text-[14px] text-muted">{paying.days} {paying.days === 1 ? 'day' : 'days'}. It starts when our team approves it, usually within a day.</p></div><button type="button" onClick={() => setPaying(null)} aria-label="Close" className="rounded-full p-2 hover:bg-surface"><Icon.Close size={20} /></button></div>
-              <div className="mt-4 max-w-lg"><PayPanel usdCents={paying.totalCents} plans={plans} label="Pay for ad" onPaid={paid} start={async (method, phone) => (await api<{ payment: Payment }>(`/ads/campaigns/${paying.id}/pay`, { body: { method, phone } })).payment} /></div>
+              <label className="mt-3 block text-sm font-semibold">RDB certificate (optional PDF, up to 2 MiB)
+                <input type="file" accept="application/pdf,.pdf" disabled={busy} className="mt-1 block max-w-full text-sm" onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadCertificate(paying, file); e.target.value = ''; }} />
+              </label>
+              <div className="mt-4 max-w-lg"><fieldset disabled={busy}><PayPanel usdCents={paying.totalCents} plans={plans} label="Pay for ad" onPaid={paid} start={async (method, phone) => (await api<{ payment: Payment }>(`/ads/campaigns/${paying.id}/pay`, { body: { method, phone } })).payment} /></fieldset></div>
             </section>
           )}
 
