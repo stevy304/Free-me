@@ -6,6 +6,7 @@ import { compressVideo } from './compress';
 export type UploadState = 'starting' | 'compressing' | 'uploading' | 'paused' | 'finishing' | 'done' | 'error' | 'cancelled';
 export interface UploadSnapshot {
   state: UploadState; videoId: string | null; title: string; sent: number; total: number; bytesPerSecond: number; secondsLeft: number | null; error: string | null;
+  reconnecting: boolean;
   /** While compressing: how far (0–1). After: the original size, when a smaller copy is being uploaded instead. */
   compress: { progress: number; originalBytes: number; savedBytes: number | null } | null;
 }
@@ -52,7 +53,7 @@ export class VideoUpload {
 
   constructor(readonly original: File, private readonly onChange: (s: UploadSnapshot) => void, private readonly options: { ad?: boolean; compress?: boolean } = {}) {
     this.file = original;
-    this.snap = { state: 'starting', videoId: null, title: original.name.replace(/\.[^.]+$/, ''), sent: 0, total: original.size, bytesPerSecond: 0, secondsLeft: null, error: null, compress: null };
+    this.snap = { state: 'starting', videoId: null, title: original.name.replace(/\.[^.]+$/, ''), sent: 0, total: original.size, bytesPerSecond: 0, secondsLeft: null, error: null, reconnecting: false, compress: null };
   }
 
   private get resumeKey() { return this.options.ad ? `ad|${fileKey(this.file)}` : fileKey(this.file); }
@@ -174,21 +175,30 @@ export class VideoUpload {
   private async pump() {
     if (this.snap.state === 'paused' || this.snap.state === 'cancelled') return;
     this.samples = [];
-    this.set({ state: 'uploading', error: null, bytesPerSecond: 0, secondsLeft: null });
+    this.set({ state: 'uploading', error: null, reconnecting: false, bytesPerSecond: 0, secondsLeft: null });
     this.tick(true);
     const todo = this.assembled ? [] : Array.from({ length: this.partCount }, (_, i) => i + 1).filter((n) => !this.done.has(n));
     if (todo.length) await this.transfer(todo);
     if (this.snap.state !== 'uploading') return;
     if (!this.assembled && this.done.size !== this.partCount) return this.fail(new Error('Some parts could not be uploaded.'));
     this.set({ state: 'finishing', sent: this.file.size, secondsLeft: 0 });
-    await api(`/uploads/${this.snap.videoId}/complete`, { body: {
+    const body = {
       transfer: {
         bytes: this.transferBytes,
         durationMs: Math.round(this.transferMs),
         retries: this.retries,
         peakParallel: this.peakParallel,
       },
-    } });
+    };
+    for (;;) {
+      await this.waitForConnection();
+      try {
+        await api(`/uploads/${this.snap.videoId}/complete`, { body });
+        break;
+      } catch (error) {
+        if (navigator.onLine || !(error instanceof ApiError) || error.status !== 0) throw error;
+      }
+    }
     remember(this.resumeKey, null);
     this.set({ state: 'done' });
   }
@@ -258,8 +268,28 @@ export class VideoUpload {
     if (!this.urls.has(n)) throw new Error('Missing signed upload URL.');
   }
 
+  private async waitForConnection() {
+    if (navigator.onLine) return;
+    if (!this.snap.reconnecting) this.set({ reconnecting: true, bytesPerSecond: 0, secondsLeft: null });
+    await new Promise<void>((resolve) => {
+      const wake = () => {
+        window.removeEventListener('online', wake);
+        this.retryWaiters.delete(wake);
+        resolve();
+      };
+      this.retryWaiters.add(wake);
+      window.addEventListener('online', wake);
+    });
+    if ((this.snap.state === 'uploading' || this.snap.state === 'finishing') && navigator.onLine && this.snap.reconnecting) {
+      this.samples = [];
+      this.set({ reconnecting: false });
+    }
+  }
+
   private async sendPart(n: number) {
-    for (let attempt = 0; ; attempt++) {
+    let attempt = 0;
+    while (this.snap.state === 'uploading') {
+      await this.waitForConnection();
       if (this.snap.state !== 'uploading') return;
       try {
         const url = await this.urlFor(n);
@@ -287,15 +317,19 @@ export class VideoUpload {
         this.inflight.delete(n); this.progress.delete(n);
         if (this.snap.state !== 'uploading') return;
         if ((e as { status?: number }).status === 403) this.urls.delete(n); // link expired: get a new one
+        this.tick(true);
         this.retries++;
+        if (!navigator.onLine) continue;
         if (attempt >= 6) throw e;
+        const delay = Math.min(30_000, 1000 * 2 ** attempt);
+        attempt++;
         await new Promise<void>((resolve) => {
           const wake = () => {
             clearTimeout(timer);
             this.retryWaiters.delete(wake);
             resolve();
           };
-          const timer = setTimeout(wake, Math.min(30_000, 1000 * 2 ** attempt));
+          const timer = setTimeout(wake, delay);
           this.retryWaiters.add(wake);
         });
       }
@@ -309,7 +343,7 @@ export class VideoUpload {
 
   pause() {
     if (this.snap.state !== 'uploading') return;
-    this.set({ state: 'paused' });
+    this.set({ state: 'paused', reconnecting: false });
     this.stopTransfers();
   }
   async resume() {
@@ -331,7 +365,7 @@ export class VideoUpload {
   }
   async cancel() {
     if (this.snap.state === 'finishing' || this.snap.state === 'done') return;
-    this.set({ state: 'cancelled' });
+    this.set({ state: 'cancelled', reconnecting: false });
     this.compressing?.abort();
     this.stopTransfers();
     remember(this.resumeKey, null);
@@ -339,7 +373,7 @@ export class VideoUpload {
   }
   private fail(e: unknown) {
     if (this.snap.state === 'cancelled' || this.snap.state === 'paused') return;
-    this.set({ state: 'error', error: e instanceof ApiError ? e.message : 'The upload stopped. Check your connection, then resume.' });
+    this.set({ state: 'error', reconnecting: false, error: e instanceof ApiError ? e.message : 'The upload stopped. Check your connection, then resume.' });
     this.stopTransfers();
   }
 }

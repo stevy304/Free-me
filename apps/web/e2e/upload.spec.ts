@@ -39,13 +39,18 @@ test('upload, details, publish, processing to every quality, then on the home pa
 
   await page.getByRole('button', { name: 'Create' }).click();
   await page.getByRole('menuitem', { name: 'Upload video' }).click();
-  await page.locator('input[type=file]').setInputFiles(clip);
+  const launchpad = page.getByRole('dialog', { name: 'Launchpad' });
+  await expect(launchpad).toBeVisible();
+  await launchpad.locator('input[type=file]').setInputFiles(clip);
+  await expect(launchpad.getByRole('list', { name: 'Upload steps' })).toBeVisible();
   await expect(page.getByLabel('Title (required)')).toHaveValue(`Morning in Kigali ${run}`);
   await page.getByLabel('Description').fill('Six seconds of test pattern.');
   await page.getByText("No, it's not made for kids").click();
   await page.getByLabel('Category').selectOption('travel-events');
   await page.locator('label').filter({ hasText: 'Everyone can find and watch it' }).click();
   await expect(page.getByText(/Processing complete · 720p/)).toBeVisible({ timeout: 120_000 });
+  await expect(launchpad.getByText('Ready to watch', { exact: true })).toHaveAttribute('aria-current', 'step');
+  await expect(launchpad.getByRole('link', { name: 'Open video' })).toBeVisible();
   expect(readFileSync(photo).length).toBeGreaterThan(2 * 1024 * 1024);
   await page.locator('input[type=file][accept="image/*"]').setInputFiles(photo);
   await expect(page.getByText('Thumbnail updated')).toBeVisible({ timeout: 20_000 });
