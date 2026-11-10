@@ -191,3 +191,17 @@ With JSON logging enabled, match the API and worker events by `videoId`.
 The browser records the separate `free-me:play-to-playing` User Timing measure from the first play event to the first playing event for a source. Inspect it in the browser Performance panel. It measures viewer startup and stays in that browser.
 
 Uploads start with four concurrent parts. On sufficiently large files, the browser samples acknowledged throughput, tries up to six, and returns to the previous setting if the gain is under 10%. Retries reduce concurrency to a minimum of two. Use the API's transfer rate, retries, and peak concurrency to compare similar file sizes and network conditions.
+
+### Benchmark uploads while a 4K job is running
+
+Use a development or staging instance with FFmpeg, Redis, a separate media worker, and `LOG_FORMAT=json` on the API and worker. Use an isolated creator account with a channel and room for four private uploads. Use fresh log files available to the machine running the benchmark.
+
+Set `BENCH_ORIGIN` to the application origin, `BENCH_COOKIE` to that account's session cookie in `name=value` form, and `BENCH_API_LOG` and `BENCH_WORKER_LOG` to the JSON log paths. Keep the session cookie out of command history and reports.
+
+```sh
+npm run --silent bench:video -- phone-720p.mp4 video-1080p.mp4 long-video-2160p.mp4
+```
+
+The phone clip can be portrait with a 720-pixel short edge. The runner uploads the 4K file once to establish background load and again as a measured upload. Use a long enough 4K fixture that its upgrade is still running when the three measured uploads start. The four drafts stay private and can be removed from Creator Hub after the run. If the API is processing media inline, omit `BENCH_WORKER_LOG`; the reported queue wait is then zero by design.
+
+The JSON output includes transfer throughput, finalization round trip, queue wait, SD encode time, and time until the first HLS segment is fetched. It also reports when 720p, the source resolution, and all qualities are visible in Creator Hub. The HLS and quality milestones are measured from the start of upload finalization with a 500 ms polling interval. The segment fetch checks the delivery path; it does not measure a browser decoding its first frame. Compare runs with the same fixtures, worker settings, and network conditions.
