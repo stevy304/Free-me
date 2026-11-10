@@ -15,18 +15,30 @@ import type { LiveInfo } from '../types';
 export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[] }) {
   const { locale } = useShell();
   const [s, setS] = useState(initial);
+  const [reconnecting, setReconnecting] = useState(false);
   const room = `live:${s.id}`;
   const reload = () => api<{ stream: LiveInfo }>(`/live/${s.id}`).then((r) => setS(r.stream)).catch(() => undefined);
   useRealtime<{ count: number }>('viewers', (d) => setS((x) => ({ ...x, viewers: d.count })), room);
   useRealtime('started', reload, room);
   useRealtime('ended', () => setS((x) => ({ ...x, status: 'ENDED', playbackUrl: null })), room);
   useRealtime<{ title: string }>('title', (d) => setS((x) => ({ ...x, title: d.title })), room);
+  useRealtime<{ reconnectUntil: number | null }>('live:signal', (d) => setReconnecting(d.reconnectUntil !== null), room);
   const live = s.status === 'LIVE' && !!s.playbackUrl;
 
   return (
     <div className="mx-auto grid max-w-[1600px] gap-5 px-0 pb-16 sm:px-6 sm:pt-4 lg:grid-cols-[1fr_380px]">
       <div className="min-w-0">
-        {live ? <LiveVideo src={s.playbackUrl!} className="aspect-video w-full sm:rounded-[24px]" /> : (
+        {live ? (
+          <div className="relative">
+            <LiveVideo src={s.playbackUrl!} className="aspect-video w-full sm:rounded-[24px]" />
+            {reconnecting && (
+              <div role="status" className="pointer-events-none absolute inset-x-3 top-3 w-fit rounded-xl border border-amber-400/40 bg-[#1c170f]/95 px-4 py-3 text-sm text-amber-50">
+                <strong className="block">Host reconnecting</strong>
+                <span>Stay here. The broadcast will resume if the host reconnects.</span>
+              </div>
+            )}
+          </div>
+        ) : (
           <div className="grid aspect-video w-full place-items-center bg-[radial-gradient(circle_at_30%_30%,#123b38,#050a0a)] px-6 text-center text-white sm:rounded-[24px]">
             <div>
               <Avatar name={s.channel.name} src={s.channel.avatarUrl} size={72} className="mx-auto" />

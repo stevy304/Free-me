@@ -17,6 +17,7 @@ interface Studio {
   encoder: { server: string; streamKey: string } | null;
   past: Array<{ id: string; title: string; startedAt: string | null; endedAt: string | null; peakViewers: number; replayVideoId: string | null }>;
 }
+const MAX_BUFFER_BYTES = 12 * 1024 * 1024;
 const TYPES = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm', 'video/mp4;codecs=avc1,mp4a', 'video/mp4'];
 const clock = (from: string | null, now: number) => { if (!from) return '0:00'; const s = Math.max(0, Math.floor((now - new Date(from).getTime()) / 1000)); const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60); return `${h ? `${h}:${String(m).padStart(2, '0')}` : m}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -28,6 +29,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   const [source, setSource] = useState<'camera' | 'screen'>('camera');
   const [media, setMedia] = useState<MediaStream | null>(null);
   const [state, setState] = useState<'idle' | 'starting' | 'live' | 'ending'>('idle');
+  const [reconnectUntil, setReconnectUntil] = useState<number | null>(null);
   const [encoderRtt, setEncoderRtt] = useState<number | null>(null);
   const [viewers, setViewers] = useState(0);
   const [showKey, setShowKey] = useState(false);
@@ -63,6 +65,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
 
   const goLive = async () => {
     if (!st || !media || !capture.current) return;
+    const streamId = st.stream.id;
     setError(null); setEncoderRtt(null); setState('starting');
     let output: Awaited<ReturnType<NonNullable<typeof capture.current>>> | undefined;
     try {
@@ -72,46 +75,128 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       const sock = await getSocket();
       const mimeType = TYPES.find((t) => MediaRecorder.isTypeSupported(t));
       const rec = new MediaRecorder(output.stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 });
-      const r = await sock.timeout(15_000).emitWithAck('live:start', st.stream.id);
+      const r = await sock.timeout(15_000).emitWithAck('live:start', streamId);
       if (!r.ok) throw new Error(r.error ?? 'The stream could not start.');
-      let chunks = Promise.resolve();
+      const pending: Blob[] = [];
       let queued = 0;
-      let congested = false;
-      const failStream = () => {
-        congested = true;
-        setError('The encoder could not keep up with the stream. Check your connection and try again.');
+      let sequence = 0;
+      let pumping = false;
+      let needsResume = false;
+      let deadline: number | null = null;
+      let finishing = false;
+      let finished = false;
+      let failed = false;
+      let retry: ReturnType<typeof setTimeout> | undefined;
+
+      function failStream(message: string) {
+        failed = true;
+        setError(message);
         if (rec.state === 'recording') rec.stop();
-      };
-      rec.ondataavailable = (e) => {
-        if (!e.data.size || congested || !sock.connected) return;
-        queued += e.data.size;
-        if (queued > 8 * 1024 * 1024) { failStream(); return; }
-        chunks = chunks.then(async () => {
-          if (congested || !sock.connected) return;
-          const data = await e.data.arrayBuffer();
-          const sentAt = performance.now();
-          const result = await sock.timeout(8000).emitWithAck('live:chunk', [st.stream.id, data]);
-          if (!result?.ok) failStream();
-          else setEncoderRtt(Math.round(performance.now() - sentAt));
-        }).catch(failStream).finally(() => { queued -= e.data.size; });
-      };
-      const disconnected = () => {
-        setError('The connection dropped, so the stream ended. Go live again when you are back online.');
-        if (rec.state === 'recording') rec.stop();
+        else if (finishing) finish();
+      }
+
+      function finish() {
+        if (finished) return;
+        finished = true;
+        clearTimeout(retry);
+        sock.off('disconnect', disconnected);
+        sock.off('connect', pump);
+        setReconnectUntil(null);
+        stopOutput();
+        if (recorder.current === rec) recorder.current = null;
+        const stop = sock.connected && !needsResume
+          ? sock.timeout(30_000).emitWithAck('live:stop', streamId)
+          : api('/hub/live/end', { body: {} });
+        void stop.catch(() => undefined).finally(() => { setState('idle'); void load(); });
+      }
+
+      function disconnected() {
+        if (finishing) { finish(); return; }
+        needsResume = true;
+        deadline ??= Date.now() + r.reconnectMs;
+        setNow(Date.now());
+        setReconnectUntil(deadline);
+        setEncoderRtt(null);
+        void pump();
+      }
+
+      async function pump() {
+        if (pumping || failed || finished) return;
+        clearTimeout(retry);
+        if (deadline !== null && Date.now() >= deadline) {
+          failStream('The signal did not return in time. Go live again when your connection is stable.');
+          return;
+        }
+        pumping = true;
+        let delay = 250;
+        try {
+          if (!sock.connected) return;
+          if (needsResume) {
+            const socketId = sock.id;
+            const resumed = await sock.timeout(2500).emitWithAck('live:resume', [streamId, r.resumeKey]);
+            if (!resumed?.ok || sock.id !== socketId || !sock.connected || finished) return;
+            needsResume = false;
+          }
+          while (pending.length && sock.connected && !needsResume && !failed) {
+            const blob = pending[0];
+            const data = await blob.arrayBuffer();
+            if (!sock.connected || needsResume || failed || finished) break;
+            const sentAt = performance.now();
+            const result = await sock.timeout(2500).emitWithAck('live:chunk', [streamId, sequence, data]);
+            if (finished) break;
+            if (!result?.ok) {
+              if (result?.retry) break;
+              if (!needsResume) failStream('The encoder stopped accepting video. Check the connection and go live again.');
+              break;
+            }
+            pending.shift();
+            queued -= blob.size;
+            sequence += 1;
+            if (!needsResume) {
+              deadline = null;
+              setReconnectUntil(null);
+              setEncoderRtt(Math.round(performance.now() - sentAt));
+            }
+          }
+        } catch {
+          // Keep the unacknowledged chunk. Its sequence makes resending safe.
+          if (!finishing && !finished) {
+            needsResume = true;
+            deadline ??= Date.now() + r.reconnectMs;
+            setNow(Date.now());
+            setReconnectUntil(deadline);
+          }
+          delay = 500;
+        } finally {
+          pumping = false;
+          if (finishing) finish();
+          else if (!failed && !finished && (pending.length || deadline !== null)) retry = setTimeout(pump, delay);
+        }
+      }
+
+      rec.ondataavailable = ({ data }) => {
+        if (!data.size || failed) return;
+        queued += data.size;
+        if (queued > MAX_BUFFER_BYTES) {
+          failStream('The connection could not keep up and the signal buffer filled. Go live again on a stronger connection.');
+          return;
+        }
+        pending.push(data);
+        void pump();
       };
       rec.onstop = () => {
-        stopOutput();
-        sock.off('disconnect', disconnected);
-        if (recorder.current === rec) recorder.current = null;
-        void chunks.then(() => sock.connected ? sock.timeout(30_000).emitWithAck('live:stop', st.stream.id) : undefined)
-          .catch(() => undefined).finally(() => { setState('idle'); void load(); });
+        finishing = true;
+        if (failed || !sock.connected || deadline !== null) finish();
+        else void pump();
       };
       try { rec.start(1000); }
       catch (error) {
-        await sock.timeout(30_000).emitWithAck('live:stop', st.stream.id).catch(() => undefined);
+        await sock.timeout(30_000).emitWithAck('live:stop', streamId).catch(() => undefined);
         throw error;
       }
-      sock.once('disconnect', disconnected);
+      sock.on('disconnect', disconnected);
+      sock.on('connect', pump);
+      if (!sock.connected) disconnected();
       recorder.current = rec;
       setState('live');
       void load();
@@ -135,6 +220,12 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
     );
   }
   const live = st.stream.status === 'LIVE';
+  const signal = reconnectUntil !== null && (
+    <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-amber-500/40 bg-amber-950 px-4 py-3 text-sm text-amber-100">
+      <strong>Reconnecting · {Math.max(0, Math.ceil((reconnectUntil - now) / 1000))}s</strong>
+      <span>Your watch page and chat are still open. Keep this tab open while we restore your signal.</span>
+    </div>
+  );
   const watchUrl = typeof window !== 'undefined' ? `${window.location.origin}/live/${st.stream.id}` : `/live/${st.stream.id}`;
 
   if (!basic) return (
@@ -143,7 +234,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
         <Link href="/" className={styles.brand}><Icon.Live size={21} /> Free Me <span>Live Studio</span></Link>
         <input aria-label="Title" className={styles.title} value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} disabled={state !== 'idle' || live} />
         <div className={styles.status}>
-          {live ? <span className={styles.onAir}>● ON AIR {clock(st.stream.startedAt, now)}</span> : <span className={styles.standby}>Standby</span>}
+          {reconnectUntil !== null ? <span className={styles.standby}>Signal interrupted</span> : live ? <span className={styles.onAir}>● ON AIR {clock(st.stream.startedAt, now)}</span> : <span className={styles.standby}>Standby</span>}
           {state === 'live' && encoderRtt !== null && <span title="Latest encoder response">▂▄▆ {encoderRtt} ms</span>}
           {live || state === 'live' || state === 'ending' ?
             <button type="button" onClick={end} disabled={state === 'ending'}>{state === 'ending' ? 'Ending…' : 'End broadcast'}</button> :
@@ -151,6 +242,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
         </div>
       </header>
       {error && <p role="alert" className="rounded-md bg-red-950 px-3 py-2 text-sm text-red-200">{error}</p>}
+      {signal}
       <ControlRoom streamId={st.stream.id} basic={false} host={media} capture={capture} active={state === 'live'}
         chat={<LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-96" />}
         sources={<div className="space-y-3">
@@ -194,7 +286,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
 
         </div>} />
       <footer className={styles.footer}>
-        <span><Icon.Live size={16} /> Primary feed <strong>{state === 'live' ? 'Broadcasting' : live ? 'External broadcast' : media ? 'Source ready' : 'No source'}</strong></span>
+        <span><Icon.Live size={16} /> Primary feed <strong>{reconnectUntil !== null ? 'Reconnecting' : state === 'live' ? 'Broadcasting' : live ? 'External broadcast' : media ? 'Source ready' : 'No source'}</strong></span>
         <span><Icon.Eye size={16} /> {viewers.toLocaleString(locale)} watching</span>
         <span>Recording <strong>{state === 'live' ? clock(st.stream.startedAt, now) : 'Standby'}</strong></span>
         <a href={watchUrl} target="_blank" rel="noreferrer">Open watch page ↗</a>
@@ -212,6 +304,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       {error && <p role="alert" className="mt-4 rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
 
       <div className="mt-5 grid gap-5">
+        {signal}
         <div className="space-y-5">
           <section className="overflow-hidden rounded-3xl border border-line bg-elevated">
             <div className="space-y-3 p-4 sm:p-5">

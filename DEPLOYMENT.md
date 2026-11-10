@@ -173,6 +173,8 @@ Monitoring and alerts (Prometheus, Grafana) and a central log store (logs are al
 
 Free Go Live supports a host and two invited guests. Premium Studio allows six guest seats and composites the selected scene, video transition, lower third, ticker and logo into the browser recording. The host's browser renders the Program feed. Keep its tab in the foreground during a show.
 
+Browser broadcasts allow 30 seconds to reconnect on the same application server. The host tab keeps a bounded buffer of video and audio, and the watch page and chat stay open while the host reconnects. Route returning broadcaster sockets to the same server in a multi-server deployment because the active encoder runs there. Guest connections use their own signaling session and may need a new invite after the host reconnects.
+
 Guests need an authenticated Free Me account and a private invitation link. Enable the Socket.IO Redis adapter for signaling across API nodes. Direct WebRTC connections use STUN by default. For networks that require relaying, set `LIVE_TURN_URLS` to your comma-separated coturn addresses and set `LIVE_TURN_SECRET` to the coturn `static-auth-secret` on each API node. The API signs temporary credentials. Keep the shared secret on the servers.
 
 Browser composition applies to browser broadcasts. External encoders still supply their own composed program feed through Premium RTMP.
