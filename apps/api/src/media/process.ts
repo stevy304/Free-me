@@ -136,7 +136,7 @@ export class VideoProcessor {
           if (signal?.aborted) throw e;
           this.log.warn(`${videoId}: no seek previews: ${(e as Error).message.slice(0, 200)}`);
         }
-        // Higher qualities wait behind every other upload's first job (a podcast's work dir holds its video: finish here).
+        // Higher qualities run on a separate worker queue (a podcast's work dir holds its video: finish here).
         if (passes.length && !podcast) {
           await this.setProgress(videoId, 5 + fastWeight, 'Playable · adding qualities');
           this.log.log({ event: 'video_playable_job_done', videoId, ...timings });

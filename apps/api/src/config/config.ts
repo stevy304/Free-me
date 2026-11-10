@@ -103,6 +103,7 @@ export interface MediaConfig {
   /** Use the upload's own H.264 for the top rung when it is already suitable (no re-encoding). */
   copyTopRung: boolean;
   workerConcurrency: number;
+  upgradeConcurrency: number;
   /** Long videos are encoded in pieces any worker server can take (see media/chunks.ts). */
   chunked: boolean;
   /** Videos at least this long (seconds) are encoded in pieces. */
@@ -172,7 +173,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     copyTopRung: env.COPY_TOP_RUNG !== 'false',
     chunked: env.CHUNKED_ENCODING !== 'false', chunkMinSeconds: Math.max(10, Number(env.CHUNK_MIN_SECONDS) || 120),
     chunkSeconds: Math.max(4, Math.round((Number(env.CHUNK_SECONDS) || 30) / 2) * 2), chunkConcurrency: Math.max(1, Number(env.CHUNK_CONCURRENCY) || 1),
-    encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
+    encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), upgradeConcurrency: Math.max(1, Math.floor(Number(env.WORKER_UPGRADE_CONCURRENCY) || 1)), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
     whisper: env.WHISPER_CPP_PATH?.trim() && env.WHISPER_MODEL?.trim()
       ? { bin: env.WHISPER_CPP_PATH.trim(), model: env.WHISPER_MODEL.trim(), threads: Math.max(1, Number(env.WHISPER_THREADS) || 4) } : null,
   };

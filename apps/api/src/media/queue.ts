@@ -9,11 +9,12 @@ import { LocalChunks } from './chunks';
 import { createStorage, type Storage } from './storage';
 
 export const MEDIA_QUEUE = 'media';
+export const MEDIA_UPGRADE_QUEUE = 'media-upgrades';
 export const STORAGE = Symbol('STORAGE');
 
 /**
  * Job options: transcodes retry twice; moves wait while a video is busy; deletes retry until done. Upgrades (the
- * higher qualities) have a lower priority: every waiting first job (making a video playable) runs before them.
+ * higher qualities) retain their priority in the background queue and on older workers during rollout.
  */
 export function jobOptions(job: MediaJob) {
   const { name, videoId } = job;
@@ -35,7 +36,8 @@ export function jobOptions(job: MediaJob) {
 @Injectable()
 export class MediaQueue implements OnModuleDestroy {
   private readonly log = new Logger('MediaQueue');
-  readonly queue: Queue | null;
+  readonly queue: Queue<MediaJob> | null;
+  readonly upgradeQueue: Queue<MediaJob> | null;
   private readonly connection: Redis | null;
   private readonly inline: MediaJobs | null;
 
@@ -43,18 +45,20 @@ export class MediaQueue implements OnModuleDestroy {
     // BullMQ does not close a connection it was given, so this service owns and closes it.
     this.connection = config.redisUrl ? new Redis(config.redisUrl, { maxRetriesPerRequest: null }) : null;
     this.queue = this.connection ? new Queue(MEDIA_QUEUE, { connection: this.connection, prefix: config.media.queuePrefix }) : null;
+    this.upgradeQueue = this.connection ? new Queue(MEDIA_UPGRADE_QUEUE, { connection: this.connection, prefix: config.media.queuePrefix }) : null;
     this.inline = this.queue ? null : new MediaJobs(prisma, storage, config, redis.client, null,
       new LocalChunks(config.media.chunkConcurrency, { ffmpegPath: config.media.ffmpegPath, storage, scratchDir: config.media.scratchDir }));
     if (this.inline) this.log.warn('REDIS_URL is not set: media jobs run inside the API (development only).');
   }
 
   async add(job: MediaJob) {
-    if (this.queue) { await this.queue.add(job.name, job, jobOptions(job)); return; }
+    const queue = job.name === 'upgrade' || job.name === 'caption' ? this.upgradeQueue : this.queue;
+    if (queue) { await queue.add(job.name, job, jobOptions(job)); return; }
     if (job.name === 'transcode') this.log.log({ event: 'transcode_started', videoId: job.videoId, attempt: 1, queueWaitMs: 0 });
     void this.inline!.run(job, true).catch((e) => this.log.error(`${job.name} ${job.videoId}: ${(e as Error).message}`));
   }
 
-  async onModuleDestroy() { await this.queue?.close(); await this.connection?.quit().catch(() => undefined); }
+  async onModuleDestroy() { await Promise.all([this.queue?.close(), this.upgradeQueue?.close()]); await this.connection?.quit().catch(() => undefined); }
 }
 
 export const storageProvider = { provide: STORAGE, inject: [APP_CONFIG], useFactory: (c: AppConfig) => createStorage(c) };

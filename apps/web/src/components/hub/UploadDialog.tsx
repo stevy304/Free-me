@@ -96,7 +96,9 @@ export function UploadDialog() {
     else if (snap.state === 'compressing') status = <span className="tabular-nums">Making it smaller to save data · {Math.floor((snap.compress?.progress ?? 0) * 100)}% of {formatBytes(snap.compress?.originalBytes ?? snap.total)}</span>;
     else if (snap.state !== 'done') status = <span className="tabular-nums">{snap.state === 'paused' ? 'Paused' : snap.state === 'finishing' ? 'Finishing upload…' : snap.state === 'starting' ? 'Starting…' : `Uploading ${pct}%`} · {formatBytes(snap.sent)} of {formatBytes(snap.total)}{snap.compress?.savedBytes ? ` (was ${formatBytes(snap.compress.originalBytes)})` : ''}{snap.state === 'uploading' && snap.bytesPerSecond ? ` · ${formatBytes(snap.bytesPerSecond)}/s · ${formatEta(snap.secondsLeft)}` : ''}</span>;
     else if (video?.status === 'FAILED') status = <span className="flex items-center gap-2 text-danger"><Icon.Warning size={16} />{video.processingError}</span>;
+    else if (video?.status === 'READY' && video.processingError) status = <span className="flex items-center gap-2 text-muted"><Icon.Warning size={16} />Ready to watch · {video.processingError}</span>;
     else if (video?.processingStage === 'Ready') status = <span className="flex items-center gap-2 text-brand"><Icon.CheckCircle size={16} />Processing complete · {video.renditions.at(-1)}</span>;
+    else if (video?.status === 'READY') status = <span className="flex items-center gap-2 text-brand"><Icon.CheckCircle size={16} />Ready to watch · {video.renditions.at(-1)} available · Finishing processing</span>;
     else status = <span className="tabular-nums">Upload complete · {video?.processingStage ?? 'Processing'} {video ? `${video.processingProgress}%` : ''}</span>;
   }
   const bar = snap ? (snap.state === 'done' ? (video?.processingProgress ?? 0) : snap.state === 'compressing' ? (snap.compress?.progress ?? 0) * 100 : snap.total ? (snap.sent / snap.total) * 100 : 0) : 0;
