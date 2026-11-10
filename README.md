@@ -49,7 +49,13 @@ npm run dev
 3. creates the database user and database from `DATABASE_URL`, refreshes the database client for the current code, applies the migrations and seeds the video categories (so after `git pull`, just run `npm run dev` again);
 4. runs the **API** (http://localhost:4000, docs at `/api/docs`, rebuilt when you edit it), the **media worker** and the **web app** (http://localhost:3000), with labelled logs in one terminal. Ctrl+C stops all of them.
 
-In GitHub Codespaces it uses the forwarded https address of port 3000 automatically (open it from the Ports tab).
+To use **http://localhost:3000** explicitly, run `npm run dev:local`. This sets the app origin to localhost
+for that run, even if `.env` contains a Codespaces URL. Use Ubuntu or WSL on Windows. If you run this in a
+remote Codespace, forward remote port 3000 to local port 3000 in desktop VS Code before opening localhost.
+
+Plain `npm run dev` in GitHub Codespaces still uses its forwarded HTTPS address. If you installed Free Me
+from that address, open `http://localhost:3000` in your browser and install a new local copy. The old
+installed app belongs to its original address.
 
 Videos are stored in `./.data/storage` (`STORAGE_DRIVER=local`). With `MAIL_TRANSPORT=console`, sign-in codes are printed in the `[api]` lines. Put your address in `ADMIN_EMAILS` in `.env` to become an administrator (and moderator).
 
