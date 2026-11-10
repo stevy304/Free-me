@@ -12,7 +12,8 @@ import type { Storage } from '../media/storage';
 import { publish, room } from '../realtime/publish';
 import { pushTo } from '../push/push';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { endLive, finishLive, LIVE_PLAYLIST, LiveSync } from './sync';
+import { endLive, finishLive, LiveSync } from './sync';
+import { browserLiveArgs } from './browser-hls';
 
 export class LiveError extends Error {}
 import { hasPremiumAccess } from '../billing/billing';
@@ -121,20 +122,12 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
       if (!stream) throw new LiveError('Stream not found.');
       await mkdir(dir, { recursive: true });
       const s = await this.goLive(user, streamId, 'browser');
-      const ff = spawn(this.config.media.ffmpegPath, [
-        // Start after about a second of input (by default ffmpeg first analyses 5 MB, seconds of delay for viewers).
-        '-hide_banner', '-loglevel', 'error', '-probesize', '256k', '-analyzeduration', '1000000', '-fflags', '+genpts', '-i', 'pipe:0',
-        '-map', '0:v:0?', '-map', '0:a:0?',
-        '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-profile:v', 'main', '-pix_fmt', 'yuv420p',
-        '-vf', "scale='min(1280,iw)':-2", '-r', '30', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0', '-b:v', '2500k', '-maxrate', '3000k', '-bufsize', '5000k',
-        '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
-        '-f', 'hls', '-hls_time', '2', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments', '-hls_segment_filename', join(dir, 'seg%05d.ts'), join(dir, LIVE_PLAYLIST),
-      ], { stdio: ['pipe', 'ignore', 'pipe'] });
+      const ff = spawn(this.config.media.ffmpegPath, browserLiveArgs(dir), { stdio: ['pipe', 'ignore', 'pipe'] });
       let err = '';
       ff.on('error', (error) => { err = error.message; });
       ff.stderr?.on('data', (d: Buffer) => { err = (err + d.toString()).slice(-2000); });
       ff.stdin?.on('error', () => undefined);
-      const sync = new LiveSync(this.storage, s.id, dir);
+      const sync = new LiveSync(this.storage, s.id, dir, 'browser');
       const timer = setInterval(() => { void sync.tick().catch((e) => this.log.warn(`live ${s.id}: ${(e as Error).message}`)); }, 1000);
       const resumeKey = randomBytes(24).toString('base64url');
       const ended = new Promise<void>((resolve) => ff.on('close', async (code) => {

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import type Hls from 'hls.js';
 import * as Icon from '@/components/icons';
 import { Avatar } from '@/components/Avatar';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
@@ -56,23 +57,55 @@ export function LiveChat({ streamId, initial, live, className = '' }: { streamId
 /** Plays a live HLS stream (Safari natively, elsewhere hls.js), starting near the live edge. */
 export function LiveVideo({ src, muted = false, className = '' }: { src: string; muted?: boolean; className?: string }) {
   const el = useRef<HTMLVideoElement>(null);
+  const player = useRef<Hls | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [qualities, setQualities] = useState<number[]>([]);
+  const [selected, setSelected] = useState(-1);
+  const [current, setCurrent] = useState<number | null>(null);
   useEffect(() => {
-    const v = el.current!; let h: { destroy(): void } | null = null; let off = false;
-    if (v.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) v.src = src;
-    else import('hls.js').then(({ default: H }) => {
+    const v = el.current!;
+    let off = false;
+    setErr(null);
+    setQualities([]);
+    setSelected(-1);
+    setCurrent(null);
+    const play = () => { v.play().catch(() => { if (!off) { v.muted = true; v.play().catch(() => undefined); } }); };
+    if (v.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) {
+      v.src = src;
+      play();
+    } else import('hls.js').then(({ default: H }) => {
       if (off) return;
       if (!H.isSupported()) { setErr('This browser cannot play live video.'); return; }
-      const x = new H({ liveSyncDurationCount: 3, lowLatencyMode: false, maxBufferLength: 20 });
+      const x = new H({ liveSyncDurationCount: 3, lowLatencyMode: false, maxBufferLength: 20, startLevel: -1 });
+      player.current = x;
+      x.on(H.Events.MANIFEST_PARSED, (_, data) => {
+        setQualities(data.levels.map((level) => level.height));
+        play();
+      });
+      x.on(H.Events.LEVEL_SWITCHED, (_, data) => setCurrent(x.levels[data.level]?.height ?? null));
       x.on(H.Events.ERROR, (_e, d) => { if (d.fatal) { if (d.type === H.ErrorTypes.NETWORK_ERROR) x.startLoad(); else x.recoverMediaError(); } });
-      x.loadSource(src); x.attachMedia(v); h = x;
-    });
-    v.play().catch(() => { v.muted = true; v.play().catch(() => undefined); });
-    return () => { off = true; h?.destroy(); v.removeAttribute('src'); v.load(); };
+      x.loadSource(src);
+      x.attachMedia(v);
+    }).catch(() => { if (!off) setErr('The live player could not load.'); });
+    return () => { off = true; player.current?.destroy(); player.current = null; v.removeAttribute('src'); v.load(); };
   }, [src]);
+
   return (
     <div className={`relative overflow-hidden bg-black ${className}`}>
       <video ref={el} controls playsInline muted={muted} className="h-full w-full" />
+      {qualities.length > 1 && (
+        <label className="absolute right-3 top-3 flex items-center gap-2 rounded-lg bg-black/85 px-2 py-1.5 text-xs font-semibold text-white">
+          Quality
+          <select aria-label="Quality" value={selected} onChange={(e) => {
+            const level = Number(e.target.value);
+            if (player.current) player.current.loadLevel = level;
+            setSelected(level);
+          }} className="rounded bg-[#202020] px-1 py-0.5">
+            <option value={-1}>{selected === -1 && current ? `Auto · ${current}p` : 'Auto'}</option>
+            {qualities.map((height, i) => <option key={i} value={i}>{height}p</option>)}
+          </select>
+        </label>
+      )}
       {err && <p className="absolute inset-0 grid place-items-center p-6 text-center text-white">{err}</p>}
     </div>
   );

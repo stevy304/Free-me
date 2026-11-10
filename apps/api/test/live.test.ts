@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -104,12 +104,27 @@ test('Free browser streaming; recording pieces become HLS for viewers, with chat
     expect(await resumedHost.emitWithAck('live:chunk', [id, i / size, data.subarray(i, i + size)])).toEqual({ ok: true });
   }
 
-  // Viewers find it live and play HLS from storage.
-  let pl = '';
-  for (let i = 0; i < 100 && !pl.includes('.ts'); i++) { pl = (await request(ctx.http).get(`/api/storage/local/pub/live/${id}/index.m3u8`)).text ?? ''; await new Promise((r) => setTimeout(r, 200)); }
-  expect(pl).toContain('#EXTM3U');
-  const seg = pl.split('\n').find((l) => l.endsWith('.ts'))!;
-  expect((await request(ctx.http).get(`/api/storage/local/pub/live/${id}/${seg}`).expect(200)).body.length).toBeGreaterThan(1000);
+  // The master is published only after both variants have playable, aligned segments.
+  const livePath = `/api/storage/local/pub/live/${id}`;
+  let master = '';
+  for (let i = 0; i < 100 && !master.includes('720p.m3u8'); i++) {
+    master = (await request(ctx.http).get(`${livePath}/index.m3u8`)).text ?? '';
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  expect(master).toContain('#EXTM3U');
+  expect(master).toMatch(/RESOLUTION=640x360[^\n]*\n360p.m3u8/);
+  expect(master).toMatch(/RESOLUTION=1280x720[^\n]*\n720p.m3u8/);
+  const variants = await Promise.all([360, 720].map(async (height) => {
+    const variant = (await request(ctx.http).get(`${livePath}/${height}p.m3u8`).expect(200)).text;
+    const seg = variant.split('\n').find((l: string) => l.endsWith('.ts'))!;
+    const { body } = await request(ctx.http).get(`${livePath}/${seg}`).expect(200);
+    const file = join(dir, `${height}p.ts`);
+    writeFileSync(file, body);
+    const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,start_time', '-of', 'json', file], { encoding: 'utf8' })).streams[0];
+    expect(probe).toMatchObject({ width: height === 360 ? 640 : 1280, height });
+    return { start: probe.start_time, durations: variant.match(/^#EXTINF:.+/gm) };
+  }));
+  expect(variants[0]).toEqual(variants[1]);
   const now = (await request(ctx.http).get('/api/live').expect(200)).body.streams;
   expect(now).toEqual([expect.objectContaining({ id, title: 'Morning show', status: 'LIVE', playbackUrl: expect.stringContaining(`/live/${id}/index.m3u8`), channel: expect.objectContaining({ handle: 'host', isVerified: false }) })]);
 

@@ -29,7 +29,7 @@ const post = (page: Page, path: string, data: object) => page.request.post(`${BA
 
 test('a Premium creator goes live from the browser; a viewer watches, chats and sees it end', async ({ browser }) => {
   test.skip(!LOG, 'Set E2E_API_LOG to the API log (MAIL_TRANSPORT=console).');
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const hostEmail = `live.${run}@example.com`;
 
   const host = await (await browser.newContext({ permissions: ['camera', 'microphone'] })).newPage();
@@ -100,6 +100,18 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   const restoredAt = await playbackTime();
   await expect.poll(playbackTime, { timeout: 20_000 }).toBeGreaterThan(restoredAt + 1);
   expect(viewer.url()).toBe(watchPage);
+
+  // A viewer can choose either rendition and return to automatic quality on the same player.
+  const quality = viewer.getByLabel('Quality', { exact: true });
+  const height = () => video.evaluate((element) => (element as HTMLVideoElement).videoHeight);
+  await quality.selectOption({ label: '360p' });
+  await expect.poll(height, { timeout: 30_000 }).toBe(360);
+  await quality.selectOption({ label: '720p' });
+  await expect.poll(height, { timeout: 30_000 }).toBe(720);
+  await quality.selectOption('-1');
+  await expect(quality).toHaveValue('-1');
+  expect(viewer.url()).toBe(watchPage);
+
 
   // The creator ends it; the viewer is told.
   await host.getByRole('button', { name: 'End broadcast' }).click();

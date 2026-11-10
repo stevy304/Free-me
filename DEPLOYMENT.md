@@ -193,3 +193,9 @@ With JSON logging enabled, match the API and worker events by `videoId`.
 The browser records the separate `free-me:play-to-playing` User Timing measure from the first play event to the first playing event for a source. Inspect it in the browser Performance panel. It measures viewer startup and stays in that browser.
 
 Uploads start with four concurrent parts. On sufficiently large files, the browser samples acknowledged throughput, tries up to six, and returns to the previous setting if the gain is under 10%. Retries reduce concurrency to a minimum of two. Use the API's transfer rate, retries, and peak concurrency to compare similar file sizes and network conditions.
+
+### Browser live quality
+
+Free Go Live and Premium Studio browser broadcasts encode aligned 360p and 720p HLS variants. The player can switch automatically as viewer bandwidth changes. The quality menu offers a manual choice on browsers using hls.js. Safari manages quality through its native player. OBS and other RTMP sources continue serving the encoder's output as a single quality. Browser replays use the 720p recording.
+
+Both variants are encoded on the API server, with one x264 thread for 360p and two for 720p. Measure sustained encode speed and segment delivery on your deployment before raising the browser stream limit.
