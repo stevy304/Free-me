@@ -75,7 +75,8 @@ test('Free browser streaming; recording pieces become HLS for viewers, with chat
   const viewer = await connect(cookieOf(fan.res));
   await viewer.emitWithAck('join', `live:${id}`);
   const started = next(viewer, 'started');
-  expect(await hostSocket.emitWithAck('live:start', id)).toEqual({ ok: true, id });
+  const session = await hostSocket.emitWithAck('live:start', id);
+  expect(session).toEqual({ ok: true, id, resumeKey: expect.any(String), reconnectMs: 30_000 });
   await started;
   expect((await fan.agent.get('/api/me/notifications').expect(200)).body.notifications[0]).toMatchObject({ type: 'LIVE', text: 'Host is live: "Morning show"', href: `/live/${id}` });
 
@@ -83,7 +84,25 @@ test('Free browser streaming; recording pieces become HLS for viewers, with chat
   const webm = join(dir, 'cam.webm');
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '6', '-c:v', 'libvpx', '-deadline', 'realtime', '-b:v', '1M', '-c:a', 'libopus', webm]);
   const data = readFileSync(webm);
-  for (let i = 0; i < data.length; i += 64 * 1024) expect(await hostSocket.emitWithAck('live:chunk', [id, data.subarray(i, i + 64 * 1024)])).toEqual({ ok: true });
+  const size = 64 * 1024;
+  const firstChunk = data.subarray(0, size);
+  expect(await hostSocket.emitWithAck('live:chunk', [id, 0, firstChunk])).toEqual({ ok: true });
+  const interrupted = next(viewer, 'live:signal');
+  hostSocket.disconnect();
+  expect(await interrupted).toEqual({ reconnectUntil: expect.any(Number) });
+  expect((await request(ctx.http).get(`/api/live/${id}`).expect(200)).body.stream.status).toBe('LIVE');
+  expect(await viewer.emitWithAck('live:resume', [id, session.resumeKey])).toEqual({ ok: false });
+
+  const resumedHost = await connect(cookieOf(host.res));
+  expect(await resumedHost.emitWithAck('live:resume', [id, 'x'.repeat(32)])).toEqual({ ok: false });
+  const restored = next(viewer, 'live:signal');
+  expect(await resumedHost.emitWithAck('live:resume', [id, session.resumeKey])).toEqual({ ok: true });
+  expect(await restored).toEqual({ reconnectUntil: null });
+  // A lost acknowledgement must not cause a WebM chunk to be written twice.
+  expect(await resumedHost.emitWithAck('live:chunk', [id, 0, firstChunk])).toEqual({ ok: true });
+  for (let i = size; i < data.length; i += size) {
+    expect(await resumedHost.emitWithAck('live:chunk', [id, i / size, data.subarray(i, i + size)])).toEqual({ ok: true });
+  }
 
   // Viewers find it live and play HLS from storage.
   let pl = '';
@@ -95,8 +114,8 @@ test('Free browser streaming; recording pieces become HLS for viewers, with chat
   expect(now).toEqual([expect.objectContaining({ id, title: 'Morning show', status: 'LIVE', playbackUrl: expect.stringContaining(`/live/${id}/index.m3u8`), channel: expect.objectContaining({ handle: 'host', isVerified: false }) })]);
 
   // Chat: signed-in viewers only, heard by everyone in the room, kept for latecomers.
-  const line = next(hostSocket, 'chat');
-  await hostSocket.emitWithAck('join', `live:${id}`);
+  const line = next(resumedHost, 'chat');
+  await resumedHost.emitWithAck('join', `live:${id}`);
   expect(await viewer.emitWithAck('live:chat', { streamId: id, text: 'Hello from Kigali!' })).toEqual({ ok: true });
   expect(await line).toMatchObject({ text: 'Hello from Kigali!', author: { name: expect.any(String), host: false } });
   expect((await request(ctx.http).get(`/api/live/${id}`).expect(200)).body.chat).toHaveLength(1);
@@ -105,7 +124,7 @@ test('Free browser streaming; recording pieces become HLS for viewers, with chat
 
   // End: viewers are told; the recording becomes a private video that is processed like an upload.
   const ended = next(viewer, 'ended', 30_000);
-  expect(await hostSocket.emitWithAck('live:stop', id)).toEqual({ ok: true });
+  expect(await resumedHost.emitWithAck('live:stop', id)).toEqual({ ok: true });
   await ended;
   const s = await ctx.prisma.liveStream.findUniqueOrThrow({ where: { id } });
   expect(s).toMatchObject({ status: 'ENDED', source: 'browser' });

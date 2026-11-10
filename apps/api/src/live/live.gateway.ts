@@ -43,15 +43,27 @@ export class LiveGateway implements OnGatewayDisconnect, OnGatewayInit {
     const u = await this.user(socket);
     if (!u || u.status !== 'ACTIVE') return { ok: false, error: 'Sign in to go live.' };
     if (typeof streamId !== 'string' || !ID.test(streamId)) return { ok: false, error: 'Stream not found.' };
-    try { const s = await this.live.startBrowser(u, streamId, socket.id); return { ok: true, id: s.id }; }
+    try {
+      const session = await this.live.startBrowser(u, streamId, socket.id);
+      if (!socket.connected) this.live.dropSocket(socket.id);
+      return { ok: true, ...session };
+    }
     catch (e) { return { ok: false, error: e instanceof LiveError ? e.message : 'The stream could not start.' }; }
+  }
+
+  @SubscribeMessage('live:resume')
+  async resume(@ConnectedSocket() socket: Socket, @MessageBody() body: unknown) {
+    const [streamId, key] = Array.isArray(body) ? body : [];
+    if (typeof streamId !== 'string' || !ID.test(streamId) || typeof key !== 'string' || key.length !== 32) return { ok: false };
+    const user = await this.user(socket);
+    return { ok: !!(socket.connected && user?.status === 'ACTIVE' && this.live.resumeBrowser(user.id, streamId, socket.id, key)) };
   }
 
   @SubscribeMessage('live:chunk')
   chunk(@ConnectedSocket() socket: Socket, @MessageBody() body: unknown) {
-    const [streamId, data] = Array.isArray(body) ? body : [];
-    if (typeof streamId !== 'string' || !Buffer.isBuffer(data)) return { ok: false };
-    return { ok: this.live.chunk(streamId, socket.id, data) };
+    const [streamId, sequence, data] = Array.isArray(body) ? body : [];
+    if (typeof streamId !== 'string' || !Number.isSafeInteger(sequence) || sequence < 0 || !Buffer.isBuffer(data) || !data.length) return { ok: false };
+    return this.live.chunk(streamId, socket.id, sequence, data);
   }
 
   @SubscribeMessage('live:stop')
@@ -139,5 +151,5 @@ export class LiveGateway implements OnGatewayDisconnect, OnGatewayInit {
     return { ok: true };
   }
 
-  async handleDisconnect(socket: Socket) { this.leaveGuests(socket); await this.live.dropSocket(socket.id); }
+  handleDisconnect(socket: Socket) { this.leaveGuests(socket); this.live.dropSocket(socket.id); }
 }

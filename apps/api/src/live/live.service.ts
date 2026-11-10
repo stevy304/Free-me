@@ -18,7 +18,18 @@ export class LiveError extends Error {}
 import { hasPremiumAccess } from '../billing/billing';
 export const newStreamKey = () => `fm_${randomBytes(18).toString('base64url')}`;
 
-interface BrowserSession { ff: ChildProcess; sync: LiveSync; timer: NodeJS.Timeout; socketId: string; bytes: number; ended: Promise<void> }
+const RECONNECT_MS = 30_000;
+
+interface BrowserSession {
+  ff: ChildProcess;
+  ownerId: string;
+  resumeKey: string;
+  socketId: string;
+  nextSequence: number;
+  reconnect: { deadline: number; timer: NodeJS.Timeout } | null;
+  stopping: boolean;
+  ended: Promise<void>;
+}
 
 /**
  * Live streams. Browser streams arrive over the socket (MediaRecorder chunks) and are encoded here by ffmpeg into
@@ -48,6 +59,8 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
     for (const s of live) {
       const n = await this.realtime.count(room.live(s.id)).catch(() => 0);
       publish(room.live(s.id), 'viewers', { count: n });
+      const session = this.browser.get(s.id);
+      if (session && !session.stopping) this.publishSignal(s.id, session);
       if (n > s.peakViewers) await this.prisma.liveStream.update({ where: { id: s.id }, data: { peakViewers: n } }).catch(() => undefined);
     }
   }
@@ -123,8 +136,11 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
       ff.stdin?.on('error', () => undefined);
       const sync = new LiveSync(this.storage, s.id, dir);
       const timer = setInterval(() => { void sync.tick().catch((e) => this.log.warn(`live ${s.id}: ${(e as Error).message}`)); }, 1000);
+      const resumeKey = randomBytes(24).toString('base64url');
       const ended = new Promise<void>((resolve) => ff.on('close', async (code) => {
         clearInterval(timer);
+        const reconnect = this.browser.get(s.id)?.reconnect;
+        if (reconnect) clearTimeout(reconnect.timer);
         this.browser.delete(s.id);
         if (code) this.log.warn(`live ${s.id}: encoder stopped (${code}): ${err.trim().slice(-500)}`);
         try {
@@ -134,33 +150,62 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
           this.log.warn(`Could not finish stream ${s.id}: ${(error as Error).message}`);
         } finally { resolve(); }
       }));
-      this.browser.set(s.id, { ff, sync, timer, socketId, bytes: 0, ended });
-      return s;
+      this.browser.set(s.id, { ff, ownerId: user.id, resumeKey, socketId, nextSequence: 0, reconnect: null, stopping: false, ended });
+      return { id: s.id, resumeKey, reconnectMs: RECONNECT_MS };
     } finally { this.starting.delete(streamId); }
   }
 
-  /** One piece of the browser's recording. Returns false if the stream is not running here. */
-  chunk(streamId: string, socketId: string, data: Buffer) {
-    const b = this.browser.get(streamId);
-    if (!b || b.socketId !== socketId || !b.ff.stdin?.writable || b.ff.stdin.writableLength + data.length > 8 * 1024 * 1024) return false;
-    b.bytes += data.length;
-    b.ff.stdin?.write(data);
-    return true;
+  private publishSignal(id: string, session: BrowserSession) {
+    publish(room.live(id), 'live:signal', { reconnectUntil: session.reconnect?.deadline ?? null });
   }
 
-  /** Ends a browser stream (the creator pressed End, or their window closed). */
+  resumeBrowser(userId: string, streamId: string, socketId: string, key: string) {
+    const session = this.browser.get(streamId);
+    if (!session || session.ownerId !== userId || session.resumeKey !== key || session.stopping) return false;
+    if (session.reconnect) {
+      if (Date.now() >= session.reconnect.deadline) return false;
+      clearTimeout(session.reconnect.timer);
+      session.reconnect = null;
+      session.socketId = socketId;
+      this.publishSignal(streamId, session);
+    }
+    return session.socketId === socketId;
+  }
+
+  /** A repeated sequence means the encoder got the data but the acknowledgement was lost. */
+  chunk(streamId: string, socketId: string, sequence: number, data: Buffer) {
+    const b = this.browser.get(streamId);
+    if (!b || b.socketId !== socketId || b.reconnect || b.stopping) return { ok: false };
+    if (sequence < b.nextSequence) return { ok: true };
+    const stdin = b.ff.stdin;
+    if (sequence !== b.nextSequence || !stdin?.writable) return { ok: false };
+    if (stdin.writableLength + data.length > 8 * 1024 * 1024) return { ok: false, retry: true };
+    stdin.write(data);
+    b.nextSequence += 1;
+    return { ok: true };
+  }
+
+  /** Finishes the encoder and saves the replay once, even if end and expiry race. */
   async stopBrowser(streamId: string, socketId?: string) {
     const b = this.browser.get(streamId);
     if (!b || (socketId && b.socketId !== socketId)) return false;
+    if (b.stopping) { await b.ended; return true; }
+    b.stopping = true;
+    if (b.reconnect) clearTimeout(b.reconnect.timer);
     b.ff.stdin?.end();
     const kill = setTimeout(() => b.ff.kill('SIGKILL'), 20_000);
-    await b.ended; clearTimeout(kill);
+    await b.ended;
+    clearTimeout(kill);
     return true;
   }
 
-  /** A window closed: its streams end. */
-  async dropSocket(socketId: string) {
-    for (const [id, b] of this.browser) if (b.socketId === socketId) await this.stopBrowser(id);
+  dropSocket(socketId: string) {
+    for (const [id, b] of this.browser) {
+      if (b.socketId !== socketId || b.stopping || b.reconnect) continue;
+      const timer = setTimeout(() => { void this.stopBrowser(id); }, RECONNECT_MS);
+      b.reconnect = { deadline: Date.now() + RECONNECT_MS, timer };
+      this.publishSignal(id, b);
+    }
   }
 
   // ----- Chat -----
