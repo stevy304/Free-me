@@ -36,7 +36,7 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   let dropSignal = false;
   let hostSocket: WebSocketRoute | undefined;
   await host.routeWebSocket(/\/api\/socket\?/, (ws) => {
-    if (dropSignal) { ws.close({ code: 1011 }); return; }
+    if (dropSignal) { ws.close({ code: 4001 }); return; }
     hostSocket = ws;
     ws.connectToServer();
   });
@@ -103,7 +103,7 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   if (supportsH264) await expect.poll(playbackTime, { timeout: 20_000 }).toBeGreaterThan(0);
   const droppedAt = Date.now();
   dropSignal = true;
-  await hostSocket!.close({ code: 1011 });
+  await hostSocket!.close({ code: 4001 });
   await expect(host.getByText(/^Reconnecting · /)).toBeVisible();
   await expect(viewer.getByText('Host reconnecting')).toBeVisible();
   await expect(viewer.getByText('Hello from Musanze!')).toBeVisible();
