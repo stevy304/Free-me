@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type WebSocketRoute } from '@playwright/test';
 import { expectCode } from './codes';
 
 /**
@@ -33,6 +33,12 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   const hostEmail = `live.${run}@example.com`;
 
   const host = await (await browser.newContext({ permissions: ['camera', 'microphone'] })).newPage();
+  let dropSignal = false;
+  let relay: WebSocketRoute | undefined;
+  await host.routeWebSocket(/\/api\/socket\?/, (ws) => {
+    if (dropSignal) { ws.close({ code: 1011 }); return; }
+    relay = ws.connectToServer();
+  });
   await signIn(host, hostEmail);
   expect((await post(host, '/channels', { handle: `live.${run}`, name: 'Live Kigali' })).status()).toBe(201);
   await host.goto('/studio/live');
@@ -75,6 +81,25 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   await viewer.getByRole('button', { name: 'Send' }).click();
   await panels.getByRole('button', { name: 'Chat', exact: true }).click();
   await expect(host.getByText('Hello from Musanze!')).toBeVisible({ timeout: 10_000 });
+
+  // Close the host's connection and reject reconnects until both screens show the interruption.
+  const video = viewer.locator('video');
+  const playbackTime = () => video.evaluate((element) => (element as HTMLVideoElement).currentTime);
+  await expect.poll(playbackTime, { timeout: 20_000 }).toBeGreaterThan(0);
+  const watchPage = viewer.url();
+  const droppedAt = Date.now();
+  dropSignal = true;
+  await relay!.close({ code: 1011 });
+  await expect(host.getByText(/^Reconnecting · /)).toBeVisible();
+  await expect(viewer.getByText('Host reconnecting')).toBeVisible();
+  await expect(viewer.getByText('Hello from Musanze!')).toBeVisible();
+  await new Promise((resolve) => setTimeout(resolve, Math.max(0, 10_000 - (Date.now() - droppedAt))));
+  dropSignal = false;
+  await expect(host.getByText(/ON AIR/)).toBeVisible({ timeout: 20_000 });
+  await expect(viewer.getByText('Host reconnecting')).toBeHidden();
+  const restoredAt = await playbackTime();
+  await expect.poll(playbackTime, { timeout: 20_000 }).toBeGreaterThan(restoredAt + 1);
+  expect(viewer.url()).toBe(watchPage);
 
   // The creator ends it; the viewer is told.
   await host.getByRole('button', { name: 'End broadcast' }).click();
