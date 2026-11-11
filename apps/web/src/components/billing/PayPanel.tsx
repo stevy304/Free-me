@@ -63,6 +63,13 @@ export function PayPanel({ usdCents, plans, start, onPaid, label, pending }: { u
     const acc = plans.methods.find((x) => x.name === 'manual');
     return <ManualSteps payment={watching} accounts={acc?.accounts ?? []} instructions={acc?.instructions ?? null} onUpdate={watch} onCancel={() => watch(null)} />;
   }
+  if (watching?.status === 'PENDING' && watching.method === 'flutterwave') {
+    return <div className="rounded-2xl border border-line p-5 text-sm" aria-live="polite">
+      <p className="font-semibold">Waiting for checkout confirmation</p>
+      <p className="mt-1 text-muted">We are checking your payment. Returning from checkout does not itself confirm payment.</p>
+      {watching.checkoutUrl && <a href={watching.checkoutUrl} className="mt-3 inline-block font-semibold text-brand underline">Continue secure checkout</a>}
+    </div>;
+  }
   if (watching?.status === 'PENDING') {
     return (
       <div className="rounded-2xl border border-line bg-elevated p-5 text-center" aria-live="polite">

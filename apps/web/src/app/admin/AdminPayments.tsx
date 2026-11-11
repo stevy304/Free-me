@@ -40,7 +40,7 @@ export function ManualQueue() {
         {rows.map((p) => (
           <article key={p.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-elevated p-3 text-[14px]">
             <div className="min-w-0 flex-1">
-              <p><b className="tabular-nums">{money(p.amount, p.currency, locale)}</b> ({usd(p.usdCents, locale)}) · {p.purpose === 'PREMIUM' ? `Premium, ${p.months} month${p.months === 1 ? '' : 's'}` : 'Ad campaign'} · {p.email}</p>
+              <p><b className="tabular-nums">{money(p.amount, p.currency, locale)}</b> ({usd(p.usdCents, locale)}) · {p.purpose === 'PREMIUM' ? `Premium, ${p.months} month${p.months === 1 ? '' : 's'}` : p.purpose === 'CREATOR_SUPPORT' ? 'Creator support' : 'Ad campaign'} · {p.email}</p>
               <p className="text-muted">Code <b className="font-mono text-ink">{p.reference}</b> · transaction id {p.payerReference ? <b className="font-mono text-ink">{p.payerReference}</b> : <i>not given yet</i>} · {new Date(p.createdAt).toLocaleString(locale)}</p>
             </div>
             <input className={`${inputClass} max-w-[200px]`} placeholder="Reason (to reject)" value={reason[p.id] ?? ''} onChange={(e) => setReason({ ...reason, [p.id]: e.target.value })} />

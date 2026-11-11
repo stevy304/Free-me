@@ -62,7 +62,7 @@ export class Billing {
   }
 
   /** Creates a payment and asks the provider to collect it. */
-  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN'; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }) {
+  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_SUPPORT'; supportChannelId?: string; requestKey?: string; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }): Promise<Payment> {
     const provider = (await this.providers())[p.method];
     if (!provider) throw new BillingError(p.method === 'mtn_momo' ? 'MTN MoMo payments are not set up on this server yet.' : p.method === 'flutterwave' ? 'Card payments are not set up on this server yet.' : 'This way of paying is not available.');
     let phone: string | undefined;
@@ -71,9 +71,19 @@ export class Billing {
       if (!phone) throw new BillingError('Enter your MTN Mobile Money number, e.g. 0788 123 456 or +250 788 123 456.');
     }
     const amountMinor = provider.charge(p.usdCents);
-    const payment = await this.prisma.payment.create({
-      data: { userId: user.id, purpose: p.purpose, provider: p.method, providerRef: `pending-${randomUUID()}`, amountMinor, currency: provider.currency, usdCents: p.usdCents, months: p.months ?? null, campaignId: p.campaignId ?? null, phone: phone ?? null },
-    });
+    const existing = p.requestKey ? await this.prisma.payment.findUnique({ where: { requestKey: p.requestKey } }) : null;
+    if (existing) {
+      if (existing.userId !== user.id || existing.supportChannelId !== p.supportChannelId || existing.usdCents !== p.usdCents || existing.provider !== p.method || existing.phone !== (phone ?? null)) throw new BillingError('This request was already used for a different payment.');
+      return existing;
+    }
+    let payment: Payment;
+    try { payment = await this.prisma.payment.create({
+      data: { userId: user.id, purpose: p.purpose, provider: p.method, providerRef: `pending-${randomUUID()}`, amountMinor, currency: provider.currency, usdCents: p.usdCents, months: p.months ?? null, campaignId: p.campaignId ?? null, phone: phone ?? null, supportChannelId: p.supportChannelId, requestKey: p.requestKey },
+    }); } catch (e) {
+      // A competing request may have created this payment while we checked.
+      if (p.requestKey && (e as { code?: string }).code === 'P2002') return this.start(user, p);
+      throw e;
+    }
     try {
       const r = await provider.start({ paymentId: payment.id, amountMinor, currency: provider.currency, description: p.description, email: user.email, phone, returnUrl: `${this.config.appUrl}${p.returnPath}${p.returnPath.includes('?') ? '&' : '?'}payment=${payment.id}` });
       return this.prisma.payment.update({ where: { id: payment.id }, data: { providerRef: r.providerRef, checkoutUrl: r.checkoutUrl } });
@@ -122,6 +132,15 @@ export class Billing {
   private async fulfil(tx: Prisma.TransactionClient, p: Payment) {
     if (p.purpose === 'PREMIUM') {
       await this.extendPremium(tx, p.userId, p.months ?? 1);
+    } else if (p.purpose === 'CREATOR_SUPPORT' && p.supportChannelId) {
+      const amount = BigInt(p.usdCents);
+      const bal = await tx.creatorBalance.upsert({ where: { channelId: p.supportChannelId },
+        create: { channelId: p.supportChannelId, currency: EARNINGS_CURRENCY, pendingBalanceCents: amount, lifetimeEarningsCents: amount },
+        update: { pendingBalanceCents: { increment: amount }, lifetimeEarningsCents: { increment: amount } } });
+      if (bal.currency !== EARNINGS_CURRENCY) throw new BillingError('Creator balance currency needs review.');
+      await tx.revenueLedger.create({ data: { channelId: p.supportChannelId, sourceType: 'AUDIENCE_SUPPORT_PENDING', referenceId: p.id,
+        currency: EARNINGS_CURRENCY, grossAmountCents: amount, creatorShareCents: amount, platformShareCents: 0n, reinvestShareCents: 0n,
+        splitBps: '10000/0/0', balanceAfterCents: bal.confirmedBalanceCents, description: 'Audience support received; awaiting settlement review' } });
     } else if (p.campaignId) {
       await tx.campaign.updateMany({ where: { id: p.campaignId, status: 'DRAFT' }, data: { status: 'PENDING_REVIEW' } });
     }
@@ -183,11 +202,11 @@ export class Billing {
         const digits = currencyDigits(payment.currency);
         const raw = payment.amountMinor.toString().padStart(digits + 1, '0');
         const amount = digits ? `${raw.slice(0, -digits)}.${raw.slice(-digits)}` : raw;
-        const item = payment.purpose === 'PREMIUM' ? `Premium (${payment.months ?? 1} month(s))` : 'Ad campaign';
+        const item = payment.purpose === 'PREMIUM' ? `Premium (${payment.months ?? 1} month(s))` : payment.purpose === 'CREATOR_SUPPORT' ? 'One-time creator support' : 'Ad campaign';
         await mail.send(noticeMail(payment.user.email, 'Your Free Me payment receipt', [
           item, `Amount paid: ${payment.currency} ${amount}`, `Payment date (UTC): ${payment.paidAt!.toISOString().slice(0, 10)}`,
           `Receipt reference: ${payment.id}`,
-        ], { label: 'View payment history', url: `${this.config.appUrl}${payment.purpose === 'PREMIUM' ? '/premium' : '/studio/ads'}` }));
+        ], { label: 'View payment history', url: `${this.config.appUrl}${payment.purpose === 'AD_CAMPAIGN' ? '/studio/ads' : '/premium'}` }));
         await this.prisma.payment.updateMany({
           where: { id: payment.id, receiptDueAt: retryAt }, data: { receiptDueAt: null, receiptSentAt: new Date() },
         });

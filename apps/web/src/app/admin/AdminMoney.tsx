@@ -7,6 +7,7 @@ import { api } from '@/lib/client-api';
 import { duration } from '@/lib/format';
 import { usd } from '@/lib/money';
 import { useShell } from '@/components/shell/ShellContext';
+import { AdminSupport } from './AdminSupport';
 import { AdminPayouts } from './AdminPayouts';
 import { ManualQueue, PaymentSettings } from './AdminPayments';
 
@@ -48,6 +49,7 @@ export function AdminMoney() {
       {!s.methods.length && <p className="rounded-xl bg-accent-soft px-4 py-3 text-[14px] text-on-accent-soft">No way to pay is switched on yet. Start with <b>Send money (manual)</b> below: add your MoMo number and people can upgrade today.</p>}
       <ManualQueue />
       <AdminPayouts />
+      <AdminSupport />
       <div className="grid gap-3 sm:grid-cols-4">
         {[['Premium members', s.premiumMembers.toLocaleString(locale)], ['Premium, 30 days', usd(s.last30Days.premiumUsdCents, locale)], ['Ads sold, 30 days', usd(s.last30Days.adsUsdCents, locale)], ['Payments, 30 days', s.last30Days.payments.toLocaleString(locale)]].map(([l, v]) => (
           <div key={l} className="rounded-2xl border border-line p-4"><p className="text-[13px] text-muted">{l}</p><p className="font-display text-[24px] font-extrabold tabular-nums">{v}</p></div>

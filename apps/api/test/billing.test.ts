@@ -249,3 +249,52 @@ test('payment settings in the app: manual payments confirmed by an administrator
   await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ momo: { enabled: true, sandbox: false, baseUrl: base, currency: 'RWF', perUsd: 1500 } }).expect(200);
   expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.methods.find((m: any) => m.name === 'mtn_momo')).toMatchObject({ currency: 'RWF', perUsd: 1500 });
 });
+
+test('audience support: opt-in, verified destination, payment replay and concurrent clearance preserve balances', async () => {
+  const owner = await creator('support-maker@example.com', 'support-maker');
+  const viewer = await creator('support-viewer@example.com', 'support-viewer');
+  const admin = await signIn(ctx.http, ctx.mail, 'admin@example.com');
+  const ch = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'support-maker' } });
+  const body = { method: 'mtn_momo', phone: '0788123456', usdCents: 300, requestId: 'b177f509-f2ae-4b5d-bacd-7fba39d04ee1' };
+  await viewer.post('/api/support/support-maker').set('Origin', WEB).send(body).expect(400);
+  await owner.put('/api/support/support-maker').set('Origin', WEB).send({ enabled: true }).expect(400);
+  await ctx.prisma.payoutAccount.create({ data: { channelId: ch.id, country: 'RW', provider: 'mtn_momo', accountIdentifier: '250788123456', accountHolderName: 'Creator Name', status: 'VERIFIED' } });
+  await viewer.put('/api/support/support-maker').set('Origin', WEB).send({ enabled: true }).expect(404);
+  await owner.put('/api/support/support-maker').set('Origin', WEB).send({ enabled: true }).expect(200);
+  await owner.post('/api/support/support-maker').set('Origin', WEB).send(body).expect(400);
+  const attempts = await Promise.all([1, 2].map(() => viewer.post('/api/support/support-maker').set('Origin', WEB).send(body).expect(201)));
+  const pay = attempts[0].body.payment;
+  expect(attempts[1].body.payment.id).toBe(pay.id);
+  expect(momo.size).toBe(1);
+  expect(await ctx.prisma.creatorBalance.findUnique({ where: { channelId: ch.id } })).toBeNull();
+  await viewer.post('/api/support/support-maker').set('Origin', WEB).send({ ...body, usdCents: 500 }).expect(400);
+  [...momo.values()][0].status = 'SUCCESSFUL';
+  await Promise.all([1, 2].map(() => viewer.get(`/api/billing/payments/${pay.id}`).expect(200)));
+  let balance = await ctx.prisma.creatorBalance.findUniqueOrThrow({ where: { channelId: ch.id } });
+  expect(balance).toMatchObject({ pendingBalanceCents: 300n, confirmedBalanceCents: 0n, lifetimeEarningsCents: 300n });
+  await viewer.post(`/api/admin/billing/support/${pay.id}/clear`).set('Origin', WEB).send({}).expect(403);
+  await Promise.all([1, 2].map(() => admin.agent.post(`/api/admin/billing/support/${pay.id}/clear`).set('Origin', WEB).send({}).expect(201)));
+  balance = await ctx.prisma.creatorBalance.findUniqueOrThrow({ where: { channelId: ch.id } });
+  expect(balance).toMatchObject({ pendingBalanceCents: 0n, confirmedBalanceCents: 300n, lifetimeEarningsCents: 300n });
+  expect(await ctx.prisma.revenueLedger.count({ where: { channelId: ch.id } })).toBe(2);
+  expect((await owner.get('/api/me').expect(200)).body.premium.active).toBe(false);
+  await owner.put('/api/support/support-maker').set('Origin', WEB).send({ enabled: false }).expect(200);
+  expect((await viewer.post('/api/support/support-maker').set('Origin', WEB).send(body).expect(201)).body.payment.id).toBe(pay.id);
+  await viewer.post('/api/support/support-maker').set('Origin', WEB).send({ ...body, requestId: '01b643e5-a67b-4d73-99a7-a39d813b5415' }).expect(400);
+});
+
+test('declined support never earns funds and changed payout details suspend new contributions', async () => {
+  await creator('decline-maker@example.com', 'decline-maker');
+  const viewer = await creator('decline-viewer@example.com', 'decline-viewer');
+  const ch = await ctx.prisma.channel.update({ where: { handle: 'decline-maker' }, data: { supportEnabled: true } });
+  await ctx.prisma.payoutAccount.create({ data: { channelId: ch.id, country: 'RW', provider: 'mtn_momo', accountIdentifier: '250788123456', accountHolderName: 'Creator Name', status: 'VERIFIED' } });
+  const body = { method: 'mtn_momo', phone: '0788123456', usdCents: 100, requestId: '5d6b433f-ff12-43f0-bce7-65a65521aa14' };
+  const pay = (await viewer.post('/api/support/decline-maker').set('Origin', WEB).send(body).expect(201)).body.payment;
+  [...momo.values()][0].status = 'FAILED';
+  expect((await viewer.get(`/api/billing/payments/${pay.id}`).expect(200)).body.payment.status).toBe('FAILED');
+  expect(await ctx.prisma.creatorBalance.findUnique({ where: { channelId: ch.id } })).toBeNull();
+  expect(await ctx.prisma.revenueLedger.count()).toBe(0);
+  await ctx.prisma.payoutAccount.update({ where: { channelId: ch.id }, data: { status: 'PENDING', version: { increment: 1 } } });
+  expect((await request(ctx.http).get('/api/support/decline-maker').expect(200)).body.enabled).toBe(false);
+  await viewer.post('/api/support/decline-maker').set('Origin', WEB).send({ ...body, requestId: 'ce014238-8564-479d-8b42-f1d5f472b366' }).expect(400);
+});

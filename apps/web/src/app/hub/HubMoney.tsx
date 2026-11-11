@@ -1,5 +1,6 @@
 'use client';
 
+import { CreatorSupport } from '@/components/billing/CreatorSupport';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import * as Icon from '@/components/icons';
@@ -27,7 +28,7 @@ interface Earn {
 
 /** Creator Hub → Monetisation: joining (Premium members), balance, daily earnings, withdrawals to MoMo, and how the money is shared. */
 export function HubMoney() {
-  const { locale } = useShell();
+  const { locale, viewer } = useShell();
   const [m, setM] = useState<Money | null>(null);
   const [earn, setEarn] = useState<Earn | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +70,7 @@ export function HubMoney() {
       {!m.premium.active ? (
         <section className="flex flex-col gap-4 rounded-3xl bg-[#071312] p-6 text-white sm:flex-row sm:items-center">
           <VerifiedBadge size={52} />
-          <div className="flex-1"><p className="font-display text-[22px] font-extrabold">Monetisation is part of Premium</p><p className="text-[15px] text-[#c9d6d4]">For {usd(p.premiumUsdCents, locale)} a month you get Premium features and access to the ad earnings programme. Earnings depend on eligible ad activity.</p></div>
+          <div className="flex-1"><p className="font-display text-[22px] font-extrabold">Ad earnings are part of Premium</p><p className="text-[15px] text-[#c9d6d4]">For {usd(p.premiumUsdCents, locale)} a month you get Premium features and access to the ad earnings programme. Earnings depend on eligible ad activity.</p></div>
           <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />Upgrade</Link>
         </section>
       ) : !m.joined ? (
@@ -104,6 +105,11 @@ export function HubMoney() {
               </>
             ) : <p className="mt-2 text-sm text-muted">Live earnings are currently unavailable.</p>}
           </section>
+
+        </>
+      )}
+
+      {viewer?.channel && <CreatorSupport handle={viewer.channel.handle} owner />}
           <div className="grid gap-3 sm:grid-cols-4">
             {[['Available', m.balance.availableCents], ['Pending settlement', m.balance.pendingCents ?? 0], ['In withdrawal', m.balance.reservedCents ?? 0], ['Paid', m.balance.paidCents ?? 0]].map(([l, v]) => (
               <div key={l as string} className="rounded-3xl border border-line bg-elevated p-5"><p className="text-[13px] text-muted">{l}</p><p className="font-display text-[26px] font-extrabold tabular-nums">{usd(v as number, locale)}</p></div>
@@ -116,11 +122,8 @@ export function HubMoney() {
               <ul className="mt-2 divide-y divide-line text-[14px]">
                 {m.earnings.map((e) => <li key={e.id} className="flex gap-3 py-2"><span className="flex-1">{e.description}</span><span className={`tabular-nums font-semibold ${e.amountCents < 0 ? 'text-muted' : 'text-brand'}`}>{e.amountCents < 0 ? '−' : '+'}{usd(Math.abs(e.amountCents), locale)}</span></li>)}
               </ul>
-            ) : <p className="mt-1 text-[14px] text-muted">Your first earnings appear the day after ads play on your videos.</p>}
+            ) : <p className="mt-1 text-[14px] text-muted">Received audience support appears here after payment verification. Ad earnings settle daily.</p>}
           </section>
-        </>
-      )}
-
       <HubPayouts availableCents={m.balance.availableCents} minimumCents={p.payoutMinimumUsdCents} payouts={m.payouts} locale={locale} onChanged={load} />
 
       <section className="rounded-3xl border border-line bg-surface p-5 sm:p-6">

@@ -50,3 +50,16 @@ Creators save their own-name Rwanda MTN wallet in Creator Hub. An administrator 
 `FLW_PAYOUT_TEST_KEY` enables the isolated Flutterwave v3 transfer sandbox. It accepts TEST keys only. Test results never settle creator requests or move ledger balances. Server IP approval and test wallet funding may be required by the provider. The panel keeps the reference on a timeout. Check the provider dashboard before starting another test.
 
 Live automated transfers, additional countries, tips, memberships and brand commissions require separate implementation and commercial arrangements. Market sources and pilot measures are in [the creator pilot analysis](docs/CREATOR_PILOT.md).
+
+
+## One-time audience support pilot
+
+A creator with a reviewed Rwanda payout account can opt in on their Space or in Creator Hub → Money. Support is separate from advertising eligibility and does not require Premium. Editing payout details suspends new contributions until review; existing paid funds remain in the ledger.
+
+Viewers sign in and choose $1, $3, $5, $10 or $20, with the actual collection currency shown before payment. Checkout uses the existing configured MTN MoMo, Flutterwave or manual collection method. The pilot takes zero platform commission: the operator absorbs collection costs and must confirm this is affordable before enabling the pilot. This is a pilot policy, not a permanent pricing promise. The 60% advertising split is unchanged. Free Sparks never create money.
+
+Payment verification adds the contribution to **Pending settlement**, once. Administration → Money → Audience support lists received payments. An administrator checks the provider settlement and disputes before selecting **Settlement checked · clear funds**. Clearance moves the same money to **Available**, once, without increasing lifetime earnings again. Withdrawal uses the existing reviewed account and signed RWF preview.
+
+`POST /support/:handle` requires a UUID `requestId`; retries must reuse that ID and the original amount, recipient, method and phone. A changed payment needs a new ID. The browser retains the ID across reloads in the same tab and resumes pending payments. A failed payment may be retried as a new request. Never automatically retry a timed-out checkout with a fresh ID.
+
+Refunds and chargebacks are not automated in this phase. Leave disputed contributions pending; handle any refund with the collection provider and reconcile its pending ledger before clearing funds. Provider refunds do not automatically remove earnings in Free Me. Do not clear disputed funds or launch an unattended collection service with this manual pilot. Recurring creator memberships and sponsorship booking are future work.
