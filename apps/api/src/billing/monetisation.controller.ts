@@ -1,29 +1,20 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsEmail, IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
-import type { Payout } from '@prisma/client';
+import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
+import { payoutView } from './payouts';
 import { PROPOSED_SPLIT } from '@free-me/shared';
 import { PrismaService } from '../database/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import type { AppRequest, AuthContext } from '../common/request';
 import { BillingService, paymentView, premiumView } from './billing.controller';
-import { EARNINGS_CURRENCY, hasPremiumAccess, isPremium, msisdn, PREMIUM_MONTHS, utcDay } from './billing';
+import { EARNINGS_CURRENCY, hasPremiumAccess, isPremium, PREMIUM_MONTHS, utcDay } from './billing';
 import { MAX_ADS_PER_VIDEO } from './ads.controller';
 
-class PayoutDto {
-  @ApiProperty({ description: 'MTN Mobile Money number to receive the money' }) @IsString() @Length(6, 24) phone!: string;
-  @ApiProperty() @IsString() @Length(2, 100) accountHolderName!: string;
-}
 class ReviewDto {
   @ApiProperty() @IsBoolean() approve!: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) note?: string;
   @ApiPropertyOptional({ description: 'Approve an unpaid ad without payment (a test, a partner or Free Me itself). It runs at $0 a day, so it adds nothing to the revenue shared with creators.' }) @IsOptional() @IsBoolean() free?: boolean;
-}
-class PayoutDecisionDto {
-  @ApiProperty({ enum: ['paid', 'reject'] }) @IsIn(['paid', 'reject']) action!: 'paid' | 'reject';
-  @ApiPropertyOptional({ description: 'Transfer reference (paid)' }) @IsOptional() @IsString() @MaxLength(120) reference?: string;
-  @ApiPropertyOptional({ description: 'Why (reject)' }) @IsOptional() @IsString() @MaxLength(500) reason?: string;
 }
 class GrantDto { @ApiProperty() @IsEmail() email!: string; @ApiProperty({ enum: PREMIUM_MONTHS }) @IsInt() @Min(1) @Max(12) months!: number }
 
@@ -31,8 +22,6 @@ class VerificationDto {
   @IsString() @Length(1, 50) handle!: string;
   @IsBoolean() verified!: boolean;
 }
-
-const payoutView = (p: Payout) => ({ id: p.id, amountCents: Number(p.amountCents), currency: p.currency, method: p.method, account: p.accountIdentifier, accountHolderName: p.accountHolderName, status: p.status, reference: p.referenceTransactionId, rejectionReason: p.rejectionReason, requestedAt: p.requestedAt, processedAt: p.processedAt });
 
 @ApiTags('monetisation')
 @Controller('hub/monetisation')
@@ -52,16 +41,18 @@ export class MonetisationController {
     const ch = await this.channel(auth);
     const u = await this.prisma.user.findUniqueOrThrow({ where: { id: auth.user.id } });
     const since = new Date(utcDay(new Date()).getTime() - 27 * 86_400_000);
-    const [ledger, payouts, impressions] = await Promise.all([
+    const [ledger, payouts, impressions, reserved, paid] = await Promise.all([
       this.prisma.revenueLedger.findMany({ where: { channelId: ch.id }, orderBy: { createdAt: 'desc' }, take: 60 }),
       this.prisma.payout.findMany({ where: { channelId: ch.id }, orderBy: { requestedAt: 'desc' }, take: 30 }),
       this.prisma.adImpression.count({ where: { video: { channelId: ch.id }, createdAt: { gte: since } } }),
+      this.prisma.payout.aggregate({ where: { channelId: ch.id, status: { in: ['REQUESTED', 'UNDER_REVIEW', 'APPROVED'] } }, _sum: { amountCents: true } }),
+      this.prisma.payout.aggregate({ where: { channelId: ch.id, status: 'PAID' }, _sum: { amountCents: true } }),
     ]);
     const b = await this.billing.settings();
     return {
       premium: premiumView(u), joined: !!ch.eligibility?.isEligible, joinedAt: ch.eligibility?.approvedAt ?? null,
       earning: !!ch.eligibility?.isEligible && hasPremiumAccess(u),
-      balance: { currency: ch.balance?.currency ?? EARNINGS_CURRENCY, availableCents: Number(ch.balance?.confirmedBalanceCents ?? 0n), lifetimeCents: Number(ch.balance?.lifetimeEarningsCents ?? 0n), withdrawnCents: Number(ch.balance?.withdrawnCents ?? 0n) },
+      balance: { currency: ch.balance?.currency ?? EARNINGS_CURRENCY, availableCents: Number(ch.balance?.confirmedBalanceCents ?? 0n), lifetimeCents: Number(ch.balance?.lifetimeEarningsCents ?? 0n), withdrawnCents: Number(ch.balance?.withdrawnCents ?? 0n), reservedCents: Number(reserved._sum.amountCents ?? 0n), paidCents: Number(paid._sum.amountCents ?? 0n), pendingCents: Number(ch.balance?.pendingBalanceCents ?? 0n) },
       adsShownLast28Days: impressions,
       earnings: ledger.map((l) => ({ id: l.id, kind: l.sourceType, amountCents: Number(l.creatorShareCents), day: l.referenceId, description: l.description, at: l.createdAt })),
       payouts: payouts.map(payoutView),
@@ -106,28 +97,7 @@ export class MonetisationController {
     return this.status(auth);
   }
 
-  @Post('payouts')
-  @ApiOperation({ summary: 'Withdraw my whole available balance to MTN Mobile Money' })
-  async payout(@CurrentAuth() auth: AuthContext, @Body() body: PayoutDto, @Req() req: AppRequest) {
-    const ch = await this.channel(auth);
-    const phone = msisdn(body.phone, 'RWF');
-    if (!phone) throw new BadRequestException('Enter a mobile money number, e.g. 0788 123 456 or +250 788 123 456.');
-    const min = BigInt((await this.billing.settings()).payoutMinUsdCents);
-    const p = await this.prisma.$transaction(async (tx) => {
-      const bal = await tx.creatorBalance.findUnique({ where: { channelId: ch.id } });
-      const amount = bal?.confirmedBalanceCents ?? 0n;
-      if (amount < min) throw new BadRequestException(`You can withdraw once your balance reaches $${(Number(min) / 100).toFixed(2)}.`);
-      if (await tx.payout.count({ where: { channelId: ch.id, status: { in: ['REQUESTED', 'UNDER_REVIEW', 'APPROVED'] } } })) throw new BadRequestException('A withdrawal is already on its way.');
-      // Only take the money if the balance is still what we read (two requests at once cannot both withdraw it).
-      const took = await tx.creatorBalance.updateMany({ where: { channelId: ch.id, confirmedBalanceCents: amount }, data: { confirmedBalanceCents: { decrement: amount }, withdrawnCents: { increment: amount } } });
-      if (!took.count) throw new BadRequestException('Your balance just changed. Please try again.');
-      const payout = await tx.payout.create({ data: { channelId: ch.id, amountCents: amount, currency: bal!.currency, method: 'MOBILE_MONEY', provider: 'mtn_momo', accountIdentifier: phone, accountHolderName: body.accountHolderName.trim() } });
-      await tx.revenueLedger.create({ data: { channelId: ch.id, sourceType: 'PAYOUT_DEDUCTION', referenceId: payout.id, currency: bal!.currency, grossAmountCents: -amount, creatorShareCents: -amount, platformShareCents: 0n, reinvestShareCents: 0n, splitBps: '-', balanceAfterCents: 0n, description: `Withdrawal to mobile money ${phone.slice(0, 3)}…${phone.slice(-3)}` } });
-      return payout;
-    });
-    await this.audit.record({ userId: auth.user.id, action: 'PAYOUT_REQUESTED', entityType: 'Payout', entityId: p.id, req, details: { amountCents: Number(p.amountCents) } });
-    return { payout: payoutView(p) };
-  }
+
 }
 
 @ApiTags('admin')
@@ -188,28 +158,6 @@ export class AdminBillingController {
   async payouts(@Query('status') status = 'open') {
     const rows = await this.prisma.payout.findMany({ where: status === 'open' ? { status: { in: ['REQUESTED', 'UNDER_REVIEW', 'APPROVED'] } } : {}, orderBy: { requestedAt: 'desc' }, take: 100, include: { channel: { select: { handle: true, name: true } } } });
     return { payouts: rows.map((p) => ({ ...payoutView(p), channel: p.channel })) };
-  }
-
-  @Post('payouts/:id')
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Mark a withdrawal as sent (with the transfer reference) or reject it (the money returns to the balance)' })
-  async decide(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: PayoutDecisionDto, @Req() req: AppRequest) {
-    const p = await this.prisma.payout.findUnique({ where: { id } });
-    if (!p) throw new NotFoundException('Withdrawal not found.');
-    if (p.status === 'PAID' || p.status === 'REJECTED') throw new BadRequestException('This withdrawal is already settled.');
-    if (body.action === 'paid') {
-      if (!body.reference?.trim()) throw new BadRequestException('Enter the transfer reference.');
-      await this.prisma.payout.update({ where: { id }, data: { status: 'PAID', referenceTransactionId: body.reference.trim(), processedAt: new Date() } });
-    } else {
-      if (!body.reason?.trim()) throw new BadRequestException('Say why; the creator will see it.');
-      await this.prisma.$transaction(async (tx) => {
-        await tx.payout.update({ where: { id }, data: { status: 'REJECTED', rejectionReason: body.reason!.trim(), processedAt: new Date() } });
-        const bal = await tx.creatorBalance.update({ where: { channelId: p.channelId }, data: { confirmedBalanceCents: { increment: p.amountCents }, withdrawnCents: { decrement: p.amountCents } } });
-        await tx.revenueLedger.create({ data: { channelId: p.channelId, sourceType: 'PAYOUT_REVERSAL', referenceId: p.id, currency: p.currency, grossAmountCents: p.amountCents, creatorShareCents: p.amountCents, platformShareCents: 0n, reinvestShareCents: 0n, splitBps: '-', balanceAfterCents: bal.confirmedBalanceCents, description: `Withdrawal returned: ${body.reason!.trim()}` } });
-      });
-    }
-    await this.audit.record({ userId: auth.user.id, action: body.action === 'paid' ? 'PAYOUT_PAID' : 'PAYOUT_REJECTED', entityType: 'Payout', entityId: id, req, details: { reference: body.reference ?? null, reason: body.reason ?? null } });
-    return { payout: payoutView((await this.prisma.payout.findUniqueOrThrow({ where: { id } }))) };
   }
 
   @Post('premium')

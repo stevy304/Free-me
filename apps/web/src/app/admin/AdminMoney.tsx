@@ -7,6 +7,7 @@ import { api } from '@/lib/client-api';
 import { duration } from '@/lib/format';
 import { usd } from '@/lib/money';
 import { useShell } from '@/components/shell/ShellContext';
+import { AdminPayouts } from './AdminPayouts';
 import { ManualQueue, PaymentSettings } from './AdminPayments';
 
 interface Summary {
@@ -14,7 +15,7 @@ interface Summary {
   settlements: Array<{ day: string; grossCents: number; creatorPoolCents: number; paidToCreatorsCents: number; impressions: number; channels: number }>; methods: Array<{ name: string; currency: string }>;
 }
 interface Review { id: string; businessName: string; email: string; country: string; headline: string; destinationUrl: string; days: number; totalCents: number; targetCountries: string[]; video: { id: string; title: string; durationSeconds: number } | null; createdAt: string }
-interface Payout { id: string; amountCents: number; account: string; accountHolderName: string; status: string; requestedAt: string; channel: { handle: string; name: string } }
+interface Payout { id: string; amountCents: number; account: string; accountHolderName: string; status: string; destinationAmount?: string | null; feeAmount?: string | null; exchangeRate?: number | null; requestedAt: string; channel: { handle: string; name: string } }
 
 /** Administration → Money: income, ads waiting for review, withdrawals to send, and gifting Premium. */
 export function AdminMoney() {
@@ -46,6 +47,7 @@ export function AdminMoney() {
       {error && <p role="alert" className="rounded-xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
       {!s.methods.length && <p className="rounded-xl bg-accent-soft px-4 py-3 text-[14px] text-on-accent-soft">No way to pay is switched on yet. Start with <b>Send money (manual)</b> below: add your MoMo number and people can upgrade today.</p>}
       <ManualQueue />
+      <AdminPayouts />
       <div className="grid gap-3 sm:grid-cols-4">
         {[['Premium members', s.premiumMembers.toLocaleString(locale)], ['Premium, 30 days', usd(s.last30Days.premiumUsdCents, locale)], ['Ads sold, 30 days', usd(s.last30Days.adsUsdCents, locale)], ['Payments, 30 days', s.last30Days.payments.toLocaleString(locale)]].map(([l, v]) => (
           <div key={l} className="rounded-2xl border border-line p-4"><p className="text-[13px] text-muted">{l}</p><p className="font-display text-[24px] font-extrabold tabular-nums">{v}</p></div>
@@ -90,14 +92,14 @@ export function AdminMoney() {
 
       <section>
         <h2 className="text-[18px] font-semibold">Withdrawals to send ({payouts.length})</h2>
-        <p className="text-[13px] text-muted">Send the amount by MTN MoMo (converted at the day’s rate), then enter the transfer reference.</p>
+        <p className="text-[13px] text-muted">Use the quoted RWF amount when provided. Record the reference only after the transfer completes. Older requests without a quote require an agreed conversion with the creator.</p>
         <div className="mt-2 space-y-2">
           {payouts.map((p) => (
             <article key={p.id} className="flex flex-wrap items-center gap-2 rounded-2xl border border-line p-4">
-              <p className="flex-1 text-[14px]"><b className="tabular-nums">{usd(p.amountCents, locale)}</b> to <b>{p.account}</b> ({p.accountHolderName}) · {p.channel.name} @{p.channel.handle}</p>
+              <p className="flex-1 text-[14px]">{p.destinationAmount && <span className="mb-1 block font-bold">{Number(p.destinationAmount).toLocaleString(locale)} RWF to receive · fee {p.feeAmount} RWF · rate {p.exchangeRate} RWF/USD</span>}<b className="tabular-nums">{usd(p.amountCents, locale)}</b> to <b>{p.account}</b> ({p.accountHolderName}) · {p.channel.name} @{p.channel.handle}</p>
               <input className={`${inputClass} max-w-[220px]`} placeholder="Reference or reason" value={notes[p.id] ?? ''} onChange={(e) => setNotes({ ...notes, [p.id]: e.target.value })} />
-              <button type="button" onClick={() => void run(() => api(`/admin/billing/payouts/${p.id}`, { body: { action: 'paid', reference: notes[p.id] } }), 'Marked as sent.')} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand">Sent</button>
-              <button type="button" onClick={() => void run(() => api(`/admin/billing/payouts/${p.id}`, { body: { action: 'reject', reason: notes[p.id] } }), 'Returned to the creator’s balance.')} className="h-10 rounded-xl bg-surface px-4 text-[14px] font-semibold">Return</button>
+              <button type="button" disabled={busy} onClick={() => void run(() => api(`/admin/billing/payouts/${p.id}`, { body: { action: 'paid', reference: notes[p.id] } }), 'Marked as sent.')} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand">Sent</button>
+              <button type="button" disabled={busy} onClick={() => void run(() => api(`/admin/billing/payouts/${p.id}`, { body: { action: 'reject', reason: notes[p.id] } }), 'Returned to the creator’s balance.')} className="h-10 rounded-xl bg-surface px-4 text-[14px] font-semibold">Return</button>
             </article>
           ))}
           {!payouts.length && <p className="text-[14px] text-muted">Nothing to send.</p>}

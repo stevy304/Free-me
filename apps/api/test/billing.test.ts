@@ -39,7 +39,7 @@ beforeAll(async () => {
   const base = `http://127.0.0.1:${(provider.address() as AddressInfo).port}`;
   ctx = await makeApp({ adminEmails: ['admin@example.com'], env: {
     MOMO_BASE_URL: base, MOMO_SUBSCRIPTION_KEY: 'sub-1', MOMO_API_USER: 'user-1', MOMO_API_KEY: 'key-1', MOMO_CURRENCY: 'RWF', MOMO_RATE_PER_USD: '1450',
-    FLW_BASE_URL: base, FLW_SECRET_KEY: 'flw-secret', FLW_WEBHOOK_HASH: 'hook-secret', PAYOUT_MINIMUM_USD_CENTS: '100',
+    FLW_BASE_URL: base, FLW_SECRET_KEY: 'flw-secret', FLW_WEBHOOK_HASH: 'hook-secret', PAYOUT_MINIMUM_USD_CENTS: '100', PAYOUT_RWF_PER_USD: '1450',
   } });
 });
 beforeEach(async () => { await resetDb(ctx.prisma); ctx.mail.outbox.length = 0; await ctx.clearLimits(); momo.clear(); flw.clear(); });
@@ -185,14 +185,21 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   expect(money.balance).toMatchObject({ currency: 'USD', availableCents: 180, lifetimeCents: 180 });
   expect(money.earnings[0]).toMatchObject({ kind: 'AD_SHARE_PRE_ROLL', amountCents: 180 });
 
-  // Withdraw to MoMo; an administrator rejects it and the money comes back, or marks it paid.
-  const out = (await maker.post('/api/hub/monetisation/payouts').set('Origin', WEB).send({ phone: '0788 555 444', accountHolderName: 'Maker' }).expect(201)).body.payout;
-  expect(out).toMatchObject({ amountCents: 180, account: '250788555444', status: 'REQUESTED' });
-  await maker.post('/api/hub/monetisation/payouts').set('Origin', WEB).send({ phone: '0788555444', accountHolderName: 'Maker' }).expect(400);
-  await admin.post(`/api/admin/billing/payouts/${out.id}`).set('Origin', WEB).send({ action: 'reject', reason: 'Name does not match the number.' }).expect(200);
+  // A reviewed wallet and confirmed quote are required before reserving earnings.
+  const wallet = (await maker.put('/api/hub/monetisation/payout-account').set('Origin', WEB).send({ country: 'RW', phone: '0788555444', accountHolderName: 'Maker' }).expect(200)).body.account;
+  await admin.post(`/api/admin/billing/payout-accounts/${wallet.id}`).set('Origin', WEB).send({ version: wallet.version, approve: true, note: 'Wallet ownership checked with creator.' }).expect(200);
+  const quote = (await maker.get('/api/hub/monetisation/payout-quote').expect(200)).body.quote;
+  const out = (await maker.post('/api/hub/monetisation/payouts').set('Origin', WEB).send({ quoteToken: quote.token }).expect(201)).body.payout;
+  expect(out).toMatchObject({ amountCents: 180, account: '250788555444', status: 'REQUESTED', destinationAmount: '2610' });
+  const retried = (await maker.post('/api/hub/monetisation/payouts').set('Origin', WEB).send({ quoteToken: quote.token }).expect(201)).body.payout;
+  expect(retried.id).toBe(out.id);
+  await admin.post(`/api/admin/billing/payouts/${out.id}`).set('Origin', WEB).send({ action: 'reject', reason: 'Creator requested a new payout.' }).expect(200);
   expect((await maker.get('/api/hub/monetisation').expect(200)).body.balance.availableCents).toBe(180);
-  const again = (await maker.post('/api/hub/monetisation/payouts').set('Origin', WEB).send({ phone: '0788555444', accountHolderName: 'Maker Name' }).expect(201)).body.payout;
+  const next = (await maker.get('/api/hub/monetisation/payout-quote').expect(200)).body.quote;
+  const again = (await maker.post('/api/hub/monetisation/payouts').set('Origin', WEB).send({ quoteToken: next.token }).expect(201)).body.payout;
   expect((await admin.post(`/api/admin/billing/payouts/${again.id}`).set('Origin', WEB).send({ action: 'paid', reference: 'MOMO-778899' }).expect(200)).body.payout).toMatchObject({ status: 'PAID', reference: 'MOMO-778899' });
+  expect((await maker.get('/api/hub/monetisation')).body.balance).toMatchObject({ availableCents: 0, reservedCents: 0, paidCents: 180 });
+
 });
 
 test('payment settings in the app: manual payments confirmed by an administrator; secrets stored encrypted; administrators have every Premium feature', async () => {
