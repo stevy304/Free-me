@@ -211,7 +211,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <section className="flex flex-col items-center gap-4 rounded-[28px] bg-[#071312] px-6 py-10 text-center text-white">
           <span className="grid h-16 w-16 place-items-center rounded-full bg-[#e5484d]"><Icon.Live size={34} /></span>
-          <h1 className="font-display text-[30px] font-extrabold">Live Studio is part of Premium</h1>
+          <h1 className="font-display text-[30px] font-extrabold">Signal Room is part of Premium</h1>
           <p className="max-w-md text-[15px] text-[#c9d6d4]">Go live from your browser, or from OBS, a TV encoder or a camera. Your followers are told, viewers chat, and the recording is kept as a video.</p>
           <Link href="/go-live" className="font-semibold text-white underline">Go live from your browser for free</Link>
           <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />Upgrade</Link>
@@ -231,11 +231,17 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   if (!basic) return (
     <main className={`dark ${styles.studio}`}>
       <header className={styles.top}>
-        <Link href="/" className={styles.brand}><Icon.Live size={21} /> Free Me <span>Live Studio</span></Link>
-        <input aria-label="Title" className={styles.title} value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} disabled={state !== 'idle' || live} />
+        <div className={styles.identity}>
+          <Link href="/" className={styles.brand}><Icon.Live size={17} /> Free Me</Link>
+          <h1>Signal Room</h1>
+        </div>
+        <label className={styles.titleField}>
+          <span>Title</span>
+          <input className={styles.title} value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} disabled={state !== 'idle' || live} />
+        </label>
         <div className={styles.status}>
-          {reconnectUntil !== null ? <span className={styles.standby}>Signal interrupted</span> : live ? <span className={styles.onAir}>● ON AIR {clock(st.stream.startedAt, now)}</span> : <span className={styles.standby}>Standby</span>}
-          {state === 'live' && encoderRtt !== null && <span title="Latest encoder response">▂▄▆ {encoderRtt} ms</span>}
+          {reconnectUntil !== null ? <span className={styles.interrupted}>Signal interrupted</span> : live ? <span className={styles.onAir}>● ON AIR {clock(st.stream.startedAt, now)}</span> : <span className={styles.standby}>{media ? 'Source ready' : 'Standby'}</span>}
+          {state === 'live' && encoderRtt !== null && <span title="Latest encoder response" className={styles.latency}>Encoder {encoderRtt} ms</span>}
           {live || state === 'live' || state === 'ending' ?
             <button type="button" onClick={end} disabled={state === 'ending'}>{state === 'ending' ? 'Ending…' : 'End broadcast'}</button> :
             <button type="button" onClick={() => void goLive()} disabled={!media || state !== 'idle'}>{state === 'starting' ? 'Starting…' : 'Go live'}</button>}
@@ -246,7 +252,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       <ControlRoom streamId={st.stream.id} basic={false} host={media} capture={capture} active={state === 'live'}
         chat={<LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-96" />}
         sources={<div className="space-y-3">
-          <h2 className="font-bold">Input sources</h2>
+          <h3 className="font-bold">Choose your input</h3>
           <div className="flex flex-wrap gap-2">
                 <button type="button" disabled={state === 'starting' || state === 'ending'} onClick={() => void pick('camera')} aria-pressed={source === 'camera' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'camera' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.Camera size={18} />Camera</button>
                 <button type="button" disabled={state === 'starting' || state === 'ending'} onClick={() => void pick('screen')} aria-pressed={source === 'screen' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'screen' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.ScreenShare size={18} />Screen</button>
@@ -302,6 +308,8 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
         {live && <span className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-[13px] font-semibold"><Icon.Eye size={16} />{viewers.toLocaleString(locale)} watching</span>}
       </div>
       {error && <p role="alert" className="mt-4 rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
+
+      {st.premium && <Link href="/studio/live" className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-brand"><Icon.Monitor size={16} />Open Signal Room</Link>}
 
       <div className="mt-5 grid gap-5">
         {signal}
