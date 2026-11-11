@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import * as Icon from '@/components/icons';
-import { inputClass } from '@/components/Pickers';
+import { HubPayouts, type Withdrawal } from '@/components/hub/HubPayouts';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
 import { api } from '@/lib/client-api';
 import { usd } from '@/lib/money';
@@ -11,9 +11,9 @@ import { useShell } from '@/components/shell/ShellContext';
 
 interface Money {
   premium: { active: boolean; until: string | null }; joined: boolean; joinedAt: string | null; earning: boolean;
-  balance: { currency: string; availableCents: number; lifetimeCents: number; withdrawnCents: number }; adsShownLast28Days: number;
+  balance: { currency: string; availableCents: number; lifetimeCents: number; withdrawnCents: number; reservedCents: number; paidCents: number; pendingCents: number }; adsShownLast28Days: number;
   earnings: Array<{ id: string; kind: string; amountCents: number; day: string | null; description: string; at: string }>;
-  payouts: Array<{ id: string; amountCents: number; account: string; status: string; reference: string | null; rejectionReason: string | null; requestedAt: string }>;
+  payouts: Withdrawal[];
   programme: { creatorShareBps: number; adDayUsdCents: number; maxAdsPerVideo: number; payoutMinimumUsdCents: number; premiumUsdCents: number };
 }
 interface Earn {
@@ -23,7 +23,7 @@ interface Earn {
   activity: Array<{ campaignId: string; campaign: string; videoId: string; video: string; impressions: number }>;
 }
 
-const PAYOUT: Record<string, string> = { REQUESTED: 'On its way', UNDER_REVIEW: 'On its way', APPROVED: 'On its way', PAID: 'Sent', REJECTED: 'Returned to balance' };
+
 
 /** Creator Hub → Monetisation: joining (Premium members), balance, daily earnings, withdrawals to MoMo, and how the money is shared. */
 export function HubMoney() {
@@ -32,8 +32,6 @@ export function HubMoney() {
   const [earn, setEarn] = useState<Earn | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [phone, setPhone] = useState('');
-  const [name, setName] = useState('');
   // Estimator inputs: how many ads run on Free Me each day, and your share of the ads shown.
   const [campaigns, setCampaigns] = useState(100);
   const [share, setShare] = useState(1);
@@ -67,10 +65,11 @@ export function HubMoney() {
   return (
     <div className="mt-6 space-y-6">
       {error && <p role="alert" className="rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
+      <p className="rounded-2xl border border-line bg-elevated p-4 text-sm text-muted">Payouts currently have a Rwanda MTN Mobile Money pilot. Review <Link href="/earn/availability" className="font-semibold text-brand underline">country availability</Link> before joining. Premium access does not verify a payout account.</p>
       {!m.premium.active ? (
         <section className="flex flex-col gap-4 rounded-3xl bg-[#071312] p-6 text-white sm:flex-row sm:items-center">
           <VerifiedBadge size={52} />
-          <div className="flex-1"><p className="font-display text-[22px] font-extrabold">Monetisation is part of Premium</p><p className="text-[15px] text-[#c9d6d4]">For {usd(p.premiumUsdCents, locale)} a month you get the verified badge and start earning from ads on your videos.</p></div>
+          <div className="flex-1"><p className="font-display text-[22px] font-extrabold">Monetisation is part of Premium</p><p className="text-[15px] text-[#c9d6d4]">For {usd(p.premiumUsdCents, locale)} a month you get Premium features and access to the ad earnings programme. Earnings depend on eligible ad activity.</p></div>
           <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />Upgrade</Link>
         </section>
       ) : !m.joined ? (
@@ -106,28 +105,11 @@ export function HubMoney() {
             ) : <p className="mt-2 text-sm text-muted">Live earnings are currently unavailable.</p>}
           </section>
           <div className="grid gap-3 sm:grid-cols-4">
-            {[['Available', m.balance.availableCents], ['Earned in total', m.balance.lifetimeCents], ['Withdrawn', m.balance.withdrawnCents]].map(([l, v]) => (
+            {[['Available', m.balance.availableCents], ['Pending settlement', m.balance.pendingCents ?? 0], ['In withdrawal', m.balance.reservedCents ?? 0], ['Paid', m.balance.paidCents ?? 0]].map(([l, v]) => (
               <div key={l as string} className="rounded-3xl border border-line bg-elevated p-5"><p className="text-[13px] text-muted">{l}</p><p className="font-display text-[26px] font-extrabold tabular-nums">{usd(v as number, locale)}</p></div>
             ))}
-            <div className="rounded-3xl border border-line bg-elevated p-5"><p className="text-[13px] text-muted">Ads shown, 28 days</p><p className="font-display text-[26px] font-extrabold tabular-nums">{m.adsShownLast28Days.toLocaleString(locale)}</p></div>
+
           </div>
-          <section className="rounded-3xl border border-line bg-elevated p-5 sm:p-6">
-            <h3 className="font-display text-[18px] font-bold">Withdraw to MTN Mobile Money</h3>
-            {m.balance.availableCents < p.payoutMinimumUsdCents ? (
-              <p className="mt-1 text-[14px] text-muted">You can withdraw once your balance reaches {usd(p.payoutMinimumUsdCents, locale)}. Earnings are added every day for the day before.</p>
-            ) : (
-              <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-                <label><span className="text-[13px] font-semibold">MoMo number</span><input className={`mt-1 ${inputClass}`} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="0788 123 456" /></label>
-                <label><span className="text-[13px] font-semibold">Name on the account</span><input className={`mt-1 ${inputClass}`} value={name} onChange={(e) => setName(e.target.value)} /></label>
-                <button type="button" disabled={busy || phone.length < 9 || name.trim().length < 2} onClick={() => void run(() => api('/hub/monetisation/payouts', { body: { phone, accountHolderName: name } }))} className="h-11 rounded-2xl bg-brand px-5 text-[14px] font-bold text-on-brand disabled:opacity-50">Withdraw {usd(m.balance.availableCents, locale)}</button>
-              </div>
-            )}
-            {m.payouts.length > 0 && (
-              <ul className="mt-4 divide-y divide-line text-[14px]">
-                {m.payouts.map((x) => <li key={x.id} className="flex flex-wrap gap-x-3 py-2"><span className="font-semibold tabular-nums">{usd(x.amountCents, locale)}</span><span className="text-muted">to {x.account}</span><span className={x.status === 'REJECTED' ? 'text-danger' : x.status === 'PAID' ? 'text-brand' : 'text-muted'}>{PAYOUT[x.status]}{x.reference ? ` · ${x.reference}` : ''}{x.rejectionReason ? ` · ${x.rejectionReason}` : ''}</span><span className="ml-auto text-faint">{new Date(x.requestedAt).toLocaleDateString(locale)}</span></li>)}
-              </ul>
-            )}
-          </section>
           <section className="rounded-3xl border border-line bg-elevated p-5 sm:p-6">
             <h3 className="font-display text-[18px] font-bold">Earnings</h3>
             {m.earnings.length ? (
@@ -138,6 +120,8 @@ export function HubMoney() {
           </section>
         </>
       )}
+
+      <HubPayouts availableCents={m.balance.availableCents} minimumCents={p.payoutMinimumUsdCents} payouts={m.payouts} locale={locale} onChanged={load} />
 
       <section className="rounded-3xl border border-line bg-surface p-5 sm:p-6">
         <h3 className="font-display text-[18px] font-bold">How much can creators earn?</h3>

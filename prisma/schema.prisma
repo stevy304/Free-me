@@ -227,6 +227,7 @@ model Channel {
   liveStreams           LiveStream[]
   /// Secret for encoders (OBS, TV): whoever has it can broadcast on this Space. Stays the same between streams.
   liveStreamKey         String?           @unique
+  payoutAccount         PayoutAccount?
   payouts               Payout[]
   revenueRecords        RevenueLedger[]
 
@@ -649,7 +650,30 @@ model RevenueLedger {
   @@index([createdAt])
 }
 
+model PayoutAccount {
+  id                    String   @id @default(uuid())
+  channelId             String   @unique
+  channel               Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  country               String
+  provider              String
+  accountIdentifier     String
+  accountHolderName     String
+  status                String   @default("PENDING")
+  version               Int      @default(1)
+  reviewNote            String?
+  reviewedAt            DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([status])
+}
+
 model Payout {
+  idempotencyKey        String?           @unique
+  destinationCurrency   String?
+  destinationAmount     BigInt?
+  feeAmount             BigInt?
+  exchangeRate          Int?
   id                    String            @id @default(uuid())
   channelId             String
   channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)

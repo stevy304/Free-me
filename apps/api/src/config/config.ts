@@ -21,6 +21,8 @@ export interface BillingConfig {
   adDayUsdCents: number;
   /** Smallest balance a creator can withdraw. */
   payoutMinUsdCents: number;
+  payouts?: { rwfPerUsd: number; feeRwf: number } | null;
+  payoutSandbox?: { secretKey: string } | null;
   /** MTN MoMo Collections (request to pay). The charge is in `currency`, at `perUsd` units of it for one US dollar. */
   momo: { baseUrl: string; subscriptionKey: string; apiUser: string; apiKey: string; targetEnvironment: string; currency: string; perUsd: number } | null;
   /** Flutterwave Standard checkout (cards worldwide, and mobile money in many countries). Charged in US dollars. */
@@ -192,8 +194,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const momoCurrency = (env.MOMO_CURRENCY?.trim() || 'RWF').toUpperCase();
   const perUsd = Number(env.MOMO_RATE_PER_USD);
   if (momoSet.length && momoCurrency !== 'USD' && !(perUsd > 0)) problems.push(`MOMO_RATE_PER_USD is required: how many ${momoCurrency} make one US dollar (prices are set in dollars).`);
+  const payoutRate = Number(env.PAYOUT_RWF_PER_USD || 0);
+  const payoutFee = Number(env.PAYOUT_FEE_RWF || 0);
+  if (!Number.isSafeInteger(payoutRate) || payoutRate < 0 || payoutRate > 1_000_000) problems.push('PAYOUT_RWF_PER_USD must be a whole number from 1 to 1000000, or unset.');
+  if (!Number.isSafeInteger(payoutFee) || payoutFee < 0 || payoutFee > 1_000_000) problems.push('PAYOUT_FEE_RWF must be a whole number from 0 to 1000000.');
+  const payoutTestKey = env.FLW_PAYOUT_TEST_KEY?.trim() || null;
+  if (payoutTestKey && !payoutTestKey.startsWith('FLWSECK_TEST-')) problems.push('FLW_PAYOUT_TEST_KEY must be a Flutterwave TEST key.');
   const billing: BillingConfig = {
     premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
+    payouts: payoutRate > 0 ? { rwfPerUsd: payoutRate, feeRwf: payoutFee } : null,
+    payoutSandbox: payoutTestKey ? { secretKey: payoutTestKey } : null,
     momo: momoSet.length === momoKeys.length ? {
       baseUrl: (env.MOMO_BASE_URL?.trim() || 'https://sandbox.momodeveloper.mtn.com').replace(/\/+$/, ''), subscriptionKey: env.MOMO_SUBSCRIPTION_KEY!.trim(),
       apiUser: env.MOMO_API_USER!.trim(), apiKey: env.MOMO_API_KEY!.trim(), targetEnvironment: env.MOMO_TARGET_ENVIRONMENT?.trim() || 'sandbox',
