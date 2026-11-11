@@ -59,15 +59,18 @@ export function LiveVideo({ src, muted = false, className = '' }: { src: string;
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     const v = el.current!; let h: { destroy(): void } | null = null; let off = false;
-    if (v.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) v.src = src;
-    else import('hls.js').then(({ default: H }) => {
+    const play = () => { v.play().catch(() => { if (!off) { v.muted = true; v.play().catch(() => undefined); } }); };
+    if (v.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) {
+      v.src = src;
+      play();
+    } else import('hls.js').then(({ default: H }) => {
       if (off) return;
       if (!H.isSupported()) { setErr('This browser cannot play live video.'); return; }
       const x = new H({ liveSyncDurationCount: 3, lowLatencyMode: false, maxBufferLength: 20 });
       x.on(H.Events.ERROR, (_e, d) => { if (d.fatal) { if (d.type === H.ErrorTypes.NETWORK_ERROR) x.startLoad(); else x.recoverMediaError(); } });
+      x.on(H.Events.MANIFEST_PARSED, play);
       x.loadSource(src); x.attachMedia(v); h = x;
     });
-    v.play().catch(() => { v.muted = true; v.play().catch(() => undefined); });
     return () => { off = true; h?.destroy(); v.removeAttribute('src'); v.load(); };
   }, [src]);
   return (
