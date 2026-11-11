@@ -22,7 +22,7 @@ export function CreateMenu() {
     <div ref={box} className="relative flex items-center gap-2">
       {active.length > 0 && (
         <button type="button" onClick={() => openDialog(active[0].id)} className="hidden h-10 items-center gap-2 rounded-xl bg-brand-soft px-3 text-[13px] font-semibold text-brand sm:flex" aria-label="Show upload">
-          <Icon.Spinner size={16} className="animate-spin" />{active.length === 1 ? 'Uploading' : `Uploading ${active.length}`} {total ? Math.floor((sent / total) * 100) : 0}%
+          <Icon.Spinner size={16} className="animate-spin" />{active.length === 1 && active[0].snap.reconnecting ? 'Reconnecting…' : <>{active.length === 1 ? 'Uploading' : `Uploading ${active.length}`} {total ? Math.floor((sent / total) * 100) : 0}%</>}
         </button>
       )}
       <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand hover:bg-brand-strong">
