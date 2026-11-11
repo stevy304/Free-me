@@ -51,7 +51,7 @@ export function AccountMenu({ viewer }: { viewer: Viewer }) {
                   : <Link role="menuitem" href="/channel/create" onClick={close} className={item}><Icon.PersonAdd size={20} />Create your Space</Link>}
                 {viewer.channel && <Link role="menuitem" href="/hub" onClick={close} className={item}><Icon.Hub size={20} />Creator Hub</Link>}
                 <Link role="menuitem" href="/premium" onClick={close} className={item}><Icon.PremiumStar size={20} /><span className="flex-1">Premium</span>{viewer.premium?.active ? <span className="rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-bold text-brand">Member</span> : <span className="text-[12px] font-semibold text-[#c27a12]">Upgrade</span>}</Link>
-                {viewer.premium?.active && <Link role="menuitem" href="/studio/live" onClick={close} className={item}><Icon.Live size={20} />Live Studio</Link>}
+                {viewer.premium?.active && <Link role="menuitem" href="/studio/live" onClick={close} className={item}><Icon.Live size={20} />Signal Room</Link>}
                 <Link role="menuitem" href="/studio/ads" onClick={close} className={item}><Icon.Megaphone size={20} />Ad Studio</Link>
                 <Link role="menuitem" href="/trail" onClick={close} className={item}><Icon.Trail size={20} />Trail</Link>
                 <Link role="menuitem" href="/collections" onClick={close} className={item}><Icon.Collections size={20} />Collections</Link>

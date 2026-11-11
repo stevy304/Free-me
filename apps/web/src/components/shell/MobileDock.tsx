@@ -24,7 +24,7 @@ export function MobileDock() {
   };
   return (
     <nav aria-label="Main" className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-40 flex h-16 items-center rounded-[22px] bg-[rgb(16_32_31/0.94)] px-1 shadow-[0_12px_32px_rgb(0_0_0/0.3)] backdrop-blur md:hidden">
-      {item('/', 'For you', Icon.Home)}
+      {item('/', 'Current', Icon.Home)}
       {item('/moments', 'Moments', Icon.Moments)}
       <Link href={create} aria-label="Create" className="mx-1 grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[#2bb5ab] text-[#04201e]"><Icon.Plus size={24} strokeWidth={2.4} /></Link>
       {item('/following', 'Following', Icon.Following)}

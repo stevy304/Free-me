@@ -5,6 +5,7 @@ export interface HomeFeed {
   interests: Array<{ slug: string; name: string; picked: boolean }>;
   hasPicked: boolean;
   shelves: Array<{ category: { slug: string; name: string }; reason: 'picked' | 'popular'; videos: VideoCardData[] }>;
+  continueWatching?: Array<{ video: VideoCardData; progressSeconds: number }>;
   fromCreators: VideoCardData[];
   moments: VideoCardData[];
   latest: VideoCardData[];

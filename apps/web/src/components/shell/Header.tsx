@@ -13,7 +13,7 @@ import { NotificationBell } from './NotificationBell';
 import { useShell } from './ShellContext';
 
 export const TABS = [
-  { href: '/', label: 'For you' },
+  { href: '/', label: 'Current' },
   { href: '/following', label: 'Following' },
   { href: '/moments', label: 'Moments' },
   { href: '/explore', label: 'Explore' },

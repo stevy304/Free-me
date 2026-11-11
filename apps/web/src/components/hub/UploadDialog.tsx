@@ -11,6 +11,8 @@ import type { UploadKind } from './UploadsContext';
 import type { HubVideo } from './types';
 import { useRealtime } from '@/lib/realtime';
 
+const STEPS = ['Uploading', 'Processing', 'Ready to watch'];
+
 const ACCEPT = '.mp4,.m4v,.mov,.mkv,.webm,.avi,.wmv,.flv,.mpeg,.mpg,.3gp,.ts,.mts,video/*';
 const AUDIO_ACCEPT = '.mp3,.m4a,.aac,.wav,.ogg,.opus,.flac,audio/*';
 const KINDS: Array<{ k: UploadKind; label: string; hint: string; icon: typeof Icon.Upload }> = [
@@ -40,17 +42,18 @@ export function UploadDialog() {
   const shownId = useRef<string | null>(null);
   useEffect(() => {
     if (shownId.current !== (snap?.videoId ?? null)) { shownId.current = snap?.videoId ?? null; setVideo(null); }
-    if (!snap?.videoId) return;
+    if (!dialog.open || !snap?.videoId) return;
     let stop = false;
+    let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
       const r = await api<{ video: HubVideo }>(`/hub/videos/${snap.videoId}`).catch(() => null);
       if (stop) return;
-      if (r) setVideo((cur) => (cur && cur.status === r.video.status && cur.processingProgress === r.video.processingProgress && cur.thumbnailCandidates.length === r.video.thumbnailCandidates.length && cur.thumbnailUrl === r.video.thumbnailUrl && (cur.captions?.length ?? 0) === (r.video.captions?.length ?? 0) ? cur : r.video));
-      if (!r || r.video.processingStage !== 'Ready' && r.video.status !== 'FAILED') setTimeout(tick, 2500);
+      if (r) setVideo((cur) => (cur && cur.status === r.video.status && cur.processingStage === r.video.processingStage && cur.processingError === r.video.processingError && cur.renditions.join() === r.video.renditions.join() && cur.processingProgress === r.video.processingProgress && cur.thumbnailCandidates.length === r.video.thumbnailCandidates.length && cur.thumbnailUrl === r.video.thumbnailUrl && (cur.captions?.length ?? 0) === (r.video.captions?.length ?? 0) ? cur : r.video));
+      if (!r || !['FAILED', 'SUSPENDED'].includes(r.video.status) && r.video.processingStage !== 'Ready') timer = setTimeout(tick, 2500);
     };
     void tick();
-    return () => { stop = true; };
-  }, [snap?.videoId, snap?.state === 'done']); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { stop = true; clearTimeout(timer); };
+  }, [dialog.open, snap?.videoId, snap?.state === 'done']); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!cover || coverFor === null || !snap?.videoId || item?.id !== coverFor) return;
@@ -70,8 +73,12 @@ export function UploadDialog() {
   useRealtime('processing', () => setBump((b) => b + 1), snap?.videoId ? `video:${snap.videoId}` : null, !!snap?.videoId);
   useEffect(() => {
     if (!bump || !snap?.videoId) return;
-    api<{ video: HubVideo }>(`/hub/videos/${snap.videoId}`).then((r) => setVideo((cur) => (cur && cur.processingProgress === r.video.processingProgress && cur.status === r.video.status && cur.processingStage === r.video.processingStage && cur.thumbnailCandidates.length === r.video.thumbnailCandidates.length && (cur.captions?.length ?? 0) === (r.video.captions?.length ?? 0) ? cur : r.video))).catch(() => undefined);
-  }, [bump]); // eslint-disable-line react-hooks/exhaustive-deps
+    let stale = false;
+    api<{ video: HubVideo }>(`/hub/videos/${snap.videoId}`).then((r) => {
+      if (!stale) setVideo(r.video);
+    }).catch(() => undefined);
+    return () => { stale = true; };
+  }, [bump, snap?.videoId]);
 
   useEffect(() => {
     if (!dialog.open) return;
@@ -88,26 +95,34 @@ export function UploadDialog() {
     openDialog(id, kind);
   };
 
+  const playable = video?.status === 'READY' && !!video.playbackUrl;
+  const phase = snap?.state === 'done' ? (playable ? 2 : 1) : 0;
   let status: React.ReactNode = null;
   if (snap) {
     const pct = snap.total ? Math.floor((snap.sent / snap.total) * 100) : 0;
     if (snap.state === 'error') status = <span className="flex items-center gap-2 text-danger"><Icon.Warning size={16} />{snap.error}</span>;
+    else if (snap.reconnecting) status = <span role="status">Reconnecting… Upload resumes when you’re back online.</span>;
     else if (snap.state === 'cancelled') status = 'Upload cancelled';
     else if (snap.state === 'compressing') status = <span className="tabular-nums">Making it smaller to save data · {Math.floor((snap.compress?.progress ?? 0) * 100)}% of {formatBytes(snap.compress?.originalBytes ?? snap.total)}</span>;
     else if (snap.state !== 'done') status = <span className="tabular-nums">{snap.state === 'paused' ? 'Paused' : snap.state === 'finishing' ? 'Finishing upload…' : snap.state === 'starting' ? 'Starting…' : `Uploading ${pct}%`} · {formatBytes(snap.sent)} of {formatBytes(snap.total)}{snap.compress?.savedBytes ? ` (was ${formatBytes(snap.compress.originalBytes)})` : ''}{snap.state === 'uploading' && snap.bytesPerSecond ? ` · ${formatBytes(snap.bytesPerSecond)}/s · ${formatEta(snap.secondsLeft)}` : ''}</span>;
-    else if (video?.status === 'FAILED') status = <span className="flex items-center gap-2 text-danger"><Icon.Warning size={16} />{video.processingError}</span>;
-    else if (video?.status === 'READY' && video.processingError) status = <span className="flex items-center gap-2 text-muted"><Icon.Warning size={16} />Ready to watch · {video.processingError}</span>;
-    else if (video?.processingStage === 'Ready') status = <span className="flex items-center gap-2 text-brand"><Icon.CheckCircle size={16} />Processing complete · {video.renditions.at(-1)}</span>;
-    else if (video?.status === 'READY') status = <span className="flex items-center gap-2 text-brand"><Icon.CheckCircle size={16} />Ready to watch · {video.renditions.at(-1)} available · Finishing processing</span>;
-    else status = <span className="tabular-nums">Upload complete · {video?.processingStage ?? 'Processing'} {video ? `${video.processingProgress}%` : ''}</span>;
+    else if (video?.status === 'FAILED') status = <span className="flex items-center gap-2 text-danger"><Icon.Warning size={16} />{video.processingError ?? 'Processing failed.'}</span>;
+    else if (video?.status === 'FLAGGED') status = 'Held for review';
+    else if (video?.status === 'SUSPENDED') status = 'Video unavailable';
+    else if (playable && video.processingError) status = <span className="flex items-center gap-2 text-muted"><Icon.Warning size={16} />Ready to watch · {video.processingError}</span>;
+    else if (playable && video.processingStage === 'Ready') status = video.processingError ?? `Processing complete${video.renditions.length ? ` · ${video.renditions.at(-1)}` : ''}`;
+    else if (playable) status = video.processingStage === 'Playable · adding qualities' ? 'Ready to watch · Higher qualities are processing' : 'Ready to watch · Finishing processing';
+    else status = <span className="tabular-nums">{video?.status === 'PROCESSING' ? `${video.processingStage ?? 'Processing'} · ${video.processingProgress}%` : 'Waiting to process…'}</span>;
   }
   const bar = snap ? (snap.state === 'done' ? (video?.processingProgress ?? 0) : snap.state === 'compressing' ? (snap.compress?.progress ?? 0) * 100 : snap.total ? (snap.sent / snap.total) * 100 : 0) : 0;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-0 sm:p-6" role="dialog" aria-modal="true" aria-label="Upload video">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-0 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="launchpad-title">
       <div className="flex h-full w-full max-w-[960px] flex-col overflow-hidden bg-elevated sm:h-auto sm:max-h-[92dvh] sm:rounded-2xl">
         <header className="flex items-center justify-between border-b border-line px-6 py-4">
-          <h2 className="truncate text-[20px] font-semibold">{snap ? snap.title : kind === 'podcast' ? 'Upload a podcast' : kind === 'moment' ? 'Post a Moment' : 'Upload videos'}</h2>
+          <div className="min-w-0">
+            <h2 id="launchpad-title" className="text-[20px] font-semibold">Launchpad</h2>
+            <p className="truncate text-[13px] text-muted">{snap?.title ?? 'Upload a video, Moment, or podcast'}</p>
+          </div>
           <button type="button" onClick={closeDialog} aria-label="Close" className="rounded-full p-2 hover:bg-surface"><Icon.Close size={22} /></button>
         </header>
 
@@ -156,7 +171,7 @@ export function UploadDialog() {
                   {video?.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" className="h-full w-full object-cover" /> : snap?.state === 'done' ? <span className="flex items-center gap-2"><Icon.Spinner size={16} className="animate-spin" />Processing…</span> : 'Uploading…'}
                 </div>
                 <div className="space-y-2 p-3 text-[13px]">
-                  {video && <div><p className="text-muted">Video link</p>{video.status === 'READY' ? <Link href={`/watch?v=${video.id}`} target="_blank" className="flex items-center gap-1 break-all text-brand">/watch?v={video.id}<Icon.ExternalLink size={13} /></Link> : <p className="break-all text-faint">/watch?v={video.id}</p>}</div>}
+                  {video && <div><p className="text-muted">Video link</p>{playable ? <Link href={`/watch?v=${video.id}`} target="_blank" className="flex items-center gap-1 break-all text-brand">Open video<Icon.ExternalLink size={13} /></Link> : <p className="break-all text-faint">/watch?v={video.id}</p>}</div>}
                   <div><p className="text-muted">File</p><p className="break-all">{item.upload.original.name} · {formatBytes(item.upload.original.size)}{item.upload.file !== item.upload.original ? ` · sending a ${formatBytes(item.upload.file.size)} copy` : ''}</p></div>
                 </div>
               </div>
@@ -166,6 +181,14 @@ export function UploadDialog() {
 
         {snap && (
           <footer className="border-t border-line px-6 py-3">
+            <ol aria-label="Upload steps" className="mb-3 grid grid-cols-3 gap-2 text-[12px] font-semibold sm:text-[13px]">
+              {STEPS.map((step, index) => (
+                <li key={step} aria-current={index === phase ? 'step' : undefined}
+                  className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 ${index <= phase ? 'bg-brand-soft text-brand' : 'bg-surface text-muted'}`}>
+                  {index < phase && <Icon.CheckCircle size={14} className="shrink-0" />}{step}
+                </li>
+              ))}
+            </ol>
             <div className="h-1 overflow-hidden rounded-full bg-surface"><div className={`h-full transition-[width] duration-500 ${snap.state === 'error' ? 'bg-danger' : 'bg-brand'}`} style={{ width: `${Math.max(2, bar)}%` }} /></div>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[13px] text-muted">
               <span className="min-w-0">{status}</span>
