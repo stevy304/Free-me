@@ -274,11 +274,13 @@ test('audience support: opt-in, verified destination, payment replay and concurr
   await Promise.all([1, 2].map(() => viewer.get(`/api/billing/payments/${pay.id}`).expect(200)));
   let balance = await ctx.prisma.creatorBalance.findUniqueOrThrow({ where: { channelId: ch.id } });
   expect(balance).toMatchObject({ pendingBalanceCents: 300n, confirmedBalanceCents: 0n, lifetimeEarningsCents: 300n });
+  await owner.get('/api/hub/monetisation/payout-quote').expect(400);
   await viewer.post(`/api/admin/billing/support/${pay.id}/clear`).set('Origin', WEB).send({}).expect(403);
   await Promise.all([1, 2].map(() => admin.agent.post(`/api/admin/billing/support/${pay.id}/clear`).set('Origin', WEB).send({}).expect(201)));
   balance = await ctx.prisma.creatorBalance.findUniqueOrThrow({ where: { channelId: ch.id } });
   expect(balance).toMatchObject({ pendingBalanceCents: 0n, confirmedBalanceCents: 300n, lifetimeEarningsCents: 300n });
   expect(await ctx.prisma.revenueLedger.count({ where: { channelId: ch.id } })).toBe(2);
+  await owner.get('/api/hub/monetisation/payout-quote').expect(200);
   expect((await owner.get('/api/me').expect(200)).body.premium.active).toBe(false);
   await owner.put('/api/support/support-maker').set('Origin', WEB).send({ enabled: false }).expect(200);
   expect((await viewer.post('/api/support/support-maker').set('Origin', WEB).send(body).expect(201)).body.payment.id).toBe(pay.id);

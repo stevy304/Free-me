@@ -60,7 +60,7 @@ export function CreatorSupport({ handle, owner }: { handle: string; owner: boole
     <button onClick={() => setOpen(!open)} aria-expanded={open} className="font-semibold">Support {info.name} <span aria-hidden>↗</span></button>
     {open && <div className="mt-3 space-y-3">
       <p className="text-sm text-muted">{info.terms}</p>
-      {notice ? <p role="status" className="rounded-xl bg-brand-soft p-3 text-brand">{notice}</p> : !viewer ? <Link href={`/login?returnTo=${encodeURIComponent(`/channel/${handle}?support=1`)}`} className="underline">Sign in to support this creator</Link> : <>
+      {notice ? <p role="status" className="rounded-xl bg-brand-soft p-3 text-brand">{notice}</p> : !plans.methods.length ? <p className="text-sm text-muted">Support payments are temporarily unavailable.</p> : !viewer ? <Link href={`/login?returnTo=${encodeURIComponent(`/channel/${handle}?support=1`)}`} className="underline">Sign in to support this creator</Link> : <>
         <div role="radiogroup" aria-label="Support amount" className="flex flex-wrap gap-2">{info.amountsUsdCents.map((a) => <button key={a} disabled={!!pending} role="radio" aria-checked={amount === a} className={`rounded-xl border px-3 py-2 ${amount === a ? 'border-brand bg-brand-soft' : 'border-line'}`} onClick={() => { setAmount(a); setError(''); }}>{usd(a, locale)}</button>)}</div>
         <PayPanel key={pending?.id ?? amount} usdCents={amount} plans={plans} pending={pending} label="Send one-time support" onPaid={settled} start={async (method, phone) => {
           let requestId = sessionStorage.getItem(storageKey);

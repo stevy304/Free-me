@@ -5,7 +5,7 @@ import type { Payment } from '@/lib/types';
 import { usd } from '@/lib/money';
 import { useShell } from '@/components/shell/ShellContext';
 
-type Item = Payment & { channel: { name: string; handle: string } | null };
+type Item = Payment & { providerReference: string; channel: { name: string; handle: string } | null };
 export function AdminSupport() {
   const { locale } = useShell();
   const [rows, setRows] = useState<Item[]>([]);
@@ -19,7 +19,7 @@ export function AdminSupport() {
     {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
     {!rows.length && <p className="mt-3 text-sm text-muted">No received support awaiting clearance.</p>}
     <ul className="mt-3 divide-y divide-line">{rows.map((p) => <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
-      <div><p className="font-semibold">{p.channel?.name ?? 'Creator'} · {usd(p.usdCents, locale)}</p><p className="break-all text-xs text-muted">{p.method} · {p.id} · {p.paidAt ? new Date(p.paidAt).toLocaleDateString(locale) : ''}</p></div>
+      <div><p className="font-semibold">{p.channel?.name ?? 'Creator'} · {usd(p.usdCents, locale)}</p><p className="break-all text-xs text-muted">{p.method} · {p.providerReference} · {p.payerReference ? `Payer reference: ${p.payerReference} · ` : ''}{p.id} · {p.paidAt ? new Date(p.paidAt).toLocaleDateString(locale) : ''}</p></div>
       <button disabled={busy} className="rounded-xl bg-brand px-3 py-2 font-semibold text-on-brand disabled:opacity-50" onClick={async () => {
         setBusy(true); setError(''); try { await api(`/admin/billing/support/${p.id}/clear`, { body: {} }); await load(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
       }}>Settlement checked · clear funds</button>

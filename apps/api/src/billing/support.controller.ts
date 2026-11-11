@@ -60,7 +60,7 @@ export class SupportController {
   async queue() {
     const payments = await this.prisma.payment.findMany({ where: { purpose: 'CREATOR_SUPPORT', status: 'SUCCEEDED', supportClearedAt: null },
       orderBy: { paidAt: 'asc' }, take: 100, include: { supportChannel: { select: { handle: true, name: true } } } });
-    return { payments: payments.map((p) => ({ ...paymentView(p), channel: p.supportChannel })) };
+    return { payments: payments.map((p) => ({ ...paymentView(p), providerReference: p.providerRef, channel: p.supportChannel })) };
   }
 
   @Post('admin/billing/support/:id/clear')
