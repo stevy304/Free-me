@@ -6,6 +6,7 @@ import { Billing } from '../src/billing/billing';
 
 // Stand-ins for MTN MoMo (Collections) and Flutterwave, speaking their HTTP APIs.
 let provider: Server;
+let dropMomoResponse = false;
 const momo = new Map<string, { body: any; status: string }>();
 const flw = new Map<string, { body: any; status: string }>();
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -21,6 +22,7 @@ beforeAll(async () => {
       if (url === '/collection/v1_0/requesttopay' && req.method === 'POST') {
         if (req.headers.authorization !== 'Bearer tok' || req.headers['ocp-apim-subscription-key'] !== 'sub-1') return send(401);
         momo.set(String(req.headers['x-reference-id']), { body: JSON.parse(raw), status: 'PENDING' });
+        if (dropMomoResponse) { dropMomoResponse = false; req.socket.destroy(); return; }
         return send(202);
       }
       const m = /^\/collection\/v1_0\/requesttopay\/(.+)$/.exec(url);
@@ -31,7 +33,7 @@ beforeAll(async () => {
         return send(200, { status: 'success', data: { link: `https://checkout.flutterwave.test/pay/${b.tx_ref}` } });
       }
       const v = /^\/v3\/transactions\/verify_by_reference\?tx_ref=(.+)$/.exec(url);
-      if (v) { const p = flw.get(decodeURIComponent(v[1])); return p && p.status !== 'pending' ? send(200, { status: 'success', data: { status: p.status, amount: Number(p.body.amount), currency: p.body.currency } }) : send(404, { status: 'error', message: 'No transaction was found' }); }
+      if (v) { const p = flw.get(decodeURIComponent(v[1])); return p && p.status !== 'pending' ? send(200, { status: 'success', data: { status: p.status, amount: Number(p.body.amount), currency: p.body.currency, tx_ref: p.body.tx_ref } }) : send(404, { status: 'error', message: 'No transaction was found' }); }
       send(404);
     });
   });
@@ -42,7 +44,7 @@ beforeAll(async () => {
     FLW_BASE_URL: base, FLW_SECRET_KEY: 'flw-secret', FLW_WEBHOOK_HASH: 'hook-secret', PAYOUT_MINIMUM_USD_CENTS: '100', PAYOUT_RWF_PER_USD: '1450',
   } });
 });
-beforeEach(async () => { await resetDb(ctx.prisma); ctx.mail.outbox.length = 0; await ctx.clearLimits(); momo.clear(); flw.clear(); });
+beforeEach(async () => { await resetDb(ctx.prisma); ctx.mail.outbox.length = 0; await ctx.clearLimits(); momo.clear(); flw.clear(); dropMomoResponse = false; });
 afterAll(async () => { await ctx.app.close(); provider.close(); });
 
 async function creator(email: string, handle: string) {
@@ -297,4 +299,24 @@ test('declined support never earns funds and changed payout details suspend new 
   await ctx.prisma.payoutAccount.update({ where: { channelId: ch.id }, data: { status: 'PENDING', version: { increment: 1 } } });
   expect((await request(ctx.http).get('/api/support/decline-maker').expect(200)).body.enabled).toBe(false);
   await viewer.post('/api/support/decline-maker').set('Origin', WEB).send({ ...body, requestId: 'ce014238-8564-479d-8b42-f1d5f472b366' }).expect(400);
+});
+
+
+test('a lost collection response retains its provider reference and never starts a second prompt on retry', async () => {
+  await creator('uncertain-maker@example.com', 'uncertain-maker');
+  const viewer = await creator('uncertain-viewer@example.com', 'uncertain-viewer');
+  const ch = await ctx.prisma.channel.update({ where: { handle: 'uncertain-maker' }, data: { supportEnabled: true } });
+  await ctx.prisma.payoutAccount.create({ data: { channelId: ch.id, country: 'RW', provider: 'mtn_momo', accountIdentifier: '250788123456', accountHolderName: 'Creator Name', status: 'VERIFIED' } });
+  dropMomoResponse = true;
+  const body = { method: 'mtn_momo', phone: '0788123456', usdCents: 100, requestId: '8c0640f4-a131-4c46-b20a-0c445a023cc5' };
+  const pay = (await viewer.post('/api/support/uncertain-maker').set('Origin', WEB).send(body).expect(201)).body.payment;
+  expect(pay.status).toBe('PENDING');
+  expect(pay.failureReason).toContain('Do not send another');
+  const saved = await ctx.prisma.payment.findUniqueOrThrow({ where: { id: pay.id } });
+  expect(momo.has(saved.providerRef)).toBe(true);
+  expect((await viewer.post('/api/support/uncertain-maker').set('Origin', WEB).send(body).expect(201)).body.payment.id).toBe(pay.id);
+  expect(momo.size).toBe(1);
+  [...momo.values()][0].status = 'SUCCESSFUL';
+  expect((await viewer.get(`/api/billing/payments/${pay.id}`).expect(200)).body.payment.status).toBe('SUCCEEDED');
+  expect((await ctx.prisma.creatorBalance.findUniqueOrThrow({ where: { channelId: ch.id } })).pendingBalanceCents).toBe(100n);
 });

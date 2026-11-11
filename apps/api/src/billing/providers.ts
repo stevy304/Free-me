@@ -7,6 +7,8 @@ export type ProviderStatus = { status: 'PENDING' } | { status: 'SUCCEEDED' } | {
 
 export interface StartPayment {
   paymentId: string;
+  /** Persisted before collection so uncertain responses remain traceable. */
+  providerRef?: string;
   /** Amount in minor units of `currency`. */
   amountMinor: bigint;
   currency: string;
@@ -76,7 +78,7 @@ export class MomoProvider implements PaymentProvider {
 
   async start(p: StartPayment) {
     if (!p.phone) throw new ProviderError('A mobile money number is needed.');
-    const ref = randomUUID();
+    const ref = p.providerRef ?? randomUUID();
     const res = await call(`${this.c.baseUrl}/collection/v1_0/requesttopay`, {
       method: 'POST', headers: { ...(await this.headers()), 'X-Reference-Id': ref },
       body: JSON.stringify({ amount: major(p.amountMinor, p.currency), currency: p.currency, externalId: p.paymentId, payer: { partyIdType: 'MSISDN', partyId: p.phone }, payerMessage: p.description.slice(0, 160), payeeNote: p.description.slice(0, 160) }),
@@ -111,7 +113,7 @@ export class FlutterwaveProvider implements PaymentProvider {
   private get auth() { return { authorization: `Bearer ${this.c.secretKey}`, 'content-type': 'application/json' }; }
 
   async start(p: StartPayment) {
-    const ref = `fm-${p.paymentId}`;
+    const ref = p.providerRef ?? `fm-${p.paymentId}`;
     const res = await call(`${this.c.baseUrl}/v3/payments`, {
       method: 'POST', headers: this.auth,
       body: JSON.stringify({ tx_ref: ref, amount: major(p.amountMinor, p.currency), currency: p.currency, redirect_url: p.returnUrl, customer: { email: p.email }, customizations: { title: 'Free Me', description: p.description } }),
@@ -125,10 +127,10 @@ export class FlutterwaveProvider implements PaymentProvider {
     const res = await call(`${this.c.baseUrl}/v3/transactions/verify_by_reference?tx_ref=${encodeURIComponent(ref)}`, { headers: this.auth }, 'Card status');
     if (res.status === 404 || res.status === 400) return { status: 'PENDING' }; // not paid yet
     if (!res.ok) throw new ProviderError(`Card status: answered ${res.status}`);
-    const j = (await res.json()) as { data?: { status?: string; amount?: number; currency?: string } };
+    const j = (await res.json()) as { data?: { status?: string; amount?: number; currency?: string; tx_ref?: string } };
     const d = j.data ?? {};
     if (d.status === 'successful') {
-      if (d.currency !== expected.currency || toMinor(d.amount ?? 0, expected.currency) < expected.amountMinor) return { status: 'FAILED', reason: 'The amount paid does not match the price.' };
+      if (d.tx_ref !== ref || d.currency !== expected.currency || toMinor(d.amount ?? 0, expected.currency) < expected.amountMinor) return { status: 'FAILED', reason: 'The amount paid does not match the price.' };
       return { status: 'SUCCEEDED' };
     }
     if (d.status === 'failed' || d.status === 'cancelled') return { status: 'FAILED', reason: 'The card payment did not go through.' };

@@ -76,18 +76,26 @@ export class Billing {
       if (existing.userId !== user.id || existing.supportChannelId !== p.supportChannelId || existing.usdCents !== p.usdCents || existing.provider !== p.method || existing.phone !== (phone ?? null)) throw new BillingError('This request was already used for a different payment.');
       return existing;
     }
+    const paymentId = randomUUID();
+    const preparedRef = p.purpose === 'CREATOR_SUPPORT' && p.method !== 'manual'
+      ? p.method === 'flutterwave' ? `fm-${paymentId}` : randomUUID()
+      : `pending-${randomUUID()}`;
     let payment: Payment;
     try { payment = await this.prisma.payment.create({
-      data: { userId: user.id, purpose: p.purpose, provider: p.method, providerRef: `pending-${randomUUID()}`, amountMinor, currency: provider.currency, usdCents: p.usdCents, months: p.months ?? null, campaignId: p.campaignId ?? null, phone: phone ?? null, supportChannelId: p.supportChannelId, requestKey: p.requestKey },
+      data: { id: paymentId, userId: user.id, purpose: p.purpose, provider: p.method, providerRef: preparedRef, amountMinor, currency: provider.currency, usdCents: p.usdCents, months: p.months ?? null, campaignId: p.campaignId ?? null, phone: phone ?? null, supportChannelId: p.supportChannelId, requestKey: p.requestKey },
     }); } catch (e) {
       // A competing request may have created this payment while we checked.
       if (p.requestKey && (e as { code?: string }).code === 'P2002') return this.start(user, p);
       throw e;
     }
     try {
-      const r = await provider.start({ paymentId: payment.id, amountMinor, currency: provider.currency, description: p.description, email: user.email, phone, returnUrl: `${this.config.appUrl}${p.returnPath}${p.returnPath.includes('?') ? '&' : '?'}payment=${payment.id}` });
+      const r = await provider.start({ paymentId: payment.id, providerRef: preparedRef.startsWith('pending-') ? undefined : preparedRef, amountMinor, currency: provider.currency, description: p.description, email: user.email, phone, returnUrl: `${this.config.appUrl}${p.returnPath}${p.returnPath.includes('?') ? '&' : '?'}payment=${payment.id}` });
       return this.prisma.payment.update({ where: { id: payment.id }, data: { providerRef: r.providerRef, checkoutUrl: r.checkoutUrl } });
     } catch (e) {
+      if (p.purpose === 'CREATOR_SUPPORT' && p.method !== 'manual') {
+        this.log.warn(`Support payment ${payment.id}: collection response uncertain; checking saved reference`);
+        return this.prisma.payment.update({ where: { id: payment.id }, data: { failureReason: 'Confirmation is delayed. We are checking the saved payment reference. Do not send another payment.' } });
+      }
       await this.prisma.payment.update({ where: { id: payment.id }, data: { status: 'FAILED', failureReason: 'The payment could not be started.' } });
       this.log.warn(`payment ${payment.id}: ${(e as Error).message}`);
       throw new BillingError(e instanceof ProviderError ? 'The payment service did not answer. Please try again in a moment.' : 'The payment could not be started.');
@@ -122,7 +130,7 @@ export class Billing {
     }
     await this.prisma.$transaction(async (tx) => {
       // Only the first caller to flip PENDING → SUCCEEDED fulfils (the API and the worker may both check).
-      const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', paidAt: new Date(), receiptDueAt: new Date() } });
+      const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', failureReason: null, paidAt: new Date(), receiptDueAt: new Date() } });
       if (flipped.count) await this.fulfil(tx, p);
     });
     publish(room.user(p.userId), 'payment', { id });
@@ -163,7 +171,7 @@ export class Billing {
     if (p.status !== 'PENDING') throw new BillingError('This payment is already settled.');
     if (approve) {
       await this.prisma.$transaction(async (tx) => {
-        const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', paidAt: new Date(), receiptDueAt: new Date() } });
+        const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', failureReason: null, paidAt: new Date(), receiptDueAt: new Date() } });
         if (flipped.count) await this.fulfil(tx, p);
       });
     } else {

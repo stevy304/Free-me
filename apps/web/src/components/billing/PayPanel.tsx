@@ -73,6 +73,7 @@ export function PayPanel({ usdCents, plans, start, onPaid, label, pending }: { u
   if (watching?.status === 'PENDING') {
     return (
       <div className="rounded-2xl border border-line bg-elevated p-5 text-center" aria-live="polite">
+        {watching.failureReason && <p className="mb-3 text-sm text-muted">{watching.failureReason}</p>}
         <Icon.Spinner size={28} className="mx-auto animate-spin text-brand" />
         <p className="mt-3 font-display text-[18px] font-bold">Approve {money(watching.amount, watching.currency, locale)} on your phone</p>
         <p className="mt-1 text-[14px] text-muted">A MoMo prompt was sent to your number. Enter your PIN to confirm. If it does not appear, dial <b>*182*7*1#</b> to see pending approvals.</p>
