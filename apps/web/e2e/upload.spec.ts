@@ -39,13 +39,18 @@ test('upload, details, publish, processing to every quality, then on the home pa
 
   await page.getByRole('button', { name: 'Create' }).click();
   await page.getByRole('menuitem', { name: 'Upload video' }).click();
-  await page.locator('input[type=file]').setInputFiles(clip);
+  const launchpad = page.getByRole('dialog', { name: 'Launchpad' });
+  await expect(launchpad).toBeVisible();
+  await launchpad.locator('input[type=file]').setInputFiles(clip);
+  await expect(launchpad.getByRole('list', { name: 'Upload steps' })).toBeVisible();
   await expect(page.getByLabel('Title (required)')).toHaveValue(`Morning in Kigali ${run}`);
   await page.getByLabel('Description').fill('Six seconds of test pattern.');
   await page.getByText("No, it's not made for kids").click();
   await page.getByLabel('Category').selectOption('travel-events');
   await page.locator('label').filter({ hasText: 'Everyone can find and watch it' }).click();
   await expect(page.getByText(/Processing complete · 720p/)).toBeVisible({ timeout: 120_000 });
+  await expect(launchpad.getByText('Ready to watch', { exact: true })).toHaveAttribute('aria-current', 'step');
+  await expect(launchpad.getByRole('link', { name: 'Open video' })).toBeVisible();
   expect(readFileSync(photo).length).toBeGreaterThan(2 * 1024 * 1024);
   await page.locator('input[type=file][accept="image/*"]').setInputFiles(photo);
   await expect(page.getByText('Thumbnail updated')).toBeVisible({ timeout: 20_000 });
@@ -83,4 +88,55 @@ test('upload, details, publish, processing to every quality, then on the home pa
   const master = await page.evaluate(async () => (await (await fetch(`/api/videos/${new URLSearchParams(location.search).get('v')}`)).json()).video.playbackUrl as string);
   const text = await (await page.request.get(master)).text();
   expect(text.match(/#EXT-X-STREAM-INF/g)).toHaveLength(5);
+
+  // Drive the native media events so the recovery flow can run even on Chromium builds without H.264.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'userAgent', { value: 'Safari', configurable: true });
+    const canPlayType = HTMLMediaElement.prototype.canPlayType;
+    HTMLMediaElement.prototype.canPlayType = function (type) {
+      return type === 'application/vnd.apple.mpegurl' ? 'probably' : canPlayType.call(this, type);
+    };
+  });
+  const watchUrl = page.url();
+  await page.evaluate(() => localStorage.setItem('fm_speed', '1.5'));
+  await page.reload();
+  const player = page.locator('video');
+  await expect(player).toHaveAttribute('src', /master\.m3u8/);
+  await player.evaluate((element: HTMLVideoElement) => {
+    let position = 3;
+    Object.defineProperties(element, {
+      currentTime: { get: () => position, set: (value: number) => { position = value; } },
+      error: { get: () => navigator.onLine ? null : { code: 2 } },
+      play: { value: () => {
+        element.dataset.resumedAt = String(position);
+        element.dispatchEvent(new Event('play'));
+        element.dispatchEvent(new Event('playing'));
+        return Promise.resolve();
+      } },
+    });
+    element.dispatchEvent(new Event('play'));
+    element.dispatchEvent(new Event('timeupdate'));
+  });
+  const recoveryReport = page.waitForResponse((response) => response.url().endsWith('/playback-health') && response.request().method() === 'POST');
+  await page.context().setOffline(true);
+  try {
+    await player.evaluate((element: HTMLVideoElement) => {
+      element.dispatchEvent(new Event('pause'));
+      element.dispatchEvent(new Event('error'));
+      element.currentTime = 0;
+      element.playbackRate = 1;
+    });
+    await expect(page.getByText('Your place · 0:03')).toBeVisible();
+  } finally {
+    await page.context().setOffline(false);
+  }
+  await expect(page.getByText('Waiting for connection')).toBeHidden();
+  await player.dispatchEvent('loadedmetadata');
+  await expect(player).toHaveAttribute('data-resumed-at', '3');
+  const reported = await recoveryReport;
+  expect(reported.ok()).toBe(true);
+  expect(reported.request().postDataJSON()).toMatchObject({ kind: 'recovery', durationMs: expect.any(Number) });
+  await expect.poll(() => player.evaluate((element: HTMLVideoElement) => element.playbackRate)).toBe(1.5);
+  await expect(page).toHaveURL(watchUrl);
+
 });

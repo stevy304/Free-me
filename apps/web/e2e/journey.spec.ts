@@ -76,6 +76,6 @@ test('unknown pages and channels show a clear message; phones get the floating d
   await page.goto('/@no-such-channel-here');
   await expect(page.getByRole('heading', { name: "This page isn't available" })).toBeVisible();
   await page.goto('/');
-  await expect(page.getByRole('navigation', { name: 'Main' }).last().getByRole('link', { name: 'For you' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Main' }).last().getByRole('link', { name: 'Current' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
 });

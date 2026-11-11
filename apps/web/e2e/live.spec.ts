@@ -43,13 +43,15 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   await signIn(host, hostEmail);
   expect((await post(host, '/channels', { handle: `live.${run}`, name: 'Live Kigali' })).status()).toBe(201);
   await host.goto('/studio/live');
-  await expect(host.getByRole('heading', { name: 'Live Studio is part of Premium' })).toBeVisible();
+  await expect(host.getByRole('heading', { name: 'Signal Room is part of Premium' })).toBeVisible();
 
   const admin = await (await browser.newContext()).newPage();
   await signIn(admin, 'live-admin@example.com');
   expect((await post(admin, '/admin/billing/premium', { email: hostEmail, months: 1 })).ok()).toBe(true);
 
   await host.reload();
+  await expect(host.getByRole('heading', { name: 'Signal Room', exact: true })).toBeVisible();
+  await expect(host.getByRole('region', { name: 'Production monitors' })).toBeVisible();
   const panels = host.getByRole('complementary', { name: 'Production panels' });
   await panels.getByRole('button', { name: 'Sources', exact: true }).click();
   await host.getByRole('button', { name: 'Camera' }).click();
@@ -66,7 +68,7 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   await expect(host.getByText(/ON AIR/)).toBeVisible({ timeout: 20_000 });
 
   // A viewer finds it in "Live now" and opens it.
-  const viewer = await (await browser.newContext()).newPage();
+  const viewer = await (await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true })).newPage();
   await signIn(viewer, `fan.${run}@example.com`);
   await expect(async () => {
     await viewer.goto('/live');

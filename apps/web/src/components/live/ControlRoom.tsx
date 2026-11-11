@@ -59,7 +59,7 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
   const [programGuests, setProgramGuests] = useState<string[]>([]);
   const [draft, setDraft] = useState<Graphics>(show.graphics);
   const [onAir, setOnAir] = useState<Graphics>(() => ({ ...cloneGraphics(show.graphics), lower: { ...show.graphics.lower, show: false } }));
-  const [panel, setPanel] = useState('Crew');
+  const [panel, setPanel] = useState('Sources');
   const [transition, setTransition] = useState<Transition>('fade');
   const [fadeMs, setFadeMs] = useState(1000);
   const [rundown, setRundown] = useState<Cue[]>([]);
@@ -592,23 +592,10 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
   const recClock = recording ? Math.max(0, Math.floor((now - recording.since) / 1000)) : 0;
   return (
     <div className={styles.desk}>
-      <nav className={styles.tools} aria-label="Studio tools">
-        {([{ label: 'Scene', icon: Icon.Pencil }, { label: 'Sources', icon: Icon.Camera }, { label: 'Graphics', icon: Icon.Monitor }, { label: 'Guests', icon: Icon.PersonAdd }, { label: 'Rundown', icon: Icon.Hub }, { label: 'Chat', icon: Icon.Comment }] as const).map(({ label, icon: Tool }) =>
-          <button key={label} type="button" title={label} aria-label={label} aria-pressed={panel === label} onClick={() => setPanel(label)}><Tool size={19} /></button>,
-        )}
-      </nav>
-      <aside className={styles.scenes} aria-label="Scenes">
-        <h2>Scenes</h2>
-        {scenes.map((item, i) => <button key={item.id} type="button" aria-pressed={scene.id === item.id} onClick={() => setPreviewId(item.id)} onDoubleClick={() => { setPreviewId(item.id); setPanel('Scene'); }} title={`${item.name} · key ${i + 1}`}>
-          <span className="flex min-w-0 items-center gap-1.5"><LayoutIcon layout={item.layout} /><span className="truncate">{item.name}</span></span>
-          {program.id === item.id ? <span className={styles.airDot} title="On air">●</span> : i < 9 ? <kbd className={styles.key}>{i + 1}</kbd> : null}
-        </button>)}
-        <button type="button" className={styles.addScene} onClick={addScene}><Icon.Plus size={14} />New scene</button>
-      </aside>
       <section className={styles.production} aria-label="Production monitors">
-        <div className={styles.monitors}>
-          <div className={styles.monitor}><h2>Preview <small>{scene.name}</small></h2><canvas ref={preview} width={W} height={H} /></div>
-          <div className={styles.monitor}><h2>Program <small>{program.name}</small> {active && <span>● LIVE</span>}</h2><canvas ref={output} width={W} height={H} /></div>
+        <div className={styles.monitors} data-broadcasting={active}>
+          <div className={styles.monitor}><h2>Preview <small>{scene.name}</small></h2><canvas aria-label="Scene preview" ref={preview} width={W} height={H} /></div>
+          <div className={styles.monitor}><h2>Program <small>{program.name}</small> {active && <span>● LIVE</span>}</h2><canvas aria-label="Broadcast output" ref={output} width={W} height={H} /></div>
         </div>
         <div className={styles.switcher}>
           <button type="button" className={styles.take} onClick={take} title="Space"><Icon.Live size={21} />Take to air</button>
@@ -621,6 +608,14 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
             <span className={styles.recDot} />{recording ? `Stop recording · ${Math.floor(recClock / 60)}:${String(recClock % 60).padStart(2, '0')}` : 'Record locally'}
           </button>
         </div>
+        <section className={styles.scenes} aria-label="Scenes">
+          <h2>Scenes</h2>
+          {scenes.map((item, i) => <button key={item.id} type="button" aria-pressed={scene.id === item.id} onClick={() => setPreviewId(item.id)} onDoubleClick={() => { setPreviewId(item.id); setPanel('Scene'); }} title={`${item.name} · key ${i + 1}`}>
+            <span className="flex min-w-0 items-center gap-1.5"><LayoutIcon layout={item.layout} /><span className="truncate">{item.name}</span></span>
+            {program.id === item.id ? <span className={styles.airDot} title="On air">●</span> : i < 9 ? <kbd className={styles.key}>{i + 1}</kbd> : null}
+          </button>)}
+          <button type="button" className={styles.addScene} onClick={addScene}><Icon.Plus size={14} />New scene</button>
+        </section>
         <section className={styles.mixer} aria-label="Audio mixer">
           <header><h2>Audio Mixer</h2><label><input type="checkbox" checked={monitor} onChange={(e) => setMonitor(e.target.checked)} /> Monitor (headphones)</label></header>
           <div className={styles.channels}>
@@ -633,11 +628,15 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
         </section>
       </section>
       <aside className={styles.sidebar} aria-label="Production panels">
+        <header className={styles.panelHeader}>
+          <p>Production desk</p>
+          <h2>Controls</h2>
+        </header>
         <nav aria-label="Production panels">
           {panels.map((item) => <button type="button" key={item} aria-pressed={panel === item} onClick={() => setPanel(item)}>{item}</button>)}
         </nav>
         <div className={styles.panel} hidden={panel !== 'Crew'}>
-          <div className={styles.operator}><span>FM</span><div><strong>Host · You</strong><small>{active ? 'On air' : 'In control room'}</small></div></div>
+          <div className={styles.operator}><span>FM</span><div><strong>Host · You</strong><small>{active ? 'On air' : 'In Signal Room'}</small></div></div>
           {guests.map((g, i) => <div key={g.id} className={styles.operator}><span>G{i + 1}</span><div><strong>Guest {i + 1}</strong><small>{programGuests.includes(g.id) && uses(program, 'guests') ? 'On air' : g.onAir ? 'In preview' : g.stream ? 'Waiting in green room' : 'Connecting'}</small></div></div>)}
           <button type="button" className={styles.small} onClick={() => setPanel('Guests')}>Open green room</button>
           <p className="mt-3 text-[11px] leading-relaxed text-[#8fb0b6]">Keys: <kbd className={styles.key}>Space</kbd> take to air · <kbd className={styles.key}>1</kbd>–<kbd className={styles.key}>9</kbd> pick a scene. Your scenes and graphics are kept on this computer.</p>

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getViewer } from '@/lib/server-api';
 import { StudioLive } from './StudioLive';
 
-export const metadata: Metadata = { title: 'Live Studio' };
+export const metadata: Metadata = { title: 'Signal Room' };
 
 export default async function LiveStudioPage() {
   const viewer = await getViewer();

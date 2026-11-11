@@ -118,7 +118,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
               { href: '/hub?tab=money', icon: Icon.Wallet, title: 'Monetisation', text: 'Earnings and withdrawals' },
-              { href: '/studio/live', icon: Icon.Live, title: 'Live Studio', text: 'Go live now' },
+              { href: '/studio/live', icon: Icon.Live, title: 'Signal Room', text: 'Open your broadcast studio' },
               { href: '/hub', icon: Icon.Hub, title: 'Creator Hub', text: 'Videos, Moments, podcasts' },
               { href: '/studio/ads', icon: Icon.Megaphone, title: 'Ad Studio', text: 'Upload and run video ads' },
             ].map((t) => (
