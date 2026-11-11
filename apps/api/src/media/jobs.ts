@@ -97,7 +97,7 @@ export class MediaJobs {
         throw e;
       }
     });
-    // The higher qualities: queued behind every other upload's first job (or right away without a queue).
+    // The higher qualities run in the background queue (or right away in inline development).
     if (done.more) {
       if (this.enqueue) await this.enqueue({ name: 'upgrade', videoId });
       else return this.transcode(videoId, final, signal, 'rest');

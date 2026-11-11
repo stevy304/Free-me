@@ -108,6 +108,7 @@ export function UploadDialog() {
     else if (video?.status === 'FAILED') status = <span className="flex items-center gap-2 text-danger"><Icon.Warning size={16} />{video.processingError ?? 'Processing failed.'}</span>;
     else if (video?.status === 'FLAGGED') status = 'Held for review';
     else if (video?.status === 'SUSPENDED') status = 'Video unavailable';
+    else if (playable && video.processingError) status = <span className="flex items-center gap-2 text-muted"><Icon.Warning size={16} />Ready to watch · {video.processingError}</span>;
     else if (playable && video.processingStage === 'Ready') status = video.processingError ?? `Processing complete${video.renditions.length ? ` · ${video.renditions.at(-1)}` : ''}`;
     else if (playable) status = video.processingStage === 'Playable · adding qualities' ? 'Ready to watch · Higher qualities are processing' : 'Ready to watch · Finishing processing';
     else status = <span className="tabular-nums">{video?.status === 'PROCESSING' ? `${video.processingStage ?? 'Processing'} · ${video.processingProgress}%` : 'Waiting to process…'}</span>;

@@ -73,9 +73,10 @@ export class SystemController {
   async status() {
     const now = Date.now();
     const db = await this.prisma.$queryRaw`SELECT 1`.then(() => 'ok' as const).catch(() => 'down' as const);
-    const [redis, queue, byStatus, stuck, failed24h, sizes, renditionBytes, users, newUsers24h, channels, openReports] = await Promise.all([
+    const [redis, queue, upgradeQueue, byStatus, stuck, failed24h, sizes, renditionBytes, users, newUsers24h, channels, openReports] = await Promise.all([
       this.redis.ping(),
       this.media.queue ? this.media.queue.getJobCounts('waiting', 'active', 'delayed', 'failed').catch(() => null) : Promise.resolve(null),
+      this.media.upgradeQueue?.getJobCounts('waiting', 'prioritized', 'active', 'delayed', 'failed').catch(() => null) ?? Promise.resolve(null),
       this.prisma.video.groupBy({ by: ['status'], _count: { _all: true } }),
       this.prisma.video.count({ where: { OR: [{ status: 'PROCESSING' }, { status: 'READY', processingStage: { not: 'Ready' } }], updatedAt: { lt: new Date(now - 2 * HOUR) } } }),
       this.prisma.video.count({ where: { status: 'FAILED', updatedAt: { gte: new Date(now - 24 * HOUR) } } }),
@@ -100,7 +101,7 @@ export class SystemController {
       ok: warnings.length === 0, warnings,
       app: { environment: this.config.nodeEnv, startedAt, uptimeSeconds: Math.round((now - startedAt.getTime()) / 1000), node: process.version, memoryMb: Math.round(process.memoryUsage().rss / 1048576) },
       services: { database: db, redis, storage: this.config.media.driver, email: this.config.mail.transport, googleSignIn: !!this.config.google, autoCaptions: !!this.config.media.whisper },
-      processing: { queue, stuckOver2h: stuck, failedLast24h: failed24h, videosNeedingUpgrade: needsUpgrade },
+      processing: { queue, upgradeQueue, stuckOver2h: stuck, failedLast24h: failed24h, videosNeedingUpgrade: needsUpgrade },
       videos: Object.fromEntries(byStatus.map((s) => [s.status, s._count._all])),
       storage: { sourceBytes: (sizes._sum.sourceSizeBytes ?? 0n).toString(), mediaBytes: (renditionBytes._sum.fileSizeBytes ?? 0n).toString() },
       accounts: { users, newLast24h: newUsers24h, spaces: channels },

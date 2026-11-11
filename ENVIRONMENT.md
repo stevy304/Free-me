@@ -40,7 +40,8 @@ Values for local development are in [.env.example](.env.example). In production 
 | `MAX_UPLOAD_MB` | | `20480` (20 GB) | Largest upload |
 | `UPLOAD_PART_MB` | | `16` | Base upload part size in MiB (5 or more). New S3 uploads of at least 4 GiB use at least 64 MiB per part. |
 | `SCRATCH_DIR` | | `/tmp/freeme-scratch` | Worker's working folder (source and renditions while processing): put it on a fast local disk with room for the largest uploads |
-| `WORKER_CONCURRENCY` | | `2` | Videos one worker instance processes at once |
+| `WORKER_CONCURRENCY` | | `2` | Foreground jobs, including first-playable video processing, per worker instance |
+| `WORKER_UPGRADE_CONCURRENCY` | | `1` | Background quality upgrades and caption backfills per worker instance |
 | `TRANSCODE_PRESET` | | `veryfast` | x264 preset: faster = quicker processing, slightly larger files |
 | `TRANSCODE_PRESET_HIGH` | | `superfast` | x264 preset for 1080p and above (the rungs that cost the most CPU); `veryfast` for slightly smaller files, slower |
 | `CHUNKED_ENCODING` | | `true` | Encode long videos in pieces that every worker server takes from a shared queue (more media servers = long videos ready sooner). `false`: one run per pass, as before |
