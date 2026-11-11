@@ -117,6 +117,7 @@ test('upload, details, publish, processing to every quality, then on the home pa
     element.dispatchEvent(new Event('play'));
     element.dispatchEvent(new Event('timeupdate'));
   });
+  const recoveryReport = page.waitForResponse((response) => response.url().endsWith('/playback-health') && response.request().method() === 'POST');
   await page.context().setOffline(true);
   try {
     await player.evaluate((element: HTMLVideoElement) => {
@@ -132,6 +133,9 @@ test('upload, details, publish, processing to every quality, then on the home pa
   await expect(page.getByText('Waiting for connection')).toBeHidden();
   await player.dispatchEvent('loadedmetadata');
   await expect(player).toHaveAttribute('data-resumed-at', '3');
+  const reported = await recoveryReport;
+  expect(reported.ok()).toBe(true);
+  expect(reported.request().postDataJSON()).toMatchObject({ kind: 'recovery', durationMs: expect.any(Number) });
   await expect.poll(() => player.evaluate((element: HTMLVideoElement) => element.playbackRate)).toBe(1.5);
   await expect(page).toHaveURL(watchUrl);
 

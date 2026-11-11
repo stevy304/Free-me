@@ -52,6 +52,16 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const interrupted = useRef<{ t: number; auto: boolean } | null>(null);
   const wantsPlayback = useRef(false);
   const frame = useRef<number | null>(null);
+  const bufferingSince = useRef<number | null>(null);
+  const recoverySince = useRef<number | null>(null);
+  const reportHealth = (kind: 'startup' | 'buffer' | 'recovery', ms: number) => {
+    if (!videoId || !Number.isFinite(ms) || ms < 0 || ms > 86_400_000) return;
+    void fetch(`/api/videos/${videoId}/playback-health`, {
+      method: 'POST', credentials: 'same-origin', keepalive: true,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind, durationMs: Math.round(ms) }),
+    }).catch(() => undefined);
+  };
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(durationHint ?? 0);
   const [buffered, setBuffered] = useState(0);
@@ -134,7 +144,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   // Remember the position when the viewer leaves the page or switches tabs.
   useEffect(() => {
     const leave = () => save();
-    const vis = () => { if (document.visibilityState === 'hidden') save(); };
+    const vis = () => { if (document.visibilityState === 'hidden') { bufferingSince.current = null; save(); } };
     window.addEventListener('pagehide', leave); document.addEventListener('visibilitychange', vis);
     return () => { save(); window.removeEventListener('pagehide', leave); document.removeEventListener('visibilitychange', vis); };
   }, [src, save]);
@@ -177,6 +187,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     const el = video.current;
     if (!el || interrupted.current) return;
     // Some native players pause themselves on a network error before reporting it.
+    recoverySince.current ??= performance.now();
     interrupted.current = { t: el.currentTime || lastT.current, auto: !navigator.onLine && wantsPlayback.current };
     setTime(interrupted.current.t);
     setNetworkError(true);
@@ -185,6 +196,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
 
   useEffect(() => {
     firstPlay.current = { started: null, measured: false };
+    bufferingSince.current = null;
+    recoverySince.current = null;
   }, [playSrc]);
 
   // Source: native HLS on Safari/iOS, hls.js elsewhere.
@@ -212,6 +225,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     let cancelled = false;
     const start = () => {
       if (cancelled || preRoll.current) return;
+      firstPlay.current.started ??= performance.now();
       el.play().catch(() => {
         if (cancelled) return;
         el.muted = true;
@@ -278,6 +292,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const toggle = useCallback(() => {
     const el = video.current!;
     if (el.paused || el.ended) {
+      firstPlay.current.started ??= performance.now();
       el.play().catch(() => undefined);
       setFlash('play');
     } else {
@@ -392,12 +407,27 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
           firstPlay.current.started ??= performance.now();
           setPlaying(true);
         }} onPause={() => {
+          bufferingSince.current = null;
           if (navigator.onLine && !video.current?.error) wantsPlayback.current = false;
           if (frame.current !== null) video.current?.cancelVideoFrameCallback?.(frame.current);
           frame.current = null;
           if (!firstPlay.current.measured) firstPlay.current.started = null;
           setPlaying(false); save();
-        }} onWaiting={() => setWaiting(true)} onPlaying={() => {
+        }} onWaiting={(e) => {
+          setWaiting(true);
+          if (firstPlay.current.measured && !e.currentTarget.paused && !e.currentTarget.seeking && !ad && document.visibilityState === 'visible') {
+            bufferingSince.current ??= performance.now();
+          }
+        }} onSeeking={() => { bufferingSince.current = null; }} onPlaying={() => {
+          const now = performance.now();
+          if (recoverySince.current !== null) {
+            reportHealth('recovery', now - recoverySince.current);
+            recoverySince.current = null;
+            bufferingSince.current = null;
+          } else if (bufferingSince.current !== null) {
+            reportHealth('buffer', now - bufferingSince.current);
+            bufferingSince.current = null;
+          }
           interrupted.current = null;
           setNetworkError(false);
           setWaiting(false);
@@ -409,6 +439,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
             frame.current = el.requestVideoFrameCallback((now) => {
               frame.current = null;
               performance.measure('free-me:play-to-first-frame', { start: started, end: now });
+              reportHealth('startup', now - started);
               firstPlay.current.measured = true;
             });
           } else firstPlay.current.measured = true;
