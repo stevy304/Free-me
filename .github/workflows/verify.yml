@@ -60,6 +60,8 @@ jobs:
         run: npx prisma migrate deploy && npm run db:seed
       - name: Typecheck
         run: npm run lint
+      - name: Capacity calculator checks
+        run: npm run test:capacity
       - name: Unit and API tests (PostgreSQL, Redis, FFmpeg, S3 driver)
         run: npm test
         env:
