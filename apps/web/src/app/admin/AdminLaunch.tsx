@@ -17,7 +17,7 @@ export function AdminLaunch() {
   return (
     <div className="mt-5 max-w-3xl space-y-4">
       <div className={`flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3 ${r.ready ? 'bg-brand-soft text-brand' : 'bg-accent-soft text-on-accent-soft'}`}>
-        <p className="flex-1 text-[15px] font-semibold">{r.ready ? 'Ready to open to the public.' : 'Not ready yet: finish the items marked “Needed”.'} <span className="font-normal">{done} of {r.checks.length} done.</span></p>
+        <p className="flex-1 text-[15px] font-semibold">{r.ready ? 'Required configuration checks passed.' : 'Not ready yet: finish the items marked “Needed”.'} <span className="font-normal">{done} of {r.checks.length} done.</span></p>
         <button type="button" onClick={load} className="h-9 rounded-xl bg-elevated px-3 text-[13px] font-semibold text-ink">Check again</button>
       </div>
       <ul className="divide-y divide-line rounded-2xl border border-line">
@@ -32,7 +32,7 @@ export function AdminLaunch() {
           </li>
         ))}
       </ul>
-      <p className="text-[13px] text-muted">The full step-by-step guide is in LAUNCH.md and DEPLOYMENT.md in the code.</p>
+      <p className="text-[13px] text-muted">Before inviting viewers, test sign-in, an upload through playback, a live broadcast, and backup recovery. These checks do not measure audience capacity or guarantee reliability. The setup guide is in LAUNCH.md and DEPLOYMENT.md.</p>
     </div>
   );
 }
