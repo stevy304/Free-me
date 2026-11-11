@@ -44,6 +44,14 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const firstPlay = useRef<{ started: number | null; measured: boolean }>({ started: null, measured: false });
   const [playing, setPlaying] = useState(false);
   const [waiting, setWaiting] = useState(true);
+  const [offline, setOffline] = useState(false);
+  const [slow, setSlow] = useState(false);
+  const [networkError, setNetworkError] = useState(false);
+  const [reload, setReload] = useState(0);
+  const retryQuality = useRef<number | null>(null);
+  const interrupted = useRef<{ t: number; auto: boolean } | null>(null);
+  const wantsPlayback = useRef(false);
+  const frame = useRef<number | null>(null);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(durationHint ?? 0);
   const [buffered, setBuffered] = useState(0);
@@ -57,7 +65,14 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const [audio, setAudio] = useState<{ for: string; url: string } | null>(null);
   const [soundOnly, setSoundOnly] = useState(false);
   const resumeAt = useRef<{ t: number; play: boolean } | null>(null);
-  useEffect(() => { setSoundOnly(false); setAudio(null); resumeAt.current = null; }, [src]);
+  useEffect(() => {
+    setSoundOnly(false);
+    setAudio(null);
+    resumeAt.current = null;
+    reported.current = false;
+    watched.current = 0;
+    lastT.current = 0;
+  }, [src]);
   const playSrc = soundOnly && audio?.for === src ? audio.url : src;
   const [playingLevel, setPlayingLevel] = useState<number | null>(null);
   const [menu, setMenu] = useState<null | 'main' | 'quality' | 'speed' | 'captions'>(null);
@@ -96,7 +111,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     adsReady.current = Promise.race([fetched, new Promise<void>((done) => setTimeout(done, ADS_WAIT_MS))]);
     return () => { off = true; };
   }, [videoId, withAds]); // eslint-disable-line react-hooks/exhaustive-deps
-  const adDone = () => { setAd(null); video.current?.play().catch(() => undefined); };
+  const adDone = () => { preRoll.current = false; setAd(null); video.current?.play().catch(() => undefined); };
   useEffect(() => { onPlayingChange?.(playing); }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
   const progressRef = useRef(onProgress);
   progressRef.current = onProgress;
@@ -124,19 +139,94 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     return () => { save(); window.removeEventListener('pagehide', leave); document.removeEventListener('visibilitychange', vis); };
   }, [src, save]);
 
+  useEffect(() => {
+    const update = () => setOffline(!navigator.onLine);
+    update();
+    window.addEventListener('offline', update);
+    window.addEventListener('online', update);
+    return () => {
+      window.removeEventListener('offline', update);
+      window.removeEventListener('online', update);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!waiting || !playing || ad) return;
+    const timer = setTimeout(() => setSlow(true), 2200);
+    return () => { clearTimeout(timer); setSlow(false); };
+  }, [waiting, playing, ad]);
+
+  const retry = useCallback((play: boolean) => {
+    const el = video.current;
+    if (!el || !navigator.onLine || ad || preRoll.current) return;
+    retryQuality.current = hls.current?.manualLevel ?? null;
+    resumeAt.current = { t: interrupted.current?.t ?? el.currentTime, play };
+    setNetworkError(false);
+    setWaiting(play);
+    setReload((n) => n + 1);
+  }, [ad]);
+
+  // A fatal error while offline is recoverable when the browser reports a connection again.
+  useEffect(() => {
+    if (offline || !networkError || !interrupted.current?.auto || ad) return;
+    interrupted.current.auto = false;
+    retry(true);
+  }, [offline, networkError, ad, retry]);
+
+  const failNetwork = () => {
+    const el = video.current;
+    if (!el || interrupted.current) return;
+    // Some native players pause themselves on a network error before reporting it.
+    interrupted.current = { t: el.currentTime || lastT.current, auto: !navigator.onLine && wantsPlayback.current };
+    setTime(interrupted.current.t);
+    setNetworkError(true);
+    setWaiting(false);
+  };
+
+  useEffect(() => {
+    firstPlay.current = { started: null, measured: false };
+  }, [playSrc]);
+
   // Source: native HLS on Safari/iOS, hls.js elsewhere.
   useEffect(() => {
     const el = video.current!;
     const url = playSrc;
     const back = resumeAt.current; resumeAt.current = null;
-    if (back) el.addEventListener('loadedmetadata', () => { el.currentTime = back.t; if (back.play) void el.play().catch(() => undefined); }, { once: true });
-    firstPlay.current = { started: null, measured: false };
-    setError(null); setLevels([]); setLevel(-1); reported.current = false; watched.current = 0;
+    const quality = retryQuality.current; retryQuality.current = null;
+    const savedSpeed = Number(store.get('fm_speed') ?? '1');
+    const playbackRate = SPEEDS.includes(savedSpeed) ? savedSpeed : 1;
+    const restore = () => {
+      el.playbackRate = playbackRate;
+      setSpeed(playbackRate);
+      if (!back) return;
+      el.currentTime = back.t;
+      if (back.play) void el.play().catch(() => undefined);
+    };
+    el.addEventListener('loadedmetadata', restore, { once: true });
+    interrupted.current = null;
+    wantsPlayback.current = false;
+    setNetworkError(false);
+    setError(null); setLevels([]); setLevel(-1);
     const v = Number(store.get('fm_volume') ?? '1'); const m = store.get('fm_muted') === '1';
     el.volume = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1; el.muted = m; setVolume(el.volume); setMuted(m);
     let cancelled = false;
+    const start = () => {
+      if (cancelled || preRoll.current) return;
+      el.play().catch(() => {
+        if (cancelled) return;
+        el.muted = true;
+        setMuted(true);
+        void el.play().catch(() => undefined);
+      });
+    };
+    const autoplay = () => {
+      if (back || !autoPlay) return;
+      if (withAds) void adsReady.current.then(start);
+      else start();
+    };
     if (el.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) {
       el.src = url;
+      autoplay();
     } else {
       import('hls.js').then(({ default: H }) => {
         if (cancelled) return;
@@ -145,6 +235,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
         const h = new H({ capLevelToPlayerSize: true, startLevel: -1, startFragPrefetch: true, maxBufferLength: 30, backBufferLength: 60 });
         hls.current = h;
         h.on(H.Events.MANIFEST_PARSED, () => {
+          autoplay();
           setLevels(h.levels.map((l, index) => ({ index, height: l.height, width: l.width, label: label(l.height, l.width) })).reverse());
           const track = h.audioTracks[0];
           if (track?.url && url === src) setAudio({ for: src, url: track.url });
@@ -153,29 +244,48 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
           const on = dataSaverActive() && cap >= 0 && cap < h.levels.length - 1;
           setSaver(on);
           if (on) { h.autoLevelCapping = cap; h.nextLoadLevel = Math.min(h.nextLoadLevel, cap); }
+          if (quality !== null && quality >= 0 && quality < h.levels.length) {
+            h.autoLevelCapping = -1;
+            h.loadLevel = quality;
+            setLevel(quality);
+            setSaver(false);
+          }
         });
         h.on(H.Events.LEVEL_SWITCHED, (_e, d) => { const l = h.levels[d.level]; setPlayingLevel(l ? Math.min(l.height, l.width) : null); });
         let recoveries = 0;
         h.on(H.Events.ERROR, (_e, d) => {
           if (d.details === H.ErrorDetails.MANIFEST_INCOMPATIBLE_CODECS_ERROR) { setError('This browser cannot play H.264 video. Open the video in Chrome, Edge, Safari or Firefox.'); setWaiting(false); return; }
           if (!d.fatal) return;
-          if (d.type === H.ErrorTypes.NETWORK_ERROR && recoveries++ < 3) h.startLoad();
+          if (d.type === H.ErrorTypes.NETWORK_ERROR) {
+            if (navigator.onLine && recoveries++ < 3) h.startLoad();
+            else failNetwork();
+          }
           else if (d.type === H.ErrorTypes.MEDIA_ERROR && recoveries++ < 3) h.recoverMediaError();
           else { setError('This video cannot be played right now. Check your connection and try again.'); setWaiting(false); }
         });
         h.loadSource(url); h.attachMedia(el);
       });
     }
-    const start = () => { if (!cancelled && !preRoll.current) el.play().catch(() => { el.muted = true; setMuted(true); el.play().catch(() => undefined); }); };
-    if (autoPlay) { if (withAds) void adsReady.current.then(start); else start(); }
-    return () => { cancelled = true; hls.current?.destroy(); hls.current = null; el.removeAttribute('src'); el.load(); };
-  }, [playSrc]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => { const s = Number(store.get('fm_speed') ?? '1'); if (SPEEDS.includes(s)) { setSpeed(s); if (video.current) video.current.playbackRate = s; } }, []);
+    return () => {
+      cancelled = true;
+      el.removeEventListener('loadedmetadata', restore);
+      if (frame.current !== null) el.cancelVideoFrameCallback?.(frame.current);
+      frame.current = null;
+      hls.current?.destroy(); hls.current = null; el.removeAttribute('src'); el.load();
+    };
+  }, [playSrc, reload]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = useCallback(() => {
     const el = video.current!;
-    if (el.paused || el.ended) { el.play().catch(() => undefined); setFlash('play'); } else { el.pause(); setFlash('pause'); }
+    if (el.paused || el.ended) {
+      el.play().catch(() => undefined);
+      setFlash('play');
+    } else {
+      if (interrupted.current) interrupted.current.auto = false;
+      wantsPlayback.current = false;
+      el.pause();
+      setFlash('pause');
+    }
     setTimeout(() => setFlash(null), 500);
   }, []);
   const seek = useCallback((t: number) => { const el = video.current!; el.currentTime = Math.max(0, Math.min((el.duration || duration) - 0.05, t)); }, [duration]);
@@ -227,6 +337,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
       const el = video.current; if (!el || adRef.current) return;
       const k = (e.key ?? '').toLowerCase();
       const handled = () => { e.preventDefault(); poke(); };
+      if (k === ' ' && t.closest('button')) return;
       if (k === ' ' || k === 'k') { handled(); toggle(); }
       else if (k === 'j') { handled(); seek(el.currentTime - 10); }
       else if (k === 'l') { handled(); seek(el.currentTime + 10); }
@@ -269,26 +380,40 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const VolIcon = muted || volume === 0 ? Icon.VolumeOff : volume < 0.5 ? Icon.VolumeLow : Icon.VolumeHigh;
   const autoLabel = soundOnly ? 'Sound only' : level === -1 ? `Auto${saver ? ' · data saver' : ''}${playingLevel ? ` (${playingLevel}p)` : ''}` : levels.find((l) => l.index === level)?.label ?? 'Auto';
   const btn = 'grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white hover:bg-white/10';
-  const showUi = !playing || !idle || menu !== null;
+  const recoveryCard = !ad && !error && (networkError || (waiting && playing && (offline || slow)));
+  const showUi = !playing || !idle || menu !== null || recoveryCard;
 
   return (
     <div ref={box} onMouseMove={poke} onMouseLeave={() => playing && setIdle(true)}
       className={`group relative aspect-video w-full select-none overflow-hidden bg-black ${full ? '' : 'sm:rounded-[24px]'} ${showUi ? '' : 'cursor-none'}`}>
       <video ref={video} playsInline poster={poster ?? undefined} className="h-full w-full" onPointerUp={onTap} onClick={(e) => { if ((e.nativeEvent as PointerEvent).pointerType === 'touch') return; toggle(); }} onDoubleClick={(e) => { if ((e.nativeEvent as PointerEvent).pointerType === 'touch') return; fullscreen(); }}
         onPlay={() => {
+          wantsPlayback.current = true;
           firstPlay.current.started ??= performance.now();
           setPlaying(true);
         }} onPause={() => {
+          if (navigator.onLine && !video.current?.error) wantsPlayback.current = false;
+          if (frame.current !== null) video.current?.cancelVideoFrameCallback?.(frame.current);
+          frame.current = null;
           if (!firstPlay.current.measured) firstPlay.current.started = null;
           setPlaying(false); save();
         }} onWaiting={() => setWaiting(true)} onPlaying={() => {
+          interrupted.current = null;
+          setNetworkError(false);
           setWaiting(false);
           const { started, measured } = firstPlay.current;
-          if (started !== null && !measured) {
-            performance.measure('free-me:play-to-playing', { start: started });
-            firstPlay.current.measured = true;
-          }
+          if (started === null || measured || frame.current !== null) return;
+          performance.measure('free-me:play-to-playing', { start: started });
+          const el = video.current;
+          if (el?.requestVideoFrameCallback && !soundOnly) {
+            frame.current = el.requestVideoFrameCallback((now) => {
+              frame.current = null;
+              performance.measure('free-me:play-to-first-frame', { start: started, end: now });
+              firstPlay.current.measured = true;
+            });
+          } else firstPlay.current.measured = true;
         }} onCanPlay={() => setWaiting(false)}
+        onError={(e) => { if (!hls.current && e.currentTarget.error?.code === 2) failNetwork(); }}
         onTimeUpdate={onTime} onDurationChange={(e) => setDuration(e.currentTarget.duration)} onEnded={() => { setPlaying(false); save(true); onEnded?.(); }}
         onVolumeChange={(e) => { setMuted(e.currentTarget.muted); setVolume(e.currentTarget.volume); }}>
         {captions.map((c) => <track key={c.language} kind="subtitles" src={c.url} srcLang={c.language} label={captionLabel(c)} />)}
@@ -307,15 +432,28 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
         </div>
       )}
       {ad && videoId && <AdBreak slot={ad} videoId={videoId} muted={muted} onDone={adDone} />}
-      {waiting && !error && !ad && <Icon.Spinner className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/90" />}
+      {waiting && !error && !ad && !recoveryCard && <Icon.Spinner className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/90" />}
       {flash && <div className="pointer-events-none absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 animate-ping place-items-center rounded-full bg-[rgb(43_181_171/0.6)] text-white [animation-iteration-count:1]">{flash === 'play' ? <Icon.Play size={30} /> : <Icon.Pause size={30} />}</div>}
-      {!playing && !waiting && !error && showUi && (
+      {!playing && !waiting && !error && !recoveryCard && showUi && (
         <button type="button" onClick={toggle} aria-label="Play" className="absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[rgb(16_32_31/0.6)] text-white backdrop-blur sm:hidden"><Icon.Play size={30} /></button>
       )}
-      {playing && showUi && !menu && !error && !waiting && (
+      {playing && showUi && !menu && !error && !waiting && !recoveryCard && (
         <button type="button" onClick={toggle} aria-label="Pause" className="absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[rgb(16_32_31/0.6)] text-white backdrop-blur sm:hidden"><Icon.Pause size={28} /></button>
       )}
       {skip && <div className={`pointer-events-none absolute top-0 grid h-full w-1/3 place-items-center bg-white/10 text-[13px] font-semibold text-white ${skip === 'back' ? 'left-0 rounded-r-full' : 'right-0 rounded-l-full'}`}>{skip === 'back' ? '« 10 s' : '10 s »'}</div>}
+      {recoveryCard && (
+        <div className="pointer-events-none absolute inset-x-2 top-2 flex justify-center sm:inset-x-6 sm:top-6">
+          <div className="pointer-events-auto flex max-w-full items-center gap-2 rounded-2xl border border-[#72e6d4]/30 bg-[#0b2423]/95 px-3 py-2 text-white shadow-xl backdrop-blur sm:gap-3 sm:px-4">
+            <Icon.Play size={16} className="shrink-0 text-[#72e6d4]" />
+            <div role="status" className="min-w-0">
+              <p className="text-xs font-bold sm:text-sm">{offline ? 'Waiting for connection' : networkError ? 'Playback interrupted' : 'Buffering video'}</p>
+              <p className="text-[11px] text-[#bfe0dc] sm:text-xs">Your place · {fmt(time)}</p>
+            </div>
+            {!offline && (networkError || soundOnly || audio?.for !== src) && <button type="button" onClick={() => retry(true)} className="shrink-0 rounded-full bg-[#72e6d4] px-3 py-1.5 text-xs font-bold text-[#04201e]">Resume here</button>}
+            {!offline && !networkError && !soundOnly && audio?.for === src && <button type="button" onClick={toggleSoundOnly} className="shrink-0 rounded-full border border-[#72e6d4]/40 px-2.5 py-1.5 text-xs font-bold">Sound only</button>}
+          </div>
+        </div>
+      )}
       {error && <div className="absolute inset-0 grid place-items-center bg-black/80 px-6 text-center text-[15px] text-white">{error}</div>}
 
       {/* Controls: a floating capsule above the bottom edge, not a bar across it. */}
