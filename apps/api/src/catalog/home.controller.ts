@@ -72,10 +72,18 @@ export class HomeController {
     const spot = await this.prisma.video.findFirst({ where: { ...PUBLIC_VIDEO, isShort: false, ...topicFilter, publishedAt: { gte: week } }, orderBy: [{ viewCount: 'desc' }, { publishedAt: 'desc' }], include: { channel: true, category: true } })
       ?? await this.prisma.video.findFirst({ where: { ...PUBLIC_VIDEO, isShort: false }, orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }], include: { channel: true, category: true } });
 
-    const [fromCreators, moments, latest] = await Promise.all([
+    const [fromCreators, moments, latest, unfinished] = await Promise.all([
       follows.length ? this.prisma.video.findMany({ where: { ...PUBLIC_VIDEO, channelId: { in: follows.map((f) => f.channelId) } }, orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }], take: 6, include: { channel: true } }) : [],
       this.prisma.video.findMany({ where: { ...PUBLIC_VIDEO, isShort: true }, orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }], take: 12, include: { channel: true } }),
       this.prisma.video.findMany({ where: { ...PUBLIC_VIDEO, isShort: false }, orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }], take: 12, include: { channel: true } }),
+      auth ? this.prisma.watchHistory.findMany({
+        where: {
+          userId: auth.user.id, completed: false, progressSeconds: { gte: 10 },
+          video: { ...PUBLIC_VIDEO, isShort: false },
+        },
+        orderBy: [{ lastWatchedAt: 'desc' }, { id: 'desc' }], take: 12,
+        include: { video: { include: { channel: true } } },
+      }) : [],
     ]);
 
     return {
@@ -83,6 +91,10 @@ export class HomeController {
       interests: categories.map((c) => ({ slug: c.slug, name: c.name, picked: pickedIds.includes(c.id) })),
       hasPicked: pickedIds.length > 0,
       shelves,
+      continueWatching: unfinished
+        .filter((h) => h.progressSeconds < h.video.durationSeconds - 5)
+        .slice(0, 4)
+        .map((h) => ({ video: videoCard(h.video, this.urls), progressSeconds: h.progressSeconds })),
       fromCreators: fromCreators.map((v) => videoCard(v, this.urls)),
       moments: moments.map((v) => videoCard(v, this.urls)),
       latest: latest.filter((v) => v.id !== spot?.id).map((v) => videoCard(v, this.urls)),

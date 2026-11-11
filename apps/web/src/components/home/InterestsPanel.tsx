@@ -6,16 +6,14 @@ import { useState } from 'react';
 import * as Icon from '@/components/icons';
 import { useShell } from '@/components/shell/ShellContext';
 import { api } from '@/lib/client-api';
-import { timeAgo } from '@/lib/format';
-import type { VideoCardData } from '@/lib/types';
 import type { HomeFeed } from './types';
 
 /**
  * "Your interests": the topics For you is built from, editable in place. Explains, in plain words, that nothing else
  * (no watch-behaviour tracking) decides what appears.
  */
-export function InterestsPanel({ interests, fromCreators }: { interests: HomeFeed['interests']; fromCreators: VideoCardData[] }) {
-  const { viewer, locale } = useShell();
+export function InterestsPanel({ interests }: { interests: HomeFeed['interests'] }) {
+  const { viewer } = useShell();
   const router = useRouter();
   const [picked, setPicked] = useState(new Set(interests.filter((i) => i.picked).map((i) => i.slug)));
   const [editing, setEditing] = useState(false);
@@ -40,7 +38,7 @@ export function InterestsPanel({ interests, fromCreators }: { interests: HomeFee
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-[17px] font-bold">Your interests</h2>
-          <p className="mt-1 text-[13px] leading-5 text-muted">For you is built from these and the creators you tune in to. Nothing else.</p>
+          <p className="mt-1 text-[13px] leading-5 text-muted">Discovery comes from your topics and followed creators. Continue watching shows your unfinished videos.</p>
         </div>
         {viewer && !editing && <button type="button" onClick={() => setEditing(true)} className="shrink-0 rounded-lg px-2 py-1 text-[13px] font-semibold text-brand hover:bg-brand-soft">Edit</button>}
       </div>
@@ -62,19 +60,7 @@ export function InterestsPanel({ interests, fromCreators }: { interests: HomeFee
         </div>
       )}
       {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
-      {viewer && fromCreators.length > 0 && !editing && (
-        <>
-          <h2 className="mt-6 text-[17px] font-bold">New from your creators</h2>
-          <div className="mt-3 grid gap-3">
-            {fromCreators.slice(0, 3).map((v) => (
-              <Link key={v.id} href={`/watch?v=${v.id}`} className="group flex items-center gap-3">
-                <div className="aspect-[16/10] w-[88px] shrink-0 overflow-hidden rounded-xl bg-surface">{v.thumbnailUrl && <img src={v.thumbnailUrl} alt="" className="h-full w-full object-cover" />}</div>
-                <div className="min-w-0"><p className="line-clamp-2 text-[14px] font-semibold leading-tight group-hover:underline">{v.title}</p><p className="text-[12px] text-muted" suppressHydrationWarning>{v.channel.name} · {timeAgo(v.publishedAt, locale)}</p></div>
-              </Link>
-            ))}
-          </div>
-        </>
-      )}
+
     </aside>
   );
 }

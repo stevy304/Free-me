@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import * as Icon from '@/components/icons';
 import { Avatar } from '@/components/Avatar';
 import { EmptyState } from '@/components/EmptyState';
@@ -9,8 +10,10 @@ import { apiGet, getLocale, getViewer } from '@/lib/server-api';
 import { duration, followersLabel } from '@/lib/format';
 import type { LiveInfo } from './live/types';
 
-/** For you: a spotlight, the interests panel, one shelf per topic, a Moments ribbon and the newest uploads. */
-export default async function ForYou() {
+export const metadata: Metadata = { title: 'Current' };
+
+/** Current: a spotlight, the interests panel, one shelf per topic, a Moments ribbon and the newest uploads. */
+export default async function Current() {
   const [feed, viewer, locale, live] = await Promise.all([apiGet<HomeFeed>('/feed/home'), getViewer(), getLocale(), apiGet<{ streams: LiveInfo[] }>('/live').catch(() => null)]);
   const liveNow = live?.streams ?? [];
   if (!feed || (!feed.spotlight && !feed.moments.length)) {
@@ -26,9 +29,30 @@ export default async function ForYou() {
     );
   }
   const s = feed.spotlight;
+  const unfinished = feed.continueWatching ?? [];
   return (
     <div className="mx-auto max-w-[1600px] px-4 pt-3 sm:px-6">
+      <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div><h1 className="font-display text-[32px] font-extrabold">Current</h1><p className="text-sm text-muted">Pick up a story. Find your next one.</p></div>
+        <Link href="/following" className="rounded-full border border-line px-4 py-2 text-sm font-semibold hover:bg-surface">Following</Link>
+      </header>
       <LiveStrip streams={liveNow} />
+      {unfinished.length > 0 && (
+        <section aria-labelledby="continue-heading" className="mb-8 rounded-3xl border border-line bg-elevated p-4 sm:p-5">
+          <div className="mb-4 flex items-baseline justify-between gap-3">
+            <h2 id="continue-heading" className="text-xl font-bold">Continue watching</h2>
+            <Link href="/trail" className="text-sm font-semibold text-brand">Your Trail</Link>
+          </div>
+          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+            {unfinished.map(({ video, progressSeconds }) => (
+              <div key={video.id}>
+                <VideoCard v={video} locale={locale} progress={progressSeconds / video.durationSeconds} />
+                <p className="mt-2 text-xs font-semibold text-brand">{duration(Math.max(0, video.durationSeconds - progressSeconds))} left</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
         {s ? (
           <Link href={`/watch?v=${s.id}`} className="group relative block min-h-[300px] overflow-hidden rounded-[24px] bg-surface sm:min-h-[380px]">
@@ -37,7 +61,7 @@ export default async function ForYou() {
             <span className="absolute left-4 top-4 rounded-full bg-white/90 px-2.5 py-0.5 text-[12px] font-semibold text-[#10201f]">{duration(s.durationSeconds)}</span>
             <div className="absolute inset-x-0 bottom-0 p-5 sm:p-7">
               <p className="text-[12px] font-semibold uppercase tracking-[0.1em] text-[#f5c46b]">Spotlight{s.category ? ` · ${s.category.name}` : ''}</p>
-              <h1 className="mt-2 max-w-[680px] text-[26px] font-extrabold leading-[1.1] text-white sm:text-[34px]">{s.title}</h1>
+              <h2 className="mt-2 max-w-[680px] text-[26px] font-extrabold leading-[1.1] text-white sm:text-[34px]">{s.title}</h2>
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <span className="inline-flex h-10 items-center gap-2 rounded-xl bg-accent px-4 text-[14px] font-semibold text-[#10201f]"><Icon.Play size={18} />Watch now</span>
                 <span className="flex items-center gap-2 text-[14px] text-white/90"><Avatar name={s.channel.name} src={s.channel.avatarUrl} size={30} />{s.channel.name} · <span suppressHydrationWarning>{followersLabel(s.channelFollowers, locale)}</span></span>
@@ -45,8 +69,21 @@ export default async function ForYou() {
             </div>
           </Link>
         ) : <div />}
-        <InterestsPanel interests={feed.interests} fromCreators={feed.fromCreators} />
+        <InterestsPanel interests={feed.interests} />
       </div>
+
+      {feed.fromCreators.length > 0 && (
+        <section aria-labelledby="following-heading" className="mt-9">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 id="following-heading" className="text-[22px] font-bold">From your creators</h2>
+            <Link href="/following" className="text-sm font-semibold text-brand">See all</Link>
+          </div>
+          <p className="mt-1 text-sm text-muted">The Spaces you follow, newest first.</p>
+          <div className="mt-3 grid gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {feed.fromCreators.slice(0, 4).map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}
+          </div>
+        </section>
+      )}
 
       {feed.moments.length > 0 && (
         <section className="mt-10">

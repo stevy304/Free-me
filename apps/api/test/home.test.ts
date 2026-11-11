@@ -41,6 +41,25 @@ describe('For you home and interests', () => {
     expect(mine.shelves[0]).toMatchObject({ category: { slug: 'travel-events' }, reason: 'picked' });
     expect(mine.interests.find((i: any) => i.slug === 'travel-events').picked).toBe(true);
     expect(mine.fromCreators.length).toBe(4);
+
     expect((await request(ctx.http).get('/api/feed/rising')).body.videos.map((v: any) => v.title)).toEqual(['Drums', 'Lake', 'Guitar']);
+
+    const userId = (await fan.agent.get('/api/me')).body.user.id;
+    const hidden = await mk('Private recording', travel.id, { visibility: 'PRIVATE' });
+    const finished = await mk('Finished recording', travel.id);
+    const nearEnd = await mk('Almost finished', travel.id);
+    await ctx.prisma.watchHistory.createMany({ data: [
+      { userId, videoId: lake.id, progressSeconds: 20, completed: false },
+      { userId, videoId: hidden.id, progressSeconds: 20, completed: false },
+      { userId, videoId: finished.id, progressSeconds: 60, completed: true },
+      { userId, videoId: nearEnd.id, progressSeconds: 57, completed: false },
+    ] });
+    const home = (await fan.agent.get('/api/feed/home').expect(200)).body;
+    expect(home.continueWatching.map((h: any) => [h.video.id, h.progressSeconds])).toEqual([[lake.id, 20]]);
+    expect((await request(ctx.http).get('/api/feed/home')).body.continueWatching).toEqual([]);
+    expect((await c.agent.get('/api/feed/home')).body.continueWatching).toEqual([]);
+    await fan.agent.delete(`/api/me/history/${lake.id}`).set('Origin', WEB).expect(200);
+    expect((await fan.agent.get('/api/feed/home')).body.continueWatching).toEqual([]);
+
   });
 });
