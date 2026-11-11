@@ -6,6 +6,7 @@ import { run } from '../media/probe';
 import { sourceKey } from '../media/keys';
 import type { Storage } from '../media/storage';
 import { publish, room } from '../realtime/publish';
+import { browserLiveMaster, browserRenditions } from './browser-hls';
 
 /** Where a live stream's HLS lives in storage (served by the CDN like any public media). */
 export const livePrefix = (id: string) => `pub/live/${id}/`;
@@ -18,27 +19,47 @@ export const LIVE_PLAYLIST = 'index.m3u8';
  */
 export class LiveSync {
   private readonly sent = new Set<string>();
-  private lastPlaylist = '';
-  private busy = false;
-  constructor(private readonly storage: Storage, readonly streamId: string, readonly dir: string) {}
+  private readonly playlists = new Map<string, string>();
+  private pending: Promise<void> | null = null;
+  private masterPublished = false;
+  constructor(private readonly storage: Storage, readonly streamId: string, readonly dir: string, private readonly source: 'browser' | 'rtmp' = 'rtmp') {}
 
-  async tick() {
-    if (this.busy) return;
-    this.busy = true;
-    try {
-      let text: string;
-      try { text = await readFile(join(this.dir, LIVE_PLAYLIST), 'utf8'); } catch { return; }
-      if (text === this.lastPlaylist) return;
-      const segments = text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-      const init = /#EXT-X-MAP:URI="([^"]+)"/.exec(text)?.[1];
-      for (const name of [...(init ? [init] : []), ...segments]) {
-        if (this.sent.has(name) || name.includes('/') || name.includes('..')) continue;
-        await this.storage.putFile(livePrefix(this.streamId) + name, join(this.dir, name), { contentType: name.endsWith('.ts') ? 'video/mp2t' : 'video/mp4', cacheControl: 'public, max-age=31536000, immutable' });
-        this.sent.add(name);
-      }
-      await this.storage.putBuffer(livePrefix(this.streamId) + LIVE_PLAYLIST, Buffer.from(text), { contentType: 'application/vnd.apple.mpegurl', cacheControl: 'no-cache, max-age=1' });
-      this.lastPlaylist = text;
-    } finally { this.busy = false; }
+  get replayPlaylist() {
+    return this.source === 'browser' ? browserRenditions.at(-1)!.playlist : LIVE_PLAYLIST;
+  }
+
+  tick() {
+    this.pending ??= this.sync().finally(() => { this.pending = null; });
+    return this.pending;
+  }
+
+  private async sync() {
+    if (this.source === 'rtmp') { await this.syncPlaylist(LIVE_PLAYLIST); return; }
+    for (const { playlist } of browserRenditions) await this.syncPlaylist(playlist);
+    if (!this.masterPublished && browserRenditions.every(({ playlist }) => this.playlists.has(playlist))) {
+      await this.putPlaylist(LIVE_PLAYLIST, browserLiveMaster());
+      this.masterPublished = true;
+    }
+  }
+
+  private async syncPlaylist(playlist: string) {
+    let text: string;
+    try { text = await readFile(join(this.dir, playlist), 'utf8'); } catch { return; }
+    if (text === this.playlists.get(playlist)) return;
+    const segments = text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    if (!segments.length) return;
+    const init = /#EXT-X-MAP:URI="([^"]+)"/.exec(text)?.[1];
+    for (const name of [...(init ? [init] : []), ...segments]) {
+      if (this.sent.has(name) || name.includes('/') || name.includes('..')) continue;
+      await this.storage.putFile(livePrefix(this.streamId) + name, join(this.dir, name), { contentType: name.endsWith('.ts') ? 'video/mp2t' : 'video/mp4', cacheControl: 'public, max-age=31536000, immutable' });
+      this.sent.add(name);
+    }
+    await this.putPlaylist(playlist, text);
+    this.playlists.set(playlist, text);
+  }
+
+  private putPlaylist(playlist: string, text: string) {
+    return this.storage.putBuffer(livePrefix(this.streamId) + playlist, Buffer.from(text), { contentType: 'application/vnd.apple.mpegurl', cacheControl: 'no-cache, max-age=1' });
   }
 }
 
@@ -54,7 +75,7 @@ export async function finishLive(prisma: PrismaClient, storage: Storage, sync: L
   if (!s || s.replayVideoId) return;
   const recording = join(sync.dir, 'replay.mp4');
   try {
-    await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-allowed_extensions', 'ALL', '-i', join(sync.dir, LIVE_PLAYLIST), '-c', 'copy', '-movflags', '+faststart', recording]);
+    await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-allowed_extensions', 'ALL', '-i', join(sync.dir, sync.replayPlaylist), '-c', 'copy', '-movflags', '+faststart', recording]);
     const size = (await stat(recording)).size;
     const v = await prisma.video.create({ data: { channelId: s.channelId, title: `${s.title} (live)`.slice(0, 100), status: 'PROCESSING', visibility: 'PRIVATE', processingStage: 'Waiting to process', sourceSizeBytes: BigInt(size) } });
     const key = sourceKey(v.id, '.mp4');

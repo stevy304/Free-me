@@ -29,7 +29,7 @@ const post = (page: Page, path: string, data: object) => page.request.post(`${BA
 
 test('a Premium creator goes live from the browser; a viewer watches, chats and sees it end', async ({ browser }) => {
   test.skip(!LOG, 'Set E2E_API_LOG to the API log (MAIL_TRANSPORT=console).');
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const hostEmail = `live.${run}@example.com`;
 
   const host = await (await browser.newContext({ permissions: ['camera', 'microphone'] })).newPage();
@@ -97,11 +97,16 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   const playlistUrl: string = (await info.json()).stream.playbackUrl;
   const segments = async () => {
     const response = await viewer.request.get(playlistUrl);
-    if (!response.ok()) return [];
-    return (await response.text()).split(/\r?\n/).filter((line) => line.endsWith('.ts'));
+    if (!response.ok()) return { url: playlistUrl, items: [] };
+    const playlist = await response.text();
+    const variant = playlist.split(/\r?\n/).find((line) => line === '360p.m3u8');
+    if (!variant) return { url: playlistUrl, items: playlist.split(/\r?\n/).filter((line) => line.endsWith('.ts')) };
+    const url = new URL(variant, playlistUrl).href;
+    const variantResponse = await viewer.request.get(url);
+    return { url, items: variantResponse.ok() ? (await variantResponse.text()).split(/\r?\n/).filter((line) => line.endsWith('.ts')) : [] };
   };
   // The CI Chromium build may lack H.264. Every browser run still verifies media delivery.
-  await expect.poll(async () => (await segments()).length, { timeout: 20_000 }).toBeGreaterThan(0);
+  await expect.poll(async () => (await segments()).items.length, { timeout: 20_000 }).toBeGreaterThan(0);
   if (supportsH264) await expect.poll(playbackTime, { timeout: 20_000 }).toBeGreaterThan(0);
   const droppedAt = Date.now();
   dropSignal = true;
@@ -110,18 +115,27 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   await expect(viewer.getByText('Host reconnecting')).toBeVisible();
   await expect(viewer.getByText('Hello from Musanze!')).toBeVisible();
   await new Promise((resolve) => setTimeout(resolve, Math.max(0, 10_000 - (Date.now() - droppedAt))));
-  const segmentsDuringOutage = (await segments()).length;
+  const segmentsDuringOutage = (await segments()).items.length;
   dropSignal = false;
   await expect(host.getByText(/ON AIR/)).toBeVisible({ timeout: 20_000 });
   await expect(viewer.getByText('Host reconnecting')).toBeHidden();
-  await expect.poll(async () => (await segments()).length, { timeout: 20_000 }).toBeGreaterThan(segmentsDuringOutage);
-  const latest = (await segments()).at(-1)!;
-  const media = await viewer.request.get(new URL(latest, playlistUrl).href);
+  await expect.poll(async () => (await segments()).items.length, { timeout: 20_000 }).toBeGreaterThan(segmentsDuringOutage);
+  const { url, items } = await segments();
+  const latest = items.at(-1)!;
+  const media = await viewer.request.get(new URL(latest, url).href);
   expect(media.ok()).toBe(true);
   expect((await media.body()).byteLength).toBeGreaterThan(1000);
   if (supportsH264) {
     const restoredAt = await playbackTime();
     await expect.poll(playbackTime, { timeout: 20_000 }).toBeGreaterThan(restoredAt + 1);
+    const quality = viewer.getByLabel('Quality', { exact: true });
+    const height = () => video.evaluate((element) => (element as HTMLVideoElement).videoHeight);
+    await quality.selectOption({ label: '360p' });
+    await expect.poll(height, { timeout: 30_000 }).toBe(360);
+    await quality.selectOption({ label: '720p' });
+    await expect.poll(height, { timeout: 30_000 }).toBe(720);
+    await quality.selectOption('-1');
+    await expect(quality).toHaveValue('-1');
   }
   expect(viewer.url()).toBe(watchPage);
 
