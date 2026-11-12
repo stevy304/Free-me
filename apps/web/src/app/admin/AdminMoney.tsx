@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { AdminBusinesses } from './AdminBusinesses';
 import * as Icon from '@/components/icons';
 import { inputClass } from '@/components/Pickers';
 import { api } from '@/lib/client-api';
@@ -47,6 +48,7 @@ export function AdminMoney() {
       {error && <p role="alert" className="rounded-xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
       {!s.methods.length && <p className="rounded-xl bg-accent-soft px-4 py-3 text-[14px] text-on-accent-soft">No way to pay is switched on yet. Start with <b>Send money (manual)</b> below: add your MoMo number and people can upgrade today.</p>}
       <ManualQueue />
+      <AdminBusinesses />
       <AdminPayouts />
       <div className="grid gap-3 sm:grid-cols-4">
         {[['Premium members', s.premiumMembers.toLocaleString(locale)], ['Premium, 30 days', usd(s.last30Days.premiumUsdCents, locale)], ['Ads sold, 30 days', usd(s.last30Days.adsUsdCents, locale)], ['Payments, 30 days', s.last30Days.payments.toLocaleString(locale)]].map(([l, v]) => (
@@ -124,6 +126,9 @@ export function AdminMoney() {
           <input className={`${inputClass} max-w-xs`} type="email" placeholder="Email address" value={gift.email} onChange={(e) => setGift({ ...gift, email: e.target.value })} />
           <select className={`${inputClass} w-36`} value={gift.months} onChange={(e) => setGift({ ...gift, months: Number(e.target.value) })}>{[1, 3, 6, 12].map((m) => <option key={m} value={m}>{m} {m === 1 ? 'month' : 'months'}</option>)}</select>
           <button type="button" disabled={busy || !gift.email.includes('@')} onClick={() => void run(() => api('/admin/billing/premium', { body: gift }), `Premium given to ${gift.email}.`)} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Give Premium</button>
+          <button type="button" disabled={busy || !gift.email.includes('@')} onClick={() => void run(() => api('/admin/billing/creator-pass', { body: gift }), `Creator pass given to ${gift.email}.`)} className="h-10 rounded-xl border border-brand px-4 text-[14px] font-semibold text-brand disabled:opacity-50">Give Creator pass</button>
+          <button type="button" disabled={busy || !gift.email.includes('@')} onClick={() => void run(() => api('/admin/billing/plans/plus', { body: gift }), `Plus given to ${gift.email}.`)} className="h-10 rounded-xl border border-brand px-4 text-[14px] font-semibold text-brand disabled:opacity-50">Give Plus</button>
+          <button type="button" disabled={busy || !gift.email.includes('@')} onClick={() => void run(() => api('/admin/billing/plans/family', { body: gift }), `Family & TV given to ${gift.email}.`)} className="h-10 rounded-xl border border-brand px-4 text-[14px] font-semibold text-brand disabled:opacity-50">Give Family & TV</button>
         </div>
       </section>
       <section className="rounded-2xl border border-line p-4">

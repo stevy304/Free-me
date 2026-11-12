@@ -21,6 +21,8 @@ import { TrustModule } from './trust/trust.module';
 import { BillingModule } from './billing/billing.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { LiveModule } from './live/live.module';
+import { MetricsController } from './metrics/metrics.controller';
+import { METRICS, createRegistry } from './metrics/metrics';
 
 @Module({})
 export class AppModule {
@@ -29,14 +31,16 @@ export class AppModule {
       module: AppModule,
       global: true,
       imports: [DatabaseModule, CommonModule, MailModule, VideosModule, AuthModule, UsersModule, ChannelsModule, CatalogModule, AdminModule, EngagementModule, TrustModule, NotificationsModule, BillingModule, RealtimeModule, LiveModule],
-      controllers: [HealthController, SiteController],
+      controllers: [HealthController, SiteController, MetricsController],
       providers: [
         { provide: APP_CONFIG, useValue: config },
+        // One registry per application instance (the tests start several in one process).
+        { provide: METRICS, useFactory: () => createRegistry('api') },
         { provide: APP_GUARD, useClass: OriginGuard },
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ErrorsFilter },
       ],
-      exports: [APP_CONFIG],
+      exports: [APP_CONFIG, METRICS],
     };
   }
 }

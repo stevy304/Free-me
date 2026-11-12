@@ -75,6 +75,8 @@ Viewer: CDN serves pub/<id>/hls/master.m3u8 and its fMP4 segments; private video
 
 - **One upload path for any size.** Parts go directly to object storage. The default is 16 MiB and new uploads of at least 4 GiB use at least 64 MiB per part. Parts retry with backoff; choosing the same file after a closed tab continues where it stopped.
 - **Fast first, then complete.** One FFmpeg decode feeds all rungs of a pass (split filter). The low pass finishes quickly, so viewers can watch while HD is still encoding; players pick up new renditions on their next playlist load.
+- **Popularity-based encoding.** 1080p and above are left out until a video has `HD_MIN_VIEWS` views (default 100) or its creator is a Premium member; the video is marked `hdPending`, and the worker's `hd-upgrades` check (every minute) queues an `upgrade` job that encodes only the rungs not yet published. Most uploads are rarely watched, so their most expensive encodes and storage are never paid for.
+- **Free and full playlists.** When a video has qualities above `FREE_MAX_QUALITY` (default 720p), `hls/master.m3u8` lists only those up to it and `hls/master-full.m3u8` (`hlsFullMasterKey`) lists every one. The watch page gives Premium members and the owner the full playlist; the API's private playlist route refuses it to everyone else.
 - **Rendition ladder.** H.264 High (video only), 4-second fMP4 segments, keyframes every 2 seconds, capped CRF 21 (quality first, with a bitrate ceiling per rung), named by the short side so vertical video gets proper ladders. Never upscaled; 60 fps sources keep 60 fps with 1.5× bitrate.
 - **One shared audio rendition.** AAC stereo 128 kb/s, encoded once with the first pass and referenced by every rung (`EXT-X-MEDIA`), so audio is stored once and more languages can be added later.
 - **Same loudness everywhere.** Two-pass EBU R128 (`loudnorm`): measure, then one linear gain to −14 LUFS integrated, −1.5 dBTP, so viewers do not reach for the volume between videos.
@@ -88,6 +90,12 @@ Viewer: CDN serves pub/<id>/hls/master.m3u8 and its fMP4 segments; private video
 - **Deleting** removes the database row at once and queues a `purge` of every file. Uploads left unfinished for 3 days are cancelled hourly, and the worker checks for missing jobs every five minutes. Uploads still waiting for processing become eligible after five minutes. Interrupted processing stages become eligible after 30 minutes. Redis keeps one queued or active transcode per video, and an active worker renews a one-minute processing lease.
 - **Views.** The player reports a view after real watching (30 s, or half of a short video). The API de-duplicates per viewer for 6 hours in Redis and adds up views and watch time; the worker writes the totals to PostgreSQL every 15 seconds.
 - **Processes.** The worker (`apps/api/src/worker.ts`) shares code with the API but runs on the media node. Several instances can run on several servers; failed jobs retry (transcode 3 times, others with backoff), and a file that is not a video fails at once with a clear reason shown in Studio.
+
+## Discovery
+
+- **Next** (`/api/videos/:id/next`): same Space, shared tags and topic, the viewer's topics, popularity and freshness, plus **watched together**: among the latest 500 signed-in viewers of the video, the other videos at least 3 of them watched. A count shared by fewer than 3 people is never used, so no one's own history can be read from it.
+- **Trending** (`/api/feed/rising?country=RW`, and the home page's Trending shelf): videos of the last 30 days ranked by views in the last two days (`VideoDailyStat`), so a video rising now beats last month's hit. With a country, only creators who chose that country. The home page shows the viewer's country when it has at least 4 such videos, else everywhere.
+- The home page still ranks nothing by the viewer's own watching: picked topics, followed Spaces, trending and recency.
 
 ## Coming in later phases
 

@@ -1,0 +1,21 @@
+# Alertmanager: where alerts go. Telegram is free and reaches your phone at once; email uses your existing SMTP.
+# Copy to /etc/prometheus/alertmanager.yml (Ubuntu's prometheus-alertmanager reads it there), then
+#   sudo systemctl restart prometheus-alertmanager
+# Telegram: talk to @BotFather to create a bot (gives the token), send it a message, then read your chat id from
+# https://api.telegram.org/bot<TOKEN>/getUpdates. Put the token in /etc/prometheus/telegram.token (chmod 640).
+route:
+  receiver: phone
+  group_by: [alertname]
+  group_wait: 30s
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="warn"]
+      receiver: phone
+      repeat_interval: 12h
+
+receivers:
+  - name: phone
+    telegram_configs:
+      - bot_token_file: /etc/prometheus/telegram.token
+        chat_id: 123456789 # your chat id
+        parse_mode: HTML

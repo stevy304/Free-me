@@ -175,7 +175,7 @@ export class MediaJobs {
       const here = mediaPrefix(videoId, v.mediaLocation);
       const there = mediaPrefix(videoId, v.mediaLocation === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC');
       const [hereKeys, thereKeys] = await Promise.all([this.storage.list(here).then((k) => new Set(k)), this.storage.list(there)]);
-      const needed = [v.hlsMasterKey, ...v.renditions.map((r) => `hls/${r.playlistKey.replace(/^hls\//, '')}`), ...(v.thumbnailKey ? [v.thumbnailKey] : []), ...v.thumbnailCandidates,
+      const needed = [v.hlsMasterKey, ...(v.hlsFullMasterKey ? [v.hlsFullMasterKey] : []), ...v.renditions.map((r) => `hls/${r.playlistKey.replace(/^hls\//, '')}`), ...(v.thumbnailKey ? [v.thumbnailKey] : []), ...v.thumbnailCandidates,
         ...((v.storyboard as { key?: string } | null)?.key ? [(v.storyboard as { key: string }).key] : [])];
       const missing = [...new Set(needed)].filter((k) => !hereKeys.has(here + k));
       const toCopy = thereKeys.filter((k) => !hereKeys.has(here + k.slice(there.length)));
@@ -225,6 +225,56 @@ export class MediaJobs {
       select: { id: true, status: true, hlsMasterKey: true }, take: 200,
     });
     return rows.map((r) => ({ id: r.id, playable: r.status === 'READY' && !!r.hlsMasterKey }));
+  }
+
+  /**
+   * Videos whose 1080p and above waited for viewers (`hdPending`) and are now watched enough, or whose creator has
+   * since become a Premium member. Each is claimed (the flag cleared) before it is returned, so it is queued once.
+   */
+  async popularUpgrades(limit = 50, now = new Date()): Promise<string[]> {
+    const min = this.config.media.hdMinViews;
+    const rows = await this.prisma.video.findMany({
+      where: { hdPending: true, status: 'READY', takenDownAt: null, OR: [
+        { viewCount: { gte: BigInt(min) } },
+        { channel: { user: { OR: [{ premiumUntil: { gt: now } }, { roles: { has: 'ADMIN' } }] } } },
+      ] },
+      orderBy: { viewCount: 'desc' }, take: limit, select: { id: true },
+    });
+    const claimed: string[] = [];
+    for (const { id } of rows) {
+      const r = await this.prisma.video.updateMany({ where: { id, hdPending: true }, data: { hdPending: false } });
+      if (r.count) claimed.push(id);
+    }
+    return claimed;
+  }
+
+  /**
+   * Storage saving (SOURCE_RETENTION_DAYS): deletes the original upload of ready videos older than that, once nothing
+   * still needs it: automatic captions were tried (when they are on), no job is running on the video (lock), and a
+   * video still waiting for its HD qualities gives that up (it keeps up to 720p). Returns how many were removed.
+   */
+  async expireSources(limit = 100, now = new Date()): Promise<number> {
+    const days = this.config.media.sourceRetentionDays;
+    if (!days) return 0;
+    const rows = await this.prisma.video.findMany({
+      where: { status: 'READY', processingStage: 'Ready', sourceFileS3Key: { not: null }, createdAt: { lt: new Date(now.getTime() - days * 86_400_000) },
+        ...(this.config.media.whisper ? { captionAttemptedAt: { not: null } } : {}) },
+      orderBy: { createdAt: 'asc' }, take: limit, select: { id: true },
+    });
+    let removed = 0;
+    for (const { id } of rows) {
+      try {
+        await this.withLock(id, async () => {
+          const v = await this.prisma.video.findUnique({ where: { id }, select: { sourceFileS3Key: true, status: true, processingStage: true } });
+          if (!v?.sourceFileS3Key || v.status !== 'READY' || v.processingStage !== 'Ready') return;
+          await this.storage.deletePrefix(`src/${id}/`);
+          await this.prisma.video.update({ where: { id }, data: { sourceFileS3Key: null, hdPending: false } });
+          removed++;
+        });
+      } catch (e) { if (!(e instanceof VideoBusy)) throw e; } // busy now: next run
+    }
+    if (removed) this.log.log({ event: 'sources_expired', count: removed, days });
+    return removed;
   }
 
   async run(job: MediaJob, final: boolean, signal?: AbortSignal) {

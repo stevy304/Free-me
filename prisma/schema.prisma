@@ -110,6 +110,16 @@ model User {
   lastLoginAt           DateTime?
   /// Premium membership runs until this moment (null or past: not a member).
   premiumUntil          DateTime?
+  /// Creator pass (uploading after the free videos, up to a yearly number) runs until this moment; Premium includes it.
+  creatorPassUntil      DateTime?
+  /// Plus (no ads, every quality) runs until this moment
+  plusUntil             DateTime?
+  /// Family & TV (Plus for the holder and up to 3 members) runs until this moment
+  familyUntil           DateTime?
+  /// Member of this account's Family & TV plan
+  familyOwnerId         String?
+  familyOwner           User?             @relation("FamilyMembers", fields: [familyOwnerId], references: [id], onDelete: SetNull)
+  familyMembers         User[]            @relation("FamilyMembers")
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
@@ -134,6 +144,8 @@ model User {
   auditLogs             AuditLog[]
 
   @@index([status])
+
+  @@index([familyOwnerId])
 }
 
 model OAuthAccount {
@@ -215,6 +227,9 @@ model Channel {
   isVerified            Boolean           @default(false)
   /// Why the badge shows: "PREMIUM" (removed when membership ends) or "ADMIN" (kept).
   verificationSource    String?
+  /// Uploads ever started (deleting a video does not give a free upload back)
+  uploadCount           Int               @default(0)
+  businessVerification  BusinessVerification?
   subscriberCount       Int               @default(0)
   totalViews            BigInt            @default(0)
   createdAt             DateTime          @default(now())
@@ -285,6 +300,12 @@ model Video {
   takedownReason        String?
   sourceFileS3Key       String?
   hlsMasterKey          String?           // HLS master playlist, relative to the video's media prefix
+  /// Every quality (Premium viewers and the owner); null when it is the same as hlsMasterKey (no limit applied)
+  hlsFullMasterKey      String?
+  /// 1080p and above wait until the video is watched enough (HD_MIN_VIEWS); the worker then adds them
+  /// Hidden until a moderator reviews it: reported by several established accounts (REPORT_HOLD_THRESHOLD)
+  reviewHoldAt          DateTime?
+  hdPending             Boolean           @default(false)
   publishedAt           DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
@@ -307,6 +328,7 @@ model Video {
   captionAttemptedAt    DateTime?
 
   @@index([status, captionAttemptedAt])
+  @@index([hdPending, viewCount])
   @@index([channelId])
   @@index([categoryId])
   @@index([status, visibility])
@@ -489,6 +511,7 @@ model WatchHistory {
 
   @@unique([userId, videoId])
   @@index([userId, lastWatchedAt])
+  @@index([videoId, lastWatchedAt])
 }
 
 // -------------------------------------------------------------
@@ -541,6 +564,8 @@ model Campaign {
   headline              String
   startDate             DateTime
   endDate               DateTime
+  /// A campaign priced per 1,000 views keeps running after endDate until it has delivered its budget, at most until here
+  deliverUntil          DateTime?
   impressionsCount      BigInt            @default(0)
   clicksCount           BigInt            @default(0)
   payments              Payment[]
@@ -859,6 +884,8 @@ model VideoDailyStat {
   day                   DateTime          @db.Date
   views                 Int               @default(0)
   watchSeconds          BigInt            @default(0)
+  /// Watched by Plus, Family and Premium members: shares their subscription money with creators
+  plusWatchSeconds      BigInt            @default(0)
 
   @@id([videoId, day])
   @@index([day])
@@ -877,6 +904,10 @@ enum PaymentStatus {
 enum PaymentPurpose {
   PREMIUM
   AD_CAMPAIGN
+  CREATOR_PASS
+  PLUS
+  FAMILY
+  VERIFICATION
 }
 
 model Payment {
@@ -924,6 +955,9 @@ model AdDaySettlement {
   reinvestCents         BigInt
   impressions           Int
   channels              Int
+  /// Plus and Family money of the day set aside for creators, and what was shared out (by members' watch time)
+  subscriptionPoolCents BigInt            @default(0)
+  subscriptionAllocatedCents BigInt       @default(0)
   createdAt             DateTime          @default(now())
 }
 
@@ -963,4 +997,26 @@ model AppSetting {
   value                 Json
   updatedBy             String?
   updatedAt             DateTime          @updatedAt
+}
+
+/// A business asks for the Verified badge (protects its name): an administrator checks the details, then the business
+/// pays for a year. Status: PENDING (waiting for review), APPROVED (checked; pay to show the badge), ACTIVE (badge on
+/// until verifiedUntil), REJECTED (with the reason).
+model BusinessVerification {
+  id                    String            @id @default(uuid())
+  channelId             String            @unique
+  channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  businessName          String
+  /// Company registration number (RDB in Rwanda) or tax number
+  registrationNumber    String
+  phone                 String
+  website               String?
+  status                String            @default("PENDING")
+  reviewNote            String?
+  reviewedAt            DateTime?
+  verifiedUntil         DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([status])
 }

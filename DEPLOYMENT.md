@@ -213,3 +213,31 @@ npm run --silent bench:video -- phone-720p.mp4 video-1080p.mp4 long-video-2160p.
 The phone clip can be portrait with a 720-pixel short edge. The runner uploads the 4K file once to establish background load and again as a measured upload. Use a long enough 4K fixture that its upgrade is still running when the three measured uploads start. The four drafts stay private and can be removed from Creator Hub after the run. If the API is processing media inline, omit `BENCH_WORKER_LOG`; the reported queue wait is then zero by design.
 
 The JSON output includes transfer throughput, finalization round trip, queue wait, SD encode time, and time until the first HLS segment is fetched. It also reports when 720p, the source resolution, and all qualities are visible in Creator Hub. The HLS and quality milestones are measured from the start of upload finalization with a 500 ms polling interval. The segment fetch checks the delivery path; it does not measure a browser decoding its first frame. Compare runs with the same fixtures, worker settings, and network conditions.
+
+
+## Encoding on a rented NVIDIA GPU
+
+Add a GPU only when the monitoring asks for it: `MediaQueueBacklog` or `UploadsWaiting` alerts, or `freeme_videos_processing{measure="oldest_seconds"}` climbing during busy hours. Until then the CPU on the main server is enough, and it costs nothing extra.
+
+**What the GPU does.** With `VIDEO_ENCODER=nvenc` the worker encodes every quality with the GPU's NVENC chip, several times faster than the CPU. If the GPU fails or is out of encoding sessions, that video falls back to the CPU by itself. Ubuntu 24.04's `ffmpeg` package already includes `h264_nvenc` (and `av1_nvenc`); the server needs only the NVIDIA driver (`sudo ubuntu-drivers install`, then reboot). Check with `ffmpeg -hide_banner -encoders | grep nvenc` and `nvidia-smi`.
+
+**Two ways to rent one:**
+
+| | Monthly GPU server in the same private network (e.g. a Hetzner GPU server) | Hourly cloud GPU, started only when needed |
+| --- | --- | --- |
+| Set-up | Simplest: install with `ROLE=media`, join the vSwitch/Cloud Network like the other servers | Join the private network over WireGuard (PostgreSQL and Redis must never be reachable from the internet) |
+| Cost | A fixed monthly price, worth it once the GPU is busy every day | Pay only for the hours it runs; best for a few busy hours a day |
+| Data | Video files go through object storage either way; nothing stays on the GPU server | Same |
+
+**Settings on the GPU worker** (`/etc/freeme/freeme.env`, same file as the other servers):
+
+```
+VIDEO_ENCODER=nvenc
+WORKER_CONCURRENCY=2          # videos made playable at once
+CHUNK_CONCURRENCY=2           # pieces of long videos at once
+WORKER_UPGRADE_CONCURRENCY=1  # 1080p+ for popular videos
+```
+
+GeForce cards allow only a few NVENC sessions at a time (each running encode of one quality uses one); data-centre cards (L4, A-series) have no such limit. Keep `WORKER_CONCURRENCY × CHUNK_CONCURRENCY` low on GeForce cards. The CPU worker on the main server can keep running: both take jobs from the same queue.
+
+**Paying for it.** The Creator pass (MONETISATION.md) is priced so that half of it (about $1 per creator a month) can pay for encoding and half for storage. Measure your own cost per hour of video: the worker logs `video_processing_complete` with the time of each step, and `freeme_worker_job_duration_seconds` shows it in Grafana. Divide the GPU's price per hour by the hours of video it encodes in an hour.

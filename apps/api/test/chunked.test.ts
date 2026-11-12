@@ -50,5 +50,8 @@ test('a long video is encoded in pieces and joined: every frame there, 2-second 
   }
   // The pieces are cleaned up.
   expect(existsSync(join(dir, 'storage', 'tmp', 'chunks', v.id))).toBe(false);
-  expect(readdirSync(join(dir, 'scratch')).filter((f) => f.startsWith(v.id))).toEqual([]);
+  // The work folder is removed just after the video is marked ready: give that a moment on a busy machine.
+  const leftovers = () => readdirSync(join(dir, 'scratch')).filter((f) => f.startsWith(v.id));
+  for (let i = 0; i < 50 && leftovers().length; i++) await new Promise((r) => setTimeout(r, 100));
+  expect(leftovers()).toEqual([]);
 }, 300_000);

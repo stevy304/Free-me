@@ -8,6 +8,7 @@ import type { AppRequest, AuthContext } from '../common/request';
 import { BillingService, paymentView } from './billing.controller';
 import { createMomoSandboxUser, ProviderError, testFlutterwave, testMomo } from './providers';
 import { effective, loadStored, mask, saveStored, type ManualAccount, type StoredBilling } from './settings';
+import { parseCountryPrices } from '../config/config';
 
 const SANDBOX = 'https://sandbox.momodeveloper.mtn.com';
 class SandboxDto { @ApiProperty({ description: 'Primary key of your Collections subscription (momodeveloper.mtn.com → Profile)' }) @IsString() @MaxLength(100) subscriptionKey!: string }
@@ -47,7 +48,7 @@ export class AdminPaymentSettingsController {
     const source = (k: 'momo' | 'flutterwave') => (stored[k] !== undefined ? 'app' : env[k] ? 'environment' : 'none');
     const m = stored.momo ?? null;
     return {
-      prices: { premiumUsdCents: eff.premiumUsdCents, adDayUsdCents: eff.adDayUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
+      prices: { plusUsdCents: eff.plusUsdCents, plusByCountry: eff.plusByCountry, familyUsdCents: eff.familyUsdCents, familyByCountry: eff.familyByCountry, creatorPassUsdCents: eff.creatorPassUsdCents, creatorFreeVideos: eff.creatorFreeVideos, premiumUsdCents: eff.premiumUsdCents, premiumByCountry: eff.premiumByCountry, adDayUsdCents: eff.adDayUsdCents, adCpmUsdCents: eff.adCpmUsdCents, adMinBudgetUsdCents: eff.adMinBudgetUsdCents, verificationUsdCents: eff.verificationUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
       momo: {
         source: source('momo'), active: !!eff.momo,
         enabled: m ? m.enabled : !!env.momo, sandbox: (m?.baseUrl ?? env.momo?.baseUrl ?? SANDBOX).includes('sandbox'),
@@ -76,7 +77,24 @@ export class AdminPaymentSettingsController {
     const prices = obj(body.prices);
     if (prices) {
       next.premiumUsdCents = cents(prices.premiumUsdCents, 'Premium price') ?? next.premiumUsdCents;
+      next.creatorPassUsdCents = cents(prices.creatorPassUsdCents, 'Creator pass price') ?? next.creatorPassUsdCents;
+      if (prices.creatorFreeVideos !== undefined && prices.creatorFreeVideos !== '') {
+        const n = Number(prices.creatorFreeVideos);
+        if (!Number.isInteger(n) || n < 0 || n > 1000) throw new BadRequestException('Free videos per channel: a whole number from 0 to 1000.');
+        next.creatorFreeVideos = n;
+      }
+      next.plusUsdCents = cents(prices.plusUsdCents, 'Plus price') ?? next.plusUsdCents;
+      next.familyUsdCents = cents(prices.familyUsdCents, 'Family & TV price') ?? next.familyUsdCents;
+      for (const [key, label] of [['premiumByCountry', 'Premium'], ['plusByCountry', 'Plus'], ['familyByCountry', 'Family & TV']] as const) {
+        if (prices[key] === undefined) continue;
+        const byCountry = typeof prices[key] === 'string' ? parseCountryPrices(prices[key] as string) : null;
+        if (byCountry === null || Object.values(byCountry).some((v) => v > 10_000_000)) throw new BadRequestException(`${label} by country: write it like RW=300, KE=500 (country code = US cents a month).`);
+        next[key] = byCountry;
+      }
       next.adDayUsdCents = cents(prices.adDayUsdCents, 'Ad price per day') ?? next.adDayUsdCents;
+      next.adCpmUsdCents = cents(prices.adCpmUsdCents, 'Price per 1,000 ad views') ?? next.adCpmUsdCents;
+      next.adMinBudgetUsdCents = cents(prices.adMinBudgetUsdCents, 'Smallest ad funds') ?? next.adMinBudgetUsdCents;
+      next.verificationUsdCents = cents(prices.verificationUsdCents, 'Verified business badge') ?? next.verificationUsdCents;
       next.payoutMinUsdCents = cents(prices.payoutMinUsdCents, 'Smallest withdrawal') ?? next.payoutMinUsdCents;
     }
     const m = obj(body.momo);

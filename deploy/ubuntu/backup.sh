@@ -12,6 +12,12 @@ pg_dump --format=custom --no-owner --dbname="$DATABASE_URL" --file="$file"
 pg_restore --list "$file" > /dev/null   # the dump must be readable before it counts as a backup
 aws s3 cp "$file" "${BACKUP_S3_URI%/}/freeme-${stamp}.dump" --only-show-errors
 echo "$(date -u +%FT%TZ) backup ok: freeme-${stamp}.dump ($(du -h "$file" | cut -f1))"
+# For monitoring (MONITORING.md, alert BackupTooOld): the node exporter publishes files from this folder.
+metrics_dir=${BACKUP_METRICS_DIR:-/var/lib/prometheus/node-exporter}
+if [[ -d "$metrics_dir" && -w "$metrics_dir" ]]; then
+  printf '# HELP freeme_backup_last_success_timestamp_seconds When the last database backup was uploaded.\n# TYPE freeme_backup_last_success_timestamp_seconds gauge\nfreeme_backup_last_success_timestamp_seconds %s\nfreeme_backup_last_size_bytes %s\n' \
+    "$(date +%s)" "$(stat -c %s "$file")" > "$metrics_dir/freeme_backup.prom.tmp" && mv "$metrics_dir/freeme_backup.prom.tmp" "$metrics_dir/freeme_backup.prom"
+fi
 keep=${BACKUP_KEEP_DAYS:-30}
 cutoff=$(date -u -d "-${keep} days" +%Y%m%d)
 aws s3 ls "${BACKUP_S3_URI%/}/" | awk '{print $4}' | grep -E '^freeme-[0-9]{8}T' | while read -r name; do

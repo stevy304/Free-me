@@ -383,7 +383,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     const delta = el.currentTime - lastT.current;
     if (!el.paused && delta > 0 && delta < 2) watched.current += delta;
     lastT.current = el.currentTime;
-    if (!el.paused && Date.now() - lastSaved.current > 10_000) save();
+    if (!el.paused && Date.now() - lastSaved.current > 30_000) save(); // every 30 s while playing (and on pause, leave and end)
     const need = Math.min(30, (el.duration || duration) * 0.5);
     if (videoId && !reported.current && need > 0 && watched.current >= need) {
       reported.current = true;
