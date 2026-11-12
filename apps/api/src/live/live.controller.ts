@@ -13,6 +13,11 @@ import { publish, room } from '../realtime/publish';
 import { LiveError, LiveService, newStreamKey } from './live.service';
 import { hasPremiumAccess } from '../billing/billing';
 import { endLive, LIVE_PLAYLIST } from './sync';
+import { STORAGE } from '../media/queue';
+import type { Storage } from '../media/storage';
+import { encoderPlaylist } from './encoder-playlist';
+import { ingestHealth, type IngestSample } from './ingest-health';
+import { privateLivePrefix } from './sync';
 import { encoderCallback } from './encoder';
 
 /** Live settings: every field optional; only those sent change. */
@@ -30,12 +35,12 @@ class LiveSettingsDto {
 @ApiTags('live')
 @Controller()
 export class LiveController {
-  constructor(private readonly prisma: PrismaService, private readonly live: LiveService, @Inject(APP_CONFIG) private readonly config: AppConfig) {}
+  constructor(private readonly prisma: PrismaService, private readonly live: LiveService, @Inject(APP_CONFIG) private readonly config: AppConfig, @Inject(STORAGE) private readonly storage: Storage) {}
 
   private playback(s: LiveStream) { return s.status === 'LIVE' ? `${this.config.media.publicBaseUrl}/live/${s.id}/${LIVE_PLAYLIST}` : null; }
   private async view(s: LiveStream & { channel: Channel }) {
     return {
-      id: s.id, title: s.title, status: s.status, source: s.source, startedAt: s.startedAt, endedAt: s.endedAt, playbackUrl: this.playback(s), viewers: s.status === 'LIVE' ? await this.live.viewers(s.id) : 0,
+      id: s.id, title: s.title, status: s.status === 'PREVIEW' ? 'IDLE' : s.status, source: s.status === 'PREVIEW' ? null : s.source, startedAt: s.startedAt, endedAt: s.endedAt, playbackUrl: this.playback(s), viewers: s.status === 'LIVE' ? await this.live.viewers(s.id) : 0,
       peakViewers: s.peakViewers, replayVideoId: s.replayVideoId,
       description: s.description, visibility: s.visibility, scheduledFor: s.scheduledFor,
       chat: { mode: s.chatMode, slowModeSeconds: s.slowModeSeconds }, captionsEnabled: s.captionsEnabled,
@@ -86,10 +91,40 @@ export class LiveController {
     const past = premium ? await this.prisma.liveStream.findMany({ where: { channelId: s.channelId, status: 'ENDED' }, orderBy: { endedAt: 'desc' }, take: 10 }) : [];
     return {
       // The host also sees what happens to the recording (not part of the public view).
-      premium, stream: { ...(await this.view(full)), saveReplay: full.saveReplay, replayVisibility: full.replayVisibility },
+      premium, stream: { ...(await this.view(full)), status: full.status, source: full.source, publicationSequence: full.encoderStartSequence, saveReplay: full.saveReplay, replayVisibility: full.replayVisibility },
       encoder: this.config.live.rtmpUrl && premium ? { server: this.config.live.rtmpUrl, streamKey: await this.live.streamKey(auth.user.id), protocol: this.config.live.rtmpUrl.startsWith('rtmps:') ? 'RTMPS' : 'RTMP' } : null,
+      privatePreviewUrl: full.source === 'rtmp' && ['PREVIEW', 'LIVE'].includes(full.status) ? `${this.config.appUrl}/api/hub/live/${full.id}/preview` : null,
+      ingest: ingestHealth(full.ingestHealth as unknown as IngestSample | null, full.encoderHeartbeatAt, full.source === 'rtmp' && ['PREVIEW', 'LIVE'].includes(full.status)),
       past: past.map((p) => ({ id: p.id, title: p.title, startedAt: p.startedAt, endedAt: p.endedAt, peakViewers: p.peakViewers, replayVideoId: p.replayVideoId })),
     };
+  }
+
+  @Get('hub/live/:id/preview')
+  @Header('Cache-Control', 'private, no-store')
+  @RequireAuth()
+  @ApiOperation({ summary: 'Owner-only encoder preview playlist with short-lived media links' })
+  async preview(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Res() res: Response) {
+    const s = await this.prisma.liveStream.findFirst({ where: { id, source: 'rtmp', status: { in: ['PREVIEW', 'LIVE'] }, channel: { userId: auth.user.id } } });
+    if (!s) throw new NotFoundException('Preview is not available.');
+    const text = await this.storage.getText(privateLivePrefix(id) + LIVE_PLAYLIST);
+    if (!text) return res.status(503).set('Retry-After', '1').send('Waiting for video.');
+    const parsed = encoderPlaylist(text);
+    if (!parsed.segments.length) return res.status(503).set('Retry-After', '1').send('Waiting for video.');
+    // Only a short tail is needed for monitoring. The original stays private for replay generation.
+    const tail = parsed.segments.slice(-6);
+    const lines = await Promise.all(tail.map(async (segment) => [...segment.tags, await this.storage.signedGetUrl(privateLivePrefix(id) + segment.name, 20)].join('\n')));
+    return res.type('application/vnd.apple.mpegurl').send([...parsed.headers, `#EXT-X-MEDIA-SEQUENCE:${tail[0].sequence}`, ...lines].join('\n') + '\n');
+  }
+
+  @Post('hub/live/publish')
+  @Header('Cache-Control', 'private, no-store')
+  @RequireAuth()
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Publish my checked encoder preview; rehearsal footage stays private' })
+  async publishEncoder(@CurrentAuth() auth: AuthContext) {
+    const s = await this.attempt(() => this.live.mine(auth.user.id));
+    await this.attempt(() => this.live.publishEncoder(auth.user, s.id));
+    return this.studio(auth);
   }
 
   @Patch('hub/live')
@@ -142,7 +177,7 @@ export class LiveController {
   async end(@CurrentAuth() auth: AuthContext) {
     const s = await this.attempt(() => this.live.mine(auth.user.id));
     // Revoke reconnects too: otherwise an encoder can immediately start a new broadcast with its old key.
-    if (s.status === 'LIVE' && s.source === 'rtmp') {
+    if (['PREVIEW', 'LIVE'].includes(s.status) && s.source === 'rtmp') {
       await this.prisma.channel.update({ where: { id: s.channelId }, data: { liveStreamKey: newStreamKey() } });
     }
     if (!(await this.live.stopBrowser(s.id))) await endLive(this.prisma, s.id);
@@ -163,7 +198,7 @@ export class LiveController {
     if (!ch || ch.user.status !== 'ACTIVE') return res.status(403).send('unknown key');
     try {
       const s = await this.live.mine(ch.userId);
-      await this.live.goLive(ch.user, s.id, 'rtmp');
+      await this.live.previewEncoder(ch.user, s.id);
       // A 3xx answer makes nginx-rtmp publish under the name in Location: the stream id.
       return res.redirect(302, s.id);
     } catch (e) {
@@ -180,10 +215,11 @@ export class LiveController {
     this.checkSecret(secret);
     const { name } = encoderCallback(body);
     const s = await this.prisma.liveStream.findFirst({ where: {
-      status: 'LIVE', source: 'rtmp',
+      status: { in: ['PREVIEW', 'LIVE'] }, source: 'rtmp',
       ...(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name) ? { id: name } : { channel: { liveStreamKey: name } }),
     }, include: { channel: { include: { user: true } } } });
     if (!s || s.channel.user.status !== 'ACTIVE' || !hasPremiumAccess(s.channel.user)) throw new ForbiddenException('Broadcast is no longer authorized.');
+    await this.prisma.liveStream.updateMany({ where: { id: s.id, status: { in: ['PREVIEW', 'LIVE'] } }, data: { encoderHeartbeatAt: new Date() } });
     return { ok: true };
   }
 
@@ -196,7 +232,7 @@ export class LiveController {
     const { name } = encoderCallback(body);
     // After the rename, nginx reports the stream id; before it, the key.
     const s = /^[0-9a-f-]{36}$/.test(name) ? await this.prisma.liveStream.findUnique({ where: { id: name } })
-      : await this.prisma.liveStream.findFirst({ where: { status: 'LIVE', source: 'rtmp', channel: { liveStreamKey: name } } });
+      : await this.prisma.liveStream.findFirst({ where: { status: { in: ['PREVIEW', 'LIVE'] }, source: 'rtmp', channel: { liveStreamKey: name } } });
     if (s?.source === 'rtmp') await endLive(this.prisma, s.id);
     return { ok: true };
   }

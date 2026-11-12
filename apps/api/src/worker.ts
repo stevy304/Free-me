@@ -1,7 +1,7 @@
 import { MailService } from './mail/mail.service';
 import 'reflect-metadata';
 import { ConsoleLogger, Logger } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import { Queue, QueueEvents, UnrecoverableError, Worker, type Processor } from 'bullmq';
 import { chunkQueueName, QueueChunks, runChunk, type ChunkResult, type ChunkTask } from './media/chunks';
 import Redis from 'ioredis';
@@ -14,6 +14,8 @@ import { Billing } from './billing/billing';
 import { Emitter } from '@socket.io/redis-emitter';
 import { setRealtimeSink } from './realtime/publish';
 import { createPushSender, setPushSender } from './push/push';
+import { beginEncoderPublication } from './live/encoder-publication';
+import { sampleIngest } from './live/ingest-health';
 import { finishLive, LiveSync } from './live/sync';
 import { join } from 'node:path';
 import { verifyEncoder } from './media/encoder-health';
@@ -154,17 +156,27 @@ async function main() {
   // while the stream runs, and save the recording as a video when it ends.
   const liveDir = config.live.rtmpHlsDir;
   const syncs = new Map<string, LiveSync>();
+  const sampled = new Map<string, number>();
   const liveStorage = createStorage(config);
   let liveBusy = false;
   const liveTimer = liveDir ? setInterval(async () => {
     if (liveBusy) return; liveBusy = true;
     try {
-      const streams = await prisma.liveStream.findMany({ where: { source: 'rtmp', OR: [{ status: 'LIVE' }, { status: 'ENDED', replayVideoId: null, endedAt: { gt: new Date(Date.now() - 86_400_000) } }] } });
+      const streams = await prisma.liveStream.findMany({ where: { source: 'rtmp', OR: [{ status: { in: ['PREVIEW', 'LIVE'] } }, { status: 'ENDED', replayVideoId: null, finalizedAt: null, endedAt: { gt: new Date(Date.now() - 86_400_000) } }] } });
       for (const s of streams) {
         let sync = syncs.get(s.id);
         if (!sync) { sync = new LiveSync(liveStorage, s.id, join(liveDir, s.id)); syncs.set(s.id, sync); }
-        if (s.status === 'LIVE') await sync.tick().catch((e) => log.warn(`live ${s.id}: ${(e as Error).message}`));
-        else { syncs.delete(s.id); await finishLive(prisma, liveStorage, sync, async (videoId) => {
+        const boundary = s.status === 'LIVE' && s.encoderStartSequence === null ? await beginEncoderPublication(prisma, s.id, sync.dir) : s.encoderStartSequence;
+        sync.setPublicFrom(boundary);
+        if (s.status === 'PREVIEW' || s.status === 'LIVE') {
+          await sync.tick().catch((e) => log.warn(`live ${s.id}: ${(e as Error).message}`));
+          if (Date.now() - (sampled.get(s.id) ?? 0) >= 5000) {
+            sampled.set(s.id, Date.now());
+            const health = await sampleIngest(sync.dir, config.media.ffprobePath).catch(() => null);
+            if (health) await prisma.liveStream.updateMany({ where: { id: s.id, status: { in: ['PREVIEW', 'LIVE'] } }, data: { ingestHealth: health as unknown as Prisma.InputJsonValue } });
+          }
+        }
+        else { syncs.delete(s.id); sampled.delete(s.id); await finishLive(prisma, liveStorage, sync, async (videoId) => {
           const transcode = { name: 'transcode', videoId } as const;
           await enqueue(transcode);
         }, log, config.media.ffmpegPath); }

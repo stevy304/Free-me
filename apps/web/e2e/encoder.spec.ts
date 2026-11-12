@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { expectCode } from './codes';
 
@@ -5,7 +8,7 @@ const BASE = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
 const SECRET = process.env.E2E_RTMP_SECRET ?? '';
 
 test('Streamlabs setup protects keys and follows external broadcast state on desktop and mobile', async ({ page }) => {
-  test.skip(!SECRET || !process.env.E2E_API_LOG, 'Needs a configured encoder URL, callback secret and console mail log.');
+  test.skip(!SECRET || !process.env.E2E_API_LOG || !process.env.LIVE_RTMP_HLS_DIR, 'Needs a configured encoder URL, callback secret and console mail log.');
   const email = `encoder.${Date.now()}@example.com`;
   await page.goto('/login?returnTo=/');
   await page.getByLabel('Email address').fill(email);
@@ -19,8 +22,8 @@ test('Streamlabs setup protects keys and follows external broadcast state on des
   const admin = await page.context().browser()!.newContext();
   const adminPage = await admin.newPage();
   await adminPage.goto('/login?returnTo=/');
-  await adminPage.getByLabel('Email address').fill('live-admin@example.com');
-  const adminCode = expectCode('live-admin@example.com');
+  await adminPage.getByLabel('Email address').fill('encoder-admin@example.com');
+  const adminCode = expectCode('encoder-admin@example.com');
   await adminPage.getByRole('button', { name: 'Email me a sign-in code' }).click();
   await adminPage.getByLabel('Sign-in code').fill(await adminCode());
   await adminPage.waitForURL((url) => url.pathname === '/');
@@ -48,7 +51,27 @@ test('Streamlabs setup protects keys and follows external broadcast state on des
   await expect(panel.getByText('Title saved.', { exact: false })).toBeVisible();
   const { encoder, stream } = await (await page.request.get(`${BASE}/api/hub/live`)).json();
   const callback = (action: string, name: string) => page.request.post(`http://127.0.0.1:4000/api/live/rtmp/${action}?secret=${SECRET}`, { form: { name, app: 'live', flashver: 'FMLE/3.0', clientid: '14', tcurl: encoder.server }, maxRedirects: 0 });
+  const folder = join(process.env.LIVE_RTMP_HLS_DIR!, stream.id);
+  mkdirSync(folder, { recursive: true });
+  const media = (duration: number) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', String(duration), '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-force_key_frames', 'expr:gte(t,n_forced*1)', '-sc_threshold', '0', '-f', 'hls', '-hls_time', '1', '-hls_list_size', '0', '-hls_segment_filename', join(folder, '%d.ts'), join(folder, 'index.m3u8')]);
+  media(4);
   expect((await callback('publish', encoder.streamKey)).status()).toBe(302);
+  await expect(panel.getByText('Private preview · Encoder connected')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: 'Private encoder preview' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Stream health' }).getByText('Video arriving')).toBeVisible({ timeout: 15_000 });
+  expect((await page.request.get(`${BASE}/api/live/${stream.id}`)).ok()).toBe(true);
+  expect((await (await page.request.get(`${BASE}/api/live/${stream.id}`)).json()).stream.playbackUrl).toBeNull();
+  expect((await page.request.get(`${BASE}/api/storage/local/pub/live/${stream.id}/0.ts`)).status()).toBe(404);
+  expect((await callback('update', stream.id)).status()).toBe(200);
+  await page.getByRole('button', { name: 'Go live', exact: true }).click();
+  await expect.poll(async () => (await (await page.request.get(`${BASE}/api/hub/live`)).json()).stream.publicationSequence, { timeout: 15_000 }).toBe(5);
+  media(8);
+  await expect.poll(async () => (await page.request.get(`${BASE}/api/storage/local/pub/live/${stream.id}/index.m3u8`)).status(), { timeout: 15_000 }).toBe(200);
+  const publicPlaylist = await (await page.request.get(`${BASE}/api/storage/local/pub/live/${stream.id}/index.m3u8`)).text();
+  expect(publicPlaylist).not.toContain('0.ts');
+  expect(publicPlaylist).not.toContain('3.ts');
+  expect(publicPlaylist).not.toContain('4.ts');
+  expect(publicPlaylist).toContain('5.ts');
   await expect(panel.getByText('Encoder connected · On air')).toBeVisible({ timeout: 15_000 });
   await expect(panel.getByRole('button', { name: 'Replace stream key', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'End broadcast' }).click();

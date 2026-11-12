@@ -7,6 +7,7 @@ import { inputClass } from '@/components/Pickers';
 import styles from '@/components/live/ControlRoom.module.css';
 import { ControlRoom } from '@/components/live/ControlRoom';
 import { LiveChat, LiveVideo } from '@/components/live/LiveChat';
+import { StreamHealth, type StreamHealthData } from '@/components/live/StreamHealth';
 import { EncoderConnection } from '@/components/live/EncoderConnection';
 import { LiveSettings, type LiveStreamSettings } from '@/components/live/LiveSettings';
 import { api } from '@/lib/client-api';
@@ -15,7 +16,9 @@ import { useShell } from '@/components/shell/ShellContext';
 
 interface Studio {
   premium: boolean;
-  stream: LiveStreamSettings & { status: 'IDLE' | 'LIVE' | 'ENDED'; startedAt: string | null; viewers: number; peakViewers: number; source: string | null; playbackUrl: string | null };
+  stream: LiveStreamSettings & { status: 'IDLE' | 'PREVIEW' | 'LIVE' | 'ENDED'; startedAt: string | null; viewers: number; peakViewers: number; source: string | null; playbackUrl: string | null };
+  privatePreviewUrl: string | null;
+  ingest: StreamHealthData;
   encoder: { server: string; streamKey: string } | null;
   past: Array<{ id: string; title: string; startedAt: string | null; endedAt: string | null; peakViewers: number; replayVideoId: string | null }>;
 }
@@ -216,6 +219,12 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       void load();
     } catch (e) { output?.stop(); setError((e as Error).message); setState('idle'); }
   };
+  const publishEncoder = async () => {
+    setState('starting'); setError(null);
+    try { const next = await api<Studio>('/hub/live/publish', { body: {} }); setSt(next); }
+    catch (e) { setError((e as Error).message); }
+    finally { setState('idle'); }
+  };
   const end = () => { setState('ending'); setError(null); if (recorder.current?.state === 'recording') recorder.current.stop(); else void api('/hub/live/end', { body: {} }).catch((e) => setError((e as Error).message)).finally(() => { setState('idle'); void load(); }); };
   const copy = async (what: string, text: string) => { try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(null), 1500); } catch { setError('Clipboard access is unavailable. Select and copy the link manually.'); } };
 
@@ -242,8 +251,9 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   );
   const watchUrl = typeof window !== 'undefined' ? `${window.location.origin}/live/${st.stream.id}` : `/live/${st.stream.id}`;
 
-  const external = live && st.stream.source === 'rtmp';
-  const encoderPanel = <EncoderConnection encoder={st.encoder} live={live || state !== 'idle'} external={live && st.stream.source === 'rtmp'} busy={picking}
+  const preview = st.stream.status === 'PREVIEW';
+  const external = (live || preview) && st.stream.source === 'rtmp';
+  const encoderPanel = <EncoderConnection encoder={st.encoder} live={live || state !== 'idle'} external={live && st.stream.source === 'rtmp'} preview={preview} busy={picking}
             onKey={(streamKey) => setSt((current) => current?.encoder ? { ...current, encoder: { ...current.encoder, streamKey } } : current)}
             onPrepare={async () => {
               if (!title.trim()) throw new Error('Enter a broadcast title first.');
@@ -263,26 +273,27 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
           <input className={styles.title} value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} disabled={state !== 'idle' || live} />
         </label>
         <div className={styles.status}>
-          {reconnectUntil !== null ? <span className={styles.interrupted}>Signal interrupted</span> : live ? <span className={styles.onAir}>● ON AIR {clock(st.stream.startedAt, now)}</span> : <span className={styles.standby}>{media ? 'Source ready' : 'Standby'}</span>}
+          {reconnectUntil !== null ? <span className={styles.interrupted}>Signal interrupted</span> : live ? <span className={styles.onAir}>● ON AIR {clock(st.stream.startedAt, now)}</span> : <span className={styles.standby}>{preview ? 'Private preview' : media ? 'Source ready' : 'Standby'}</span>}
           {state === 'live' && encoderRtt !== null && <span title="Latest encoder response" className={styles.latency}>Encoder {encoderRtt} ms</span>}
           {live || state === 'live' || state === 'ending' ?
             <button type="button" onClick={end} disabled={state === 'ending'}>{state === 'ending' ? 'Ending…' : 'End broadcast'}</button> :
-            <button type="button" onClick={() => void goLive()} disabled={!media || picking || state !== 'idle' || live}>{state === 'starting' ? 'Starting…' : 'Go live'}</button>}
+            <button type="button" onClick={() => void (preview ? publishEncoder() : goLive())} disabled={state !== 'idle' || live || (preview ? !st.ingest.ready : !media || picking)}>{state === 'starting' ? 'Starting…' : 'Go live'}</button>}
+          {preview && state !== 'ending' && <button type="button" onClick={end}>End preview</button>}
         </div>
       </header>
       {error && <p role="alert" className="rounded-md bg-red-950 px-3 py-2 text-sm text-red-200">{error}</p>}
       {signal}
-      {external && st.stream.playbackUrl ? (
+      {external && st.privatePreviewUrl ? (
         <section className={styles.desk} aria-label="External broadcast control room">
           <div className="min-w-0 space-y-4">
             <section className="overflow-hidden rounded-2xl border border-[#34555c] bg-[#010809]">
-              <div className="flex items-center justify-between gap-3 bg-[#10383d] px-4 py-3"><h2 className="font-bold">Encoder program</h2><span className="text-xs text-[#9fe8df]">Viewer playback · muted preview</span></div>
-              <LiveVideo src={st.stream.playbackUrl} muted className="aspect-video w-full" />
-              <p className="px-4 py-3 text-xs leading-relaxed text-[#afc4c9]">Video and graphics come from your encoder. Playback appears after the first segments arrive and has a short delay.</p>
+              <div className="flex items-center justify-between gap-3 bg-[#10383d] px-4 py-3"><h2 className="font-bold">{preview ? 'Private encoder preview' : 'Encoder program'}</h2><span className="text-xs text-[#9fe8df]">Owner monitor · muted by default</span></div>
+              <LiveVideo src={st.privatePreviewUrl} muted className="aspect-video w-full" />
+              <p className="px-4 py-3 text-xs leading-relaxed text-[#afc4c9]">Video and graphics come from your encoder. Use the player’s sound control to check audio. Rehearsal footage stays private and is excluded from public playback and the replay.</p>
             </section>
-            <LiveSettings key={st.stream.id} stream={st.stream} live onSaved={() => void load()} />
+            <LiveSettings key={st.stream.id} stream={st.stream} live={live} onSaved={() => void load()} />
           </div>
-          <aside className="min-w-0 space-y-4" aria-label="Encoder broadcast controls">{encoderPanel}<LiveChat streamId={st.stream.id} initial={[]} live className="h-96" /></aside>
+          <aside className="min-w-0 space-y-4" aria-label="Encoder broadcast controls"><StreamHealth health={st.ingest} />{encoderPanel}<LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-96" /></aside>
         </section>
       ) : <ControlRoom streamId={st.stream.id} basic={false} host={media} capture={capture} active={state === 'live'}
         chat={<LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-96" />}
@@ -314,12 +325,20 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
 
         </div>} />}
       <footer className={styles.footer}>
-        <span><Icon.Live size={16} /> Primary feed <strong>{reconnectUntil !== null ? 'Reconnecting' : state === 'live' ? 'Broadcasting' : live ? 'External broadcast' : media ? 'Source ready' : 'No source'}</strong></span>
+        <span><Icon.Live size={16} /> Primary feed <strong>{reconnectUntil !== null ? 'Reconnecting' : state === 'live' ? 'Broadcasting' : live ? 'External broadcast' : preview ? 'Private preview' : media ? 'Source ready' : 'No source'}</strong></span>
         <span><Icon.Eye size={16} /> {viewers.toLocaleString(locale)} watching</span>
         <span>Replay <strong>{st.stream.saveReplay ? live ? 'Will be saved' : 'Enabled' : 'Off'}</strong></span>
         <a href={watchUrl} target="_blank" rel="noreferrer">Open watch page ↗</a>
       </footer>
     </main>
+  );
+
+  if (preview) return (
+    <div className="mx-auto max-w-2xl px-4 py-12">
+      <h1 className="text-2xl font-bold">Your encoder is in private preview</h1>
+      <p className="mt-3 text-muted">Open Signal Room to check the picture, audio and stream health before going live.</p>
+      <Link href="/studio/live" className="mt-5 inline-flex rounded-xl bg-brand px-5 py-3 font-bold text-on-brand">Open private preview</Link>
+    </div>
   );
 
   return (
@@ -346,7 +365,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
                   {state === 'live' || (live && st.stream.startedAt) ? (
                     <button type="button" onClick={end} disabled={state === 'ending'} className="h-10 rounded-xl bg-[#e5484d] px-5 text-[14px] font-bold text-white disabled:opacity-60">{state === 'ending' ? 'Ending…' : 'End stream'}</button>
                   ) : (
-                    <button type="button" onClick={() => void goLive()} disabled={!media || picking || state !== 'idle' || live} className="flex h-10 items-center gap-2 rounded-xl bg-[#e5484d] px-5 text-[14px] font-bold text-white disabled:opacity-50">{state === 'starting' && <Icon.Spinner size={16} className="animate-spin" />}Go live</button>
+                    <button type="button" onClick={() => void (preview ? publishEncoder() : goLive())} disabled={state !== 'idle' || live || (preview ? !st.ingest.ready : !media || picking)} className="flex h-10 items-center gap-2 rounded-xl bg-[#e5484d] px-5 text-[14px] font-bold text-white disabled:opacity-50">{state === 'starting' && <Icon.Spinner size={16} className="animate-spin" />}Go live</button>
                   )}
                 </span>
               </div>
