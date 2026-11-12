@@ -62,6 +62,7 @@ Values for local development are in [.env.example](.env.example). In production 
 | `FFMPEG_PATH`, `FFPROBE_PATH` | | `ffmpeg`, `ffprobe` | Binaries |
 | `QUEUE_PREFIX` | | `fm` | Redis key prefix for the job queue |
 | `WHISPER_CPP_PATH`, `WHISPER_MODEL` | | off | Automatic captions on the media server: the whisper.cpp program (e.g. `/opt/whisper.cpp/build/bin/whisper-cli`) and a model file (e.g. `ggml-small.bin`). Set both or neither. See DEPLOYMENT.md → Automatic captions |
+| `AUTO_CAPTIONS_ENGLISH` | | `true` | With automatic captions: videos spoken in another language also get English captions (Whisper's translation). Use a multilingual model (not an `.en` one). `false` keeps only the spoken language |
 | `WHISPER_THREADS` | | `4` | CPU threads for one transcription |
 | `SAFETY_SCAN_URL` | | off | Optional outside matching service for uploads (e.g. a PDQ/TMK service such as Meta's Hasher-Matcher-Actioner behind a small adapter, or a vendor). Receives `POST { videoId, sha256, md5, durationSeconds, frames: [base64 JPEG] }`, answers `{ match: boolean, label? }` |
 | `SAFETY_SCAN_TOKEN` | | | Sent as `Authorization: Bearer …` to the scanner |

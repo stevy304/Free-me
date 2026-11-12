@@ -976,6 +976,21 @@ model LiveStream {
   channelId             String
   channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
   title                 String
+  /// Shown under the stream, and copied to the replay
+  description           String?
+  /// PUBLIC: listed on Live and followers are told; UNLISTED: only people with the link
+  visibility            Visibility        @default(PUBLIC)
+  /// When it is planned to start (shown as Upcoming until then)
+  scheduledFor          DateTime?
+  /// Who can chat: everyone signed in, followers only, or nobody
+  chatMode              String            @default("everyone")
+  /// Seconds each viewer waits between messages (0: none; the host never waits)
+  slowModeSeconds       Int               @default(0)
+  /// Live captions from the host's browser may be shown to viewers
+  captionsEnabled       Boolean           @default(true)
+  /// Keep the recording as a video afterwards, and how visible that video is at first
+  saveReplay            Boolean           @default(true)
+  replayVisibility      Visibility        @default(PRIVATE)
   status                LiveStatus        @default(IDLE)
   /// "browser" or "rtmp", while live.
   source                String?

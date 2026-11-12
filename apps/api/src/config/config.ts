@@ -126,6 +126,8 @@ export interface MediaConfig {
   maxUploadBytes: number;
   /** Automatic captions with whisper.cpp on the media server; null turns them off. */
   whisper: { bin: string; model: string; threads: number } | null;
+  /** With whisper: also English captions (Whisper's translation) for videos spoken in another language. */
+  englishCaptions: boolean;
   /** Size of each upload part (S3 needs 5 MiB+, at most 10,000 parts). */
   partBytes: number;
   scratchDir: string;
@@ -245,6 +247,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     chunked: env.CHUNKED_ENCODING !== 'false', chunkMinSeconds: Math.max(10, Number(env.CHUNK_MIN_SECONDS) || 120),
     chunkSeconds: Math.max(4, Math.round((Number(env.CHUNK_SECONDS) || 30) / 2) * 2), chunkConcurrency: Math.max(1, Number(env.CHUNK_CONCURRENCY) || 1),
     encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), upgradeConcurrency: Math.max(1, Math.floor(Number(env.WORKER_UPGRADE_CONCURRENCY) || 1)), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
+    englishCaptions: env.AUTO_CAPTIONS_ENGLISH !== 'false',
     whisper: env.WHISPER_CPP_PATH?.trim() && env.WHISPER_MODEL?.trim()
       ? { bin: env.WHISPER_CPP_PATH.trim(), model: env.WHISPER_MODEL.trim(), threads: Math.max(1, Number(env.WHISPER_THREADS) || 4) } : null,
   };

@@ -137,7 +137,8 @@ test('Free browser streaming; recording pieces become HLS for viewers, with chat
   const anon = await connect();
   expect(await anon.emitWithAck('live:chat', { streamId: id, text: 'hi' })).toEqual({ ok: false, error: 'Sign in to chat.' });
 
-  // End: viewers are told; the recording becomes a private video that is processed like an upload.
+  // End: viewers are told; the recording becomes a video processed like an upload, as the stream's settings say.
+  await ctx.prisma.liveStream.update({ where: { id }, data: { replayVisibility: 'UNLISTED', description: 'Recorded live' } });
   const ended = next(viewer, 'ended', 30_000);
   expect(await resumedHost.emitWithAck('live:stop', id)).toEqual({ ok: true });
   await ended;
@@ -146,7 +147,7 @@ test('Free browser streaming; recording pieces become HLS for viewers, with chat
   expect(s.replayVideoId).toBeTruthy();
   let replay: any;
   for (let i = 0; i < 300; i++) { replay = (await host.agent.get(`/api/hub/videos/${s.replayVideoId}`)).body.video; if (replay.status === 'READY' && replay.processingStage === 'Ready') break; await new Promise((r) => setTimeout(r, 200)); }
-  expect(replay).toMatchObject({ title: 'Morning show (live)', visibility: 'PRIVATE', status: 'READY' });
+  expect(replay).toMatchObject({ title: 'Morning show (live)', visibility: 'UNLISTED', description: 'Recorded live', status: 'READY' });
   expect(replay.durationSeconds).toBeGreaterThanOrEqual(4);
   await request(ctx.http).get(`/api/storage/local/pub/live/${id}/index.m3u8`).expect(404);
   // The next stream is a new one; the encoder key stays the same.
@@ -202,4 +203,52 @@ test('free guest rooms admit two guests and only relay signals between members a
   expect(await host.emitWithAck('live:guest-remove', first.id)).toEqual({ ok: true });
   await removed;
   expect(await third.emitWithAck('live:guest-join', invite.token)).toEqual({ ok: true, host: host.id });
+});
+
+test('stream settings: description, schedule, who can find it; chat off, followers only, slow mode; live captions only from the host', async () => {
+  const host = await signIn(ctx.http, ctx.mail, 'settings-host@example.com');
+  const ch = (await host.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'setshost', name: 'Host' }).expect(201)).body.channel;
+  await new Billing(ctx.prisma as never, ctx.config).grantPremium((await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'settings-host@example.com' } })).id, 1);
+  const studio = (await host.agent.get('/api/hub/live').expect(200)).body;
+  const id = studio.stream.id as string;
+  expect(studio.stream).toMatchObject({ visibility: 'PUBLIC', chat: { mode: 'everyone', slowModeSeconds: 0 }, captionsEnabled: true, saveReplay: true, replayVisibility: 'PRIVATE' });
+
+  const soon = new Date(Date.now() + 2 * 3600_000).toISOString();
+  await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ slowModeSeconds: 7 }).expect(400);
+  await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ scheduledFor: new Date(Date.now() - 3600_000).toISOString() }).expect(400);
+  const saved = (await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ title: 'Morning show', description: 'News and music from Kigali', scheduledFor: soon, replayVisibility: 'UNLISTED' }).expect(200)).body.stream;
+  expect(saved).toMatchObject({ title: 'Morning show', description: 'News and music from Kigali', scheduledFor: soon, replayVisibility: 'UNLISTED' });
+  // Planned public streams are listed as upcoming; unlisted ones are not.
+  expect((await request(ctx.http).get('/api/live').expect(200)).body.upcoming.map((s: any) => s.id)).toEqual([id]);
+  await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ visibility: 'UNLISTED' }).expect(200);
+  expect((await request(ctx.http).get('/api/live').expect(200)).body.upcoming).toEqual([]);
+
+  // Live (set directly: encoding is covered by the test above).
+  await ctx.prisma.liveStream.update({ where: { id }, data: { status: 'LIVE', startedAt: new Date() } });
+  const fan = await signIn(ctx.http, ctx.mail, 'settings-fan@example.com');
+  const fanSocket = await connect(cookieOf(fan.res));
+  const hostSocket = await connect(cookieOf(host.res));
+  await fanSocket.emitWithAck('join', `live:${id}`);
+  const say = (s: Socket, text: string) => s.emitWithAck('live:chat', { streamId: id, text });
+
+  await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ chatMode: 'off' }).expect(200);
+  expect(await say(fanSocket, 'hello')).toEqual({ ok: false, error: 'Chat is turned off for this stream.' });
+  expect(await say(hostSocket, 'Welcome!')).toEqual({ ok: true }); // the host can always write
+  await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ chatMode: 'followers' }).expect(200);
+  expect((await say(fanSocket, 'hello')).error).toContain('Only followers can chat');
+  await fan.agent.post('/api/channels/setshost/follow').set('Origin', WEB).expect(200);
+  expect(await say(fanSocket, 'hello')).toEqual({ ok: true });
+  await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ chatMode: 'everyone', slowModeSeconds: 30 }).expect(200);
+  expect(await say(fanSocket, 'one')).toEqual({ ok: true });
+  expect(await say(fanSocket, 'two')).toEqual({ ok: false, error: 'Slow mode: one message every 30 seconds.' });
+
+  // Live captions: the host's lines reach viewers; nobody else can send them; off when the host turns them off.
+  const heard = next<{ text: string; final: boolean }>(fanSocket, 'caption');
+  expect(await hostSocket.emitWithAck('live:caption', { streamId: id, text: '  Good morning,\nKigali ', final: true })).toEqual({ ok: true });
+  expect(await heard).toMatchObject({ text: 'Good morning, Kigali', final: true });
+  expect(await fanSocket.emitWithAck('live:caption', { streamId: id, text: 'fake caption' })).toEqual({ ok: false });
+  await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ captionsEnabled: false }).expect(200);
+  expect(await hostSocket.emitWithAck('live:caption', { streamId: id, text: 'not shown' })).toEqual({ ok: false });
+  expect((await request(ctx.http).get(`/api/live/${id}`).expect(200)).body.stream).toMatchObject({ description: 'News and music from Kigali', chat: { mode: 'everyone', slowModeSeconds: 30 }, captionsEnabled: false });
+  expect(ch.handle).toBe('setshost');
 });
