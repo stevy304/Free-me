@@ -162,13 +162,22 @@ test('OBS and TV encoders: nginx-rtmp asks the API; a valid key goes live under 
   await host.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'host', name: 'Host' }).expect(201);
   const u = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'host@example.com' } });
   await new Billing(ctx.prisma as never, ctx.config).grantPremium(u.id, 1);
-  const { encoder, stream } = (await host.agent.get('/api/hub/live').expect(200)).body;
+  const studioResponse = await host.agent.get('/api/hub/live').expect(200);
+  expect(studioResponse.headers['cache-control']).toBe('private, no-store');
+  const { encoder, stream } = studioResponse.body;
 
   await request(ctx.http).post('/api/live/rtmp/publish?secret=wrong').type('form').send({ name: encoder.streamKey }).expect(403);
   await request(ctx.http).post('/api/live/rtmp/publish?secret=rtmp-secret-0123456789abcdef').type('form').send({ name: 'fm_guess' }).expect(403);
-  const ok = await request(ctx.http).post('/api/live/rtmp/publish?secret=rtmp-secret-0123456789abcdef').type('form').send({ app: 'live', name: encoder.streamKey }).expect(302);
+  const ok = await request(ctx.http).post('/api/live/rtmp/publish?secret=rtmp-secret-0123456789abcdef').type('form').send({ app: 'live', name: encoder.streamKey, call: 'publish', flashver: 'FMLE/3.0', tcurl: encoder.server, pageurl: '', swfurl: '', clientid: '12' }).expect(302);
   expect(ok.headers.location).toBe(stream.id);
   expect(await ctx.prisma.liveStream.findUniqueOrThrow({ where: { id: stream.id } })).toMatchObject({ status: 'LIVE', source: 'rtmp' });
+  await host.agent.post('/api/hub/live/key').set('Origin', WEB).send({}).expect(400);
+  await request(ctx.http).post('/api/live/rtmp/update?secret=wrong').type('form').send({ name: stream.id }).expect(403);
+  await request(ctx.http).post('/api/live/rtmp/update?secret=rtmp-secret-0123456789abcdef').type('form').send({ name: stream.id, call: 'update_publish', time: '10', timestamp: '10000', clientid: '12' }).expect(200);
+  await request(ctx.http).post('/api/live/rtmp/update?secret=rtmp-secret-0123456789abcdef').type('form').send({ name: encoder.streamKey }).expect(200);
+  await host.agent.post('/api/hub/live/end').set('Origin', WEB).send({}).expect(200);
+  await request(ctx.http).post('/api/live/rtmp/publish?secret=rtmp-secret-0123456789abcdef').type('form').send({ name: encoder.streamKey }).expect(403);
+  await request(ctx.http).post('/api/live/rtmp/update?secret=rtmp-secret-0123456789abcdef').type('form').send({ name: stream.id }).expect(403);
   await request(ctx.http).post('/api/live/rtmp/done?secret=rtmp-secret-0123456789abcdef').type('form').send({ name: stream.id }).expect(200);
   expect((await ctx.prisma.liveStream.findUniqueOrThrow({ where: { id: stream.id } })).status).toBe('ENDED');
 
@@ -251,4 +260,45 @@ test('stream settings: description, schedule, who can find it; chat off, followe
   expect(await hostSocket.emitWithAck('live:caption', { streamId: id, text: 'not shown' })).toEqual({ ok: false });
   expect((await request(ctx.http).get(`/api/live/${id}`).expect(200)).body.stream).toMatchObject({ description: 'News and music from Kigali', chat: { mode: 'everyone', slowModeSeconds: 30 }, captionsEnabled: false });
   expect(ch.handle).toBe('setshost');
+});
+
+
+test('unlisted streams do not notify followers and old scheduled times do not block live settings', async () => {
+  const host = await signIn(ctx.http, ctx.mail, 'private-host@example.com');
+  await host.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'private-host', name: 'Private Host' }).expect(201);
+  const fan = await signIn(ctx.http, ctx.mail, 'private-fan@example.com');
+  await fan.agent.post('/api/channels/private-host/follow').set('Origin', WEB).expect(200);
+  const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'private-host@example.com' } });
+  await new Billing(ctx.prisma as never, ctx.config).grantPremium(user.id, 1);
+  const { encoder, stream } = (await host.agent.get('/api/hub/live').expect(200)).body;
+  const scheduledFor = new Date(Date.now() - 3600_000);
+  await ctx.prisma.liveStream.update({ where: { id: stream.id }, data: { visibility: 'UNLISTED', scheduledFor } });
+  await request(ctx.http).post('/api/live/rtmp/publish?secret=rtmp-secret-0123456789abcdef').type('form').send({ name: encoder.streamKey }).expect(302);
+  expect(await ctx.prisma.notification.count({ where: { liveStreamId: stream.id } })).toBe(0);
+  await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ scheduledFor: scheduledFor.toISOString(), description: 'Updated while live' }).expect(200);
+  await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ title: '   ' }).expect(400);
+  for (const field of ['title', 'description', 'visibility', 'chatMode', 'saveReplay', 'captionsEnabled', 'slowModeSeconds', 'replayVisibility']) {
+    await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ [field]: null }).expect(400);
+  }
+  await host.agent.post('/api/hub/live/end').set('Origin', WEB).send({}).expect(200);
+});
+
+test('concurrent first key requests receive one working key', async () => {
+  const host = await signIn(ctx.http, ctx.mail, 'keys-host@example.com');
+  await host.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'keys-host', name: 'Keys Host' }).expect(201);
+  const { LiveService } = await import('../src/live/live.service');
+  const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'keys-host@example.com' } });
+  const keys = await Promise.all(Array.from({ length: 8 }, () => ctx.app.get(LiveService).streamKey(user.id)));
+  expect(new Set(keys).size).toBe(1);
+  expect((await ctx.prisma.channel.findUniqueOrThrow({ where: { userId: user.id } })).liveStreamKey).toBe(keys[0]);
+});
+
+
+test('concurrent studio requests share one current broadcast', async () => {
+  const host = await signIn(ctx.http, ctx.mail, 'tabs-host@example.com');
+  await host.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'tabs-host', name: 'Tabs Host' }).expect(201);
+  const { LiveService } = await import('../src/live/live.service');
+  const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'tabs-host@example.com' } });
+  const streams = await Promise.all(Array.from({ length: 8 }, () => ctx.app.get(LiveService).mine(user.id)));
+  expect(new Set(streams.map((s) => s.id)).size).toBe(1);
 });

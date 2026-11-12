@@ -35,7 +35,8 @@ export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSett
   const save = async () => {
     setBusy(true); setError(null); setNote(null);
     try {
-      await api('/hub/live', { method: 'PATCH', body: { ...f, description: f.description, scheduledFor: f.scheduledFor ? new Date(f.scheduledFor).toISOString() : null } });
+      const { scheduledFor, visibility, ...editable } = f;
+      await api('/hub/live', { method: 'PATCH', body: { ...editable, ...(!live ? { visibility, scheduledFor: scheduledFor ? new Date(scheduledFor).toISOString() : null } : {}) } });
       setNote(live ? 'Saved. Viewers see the change now.' : 'Saved.'); onSaved();
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };

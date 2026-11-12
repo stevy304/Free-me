@@ -1,4 +1,5 @@
 import { normalizeEmail } from '@free-me/shared';
+import { validEncoderUrl } from '../live/encoder';
 
 /**
  * Configuration from environment variables, checked once at start-up. A missing or unsafe setting stops the API
@@ -308,7 +309,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   };
 
   const rtmpUrl = env.LIVE_RTMP_URL?.trim() || null;
-  if (rtmpUrl && !/^rtmps?:\/\/[^/]+\/.+/.test(rtmpUrl)) problems.push('LIVE_RTMP_URL must look like rtmp://live.freeme.example/live.');
+  if (rtmpUrl && !validEncoderUrl(rtmpUrl)) problems.push('LIVE_RTMP_URL must be an rtmp:// or rtmps:// server URL with an application path, without credentials, query parameters or fragments.');
   const rtmpSecret = env.LIVE_RTMP_SECRET?.trim() || null;
   if (rtmpUrl && (!rtmpSecret || rtmpSecret.length < 24)) problems.push('LIVE_RTMP_SECRET (24+ random characters) is required with LIVE_RTMP_URL.');
   const browserLimit = Number(env.LIVE_BROWSER_LIMIT ?? 3);
