@@ -18,6 +18,7 @@ import { beginEncoderPublication } from './live/encoder-publication';
 import { sampleIngest } from './live/ingest-health';
 import { finishLive, LiveSync } from './live/sync';
 import { join } from 'node:path';
+import { stat } from 'node:fs/promises';
 import { verifyEncoder } from './media/encoder-health';
 import { createServer } from 'node:http';
 import { Counter, Histogram } from 'prom-client';
@@ -164,22 +165,27 @@ async function main() {
     try {
       const streams = await prisma.liveStream.findMany({ where: { source: 'rtmp', OR: [{ status: { in: ['PREVIEW', 'LIVE'] } }, { status: 'ENDED', replayVideoId: null, finalizedAt: null, endedAt: { gt: new Date(Date.now() - 86_400_000) } }] } });
       for (const s of streams) {
-        let sync = syncs.get(s.id);
-        if (!sync) { sync = new LiveSync(liveStorage, s.id, join(liveDir, s.id)); syncs.set(s.id, sync); }
-        const boundary = s.status === 'LIVE' && s.encoderStartSequence === null ? await beginEncoderPublication(prisma, s.id, sync.dir) : s.encoderStartSequence;
-        sync.setPublicFrom(boundary);
-        if (s.status === 'PREVIEW' || s.status === 'LIVE') {
-          await sync.tick().catch((e) => log.warn(`live ${s.id}: ${(e as Error).message}`));
-          if (Date.now() - (sampled.get(s.id) ?? 0) >= 5000) {
-            sampled.set(s.id, Date.now());
-            const health = await sampleIngest(sync.dir, config.media.ffprobePath).catch(() => null);
-            if (health) await prisma.liveStream.updateMany({ where: { id: s.id, status: { in: ['PREVIEW', 'LIVE'] } }, data: { ingestHealth: health as unknown as Prisma.InputJsonValue } });
+        try {
+          // Each ingest host owns only its local HLS directories, even though all hosts share the database.
+          const localDir = join(liveDir, s.id);
+          if (!(await stat(localDir).catch(() => null))?.isDirectory()) { syncs.delete(s.id); sampled.delete(s.id); continue; }
+          let sync = syncs.get(s.id);
+          if (!sync) { sync = new LiveSync(liveStorage, s.id, join(liveDir, s.id)); syncs.set(s.id, sync); }
+          const boundary = s.status === 'LIVE' && s.encoderStartSequence === null ? await beginEncoderPublication(prisma, s.id, sync.dir) : s.encoderStartSequence;
+          sync.setPublicFrom(boundary);
+          if (s.status === 'PREVIEW' || s.status === 'LIVE') {
+            await sync.tick().catch((e) => log.warn(`live ${s.id}: ${(e as Error).message}`));
+            if (Date.now() - (sampled.get(s.id) ?? 0) >= 5000) {
+              sampled.set(s.id, Date.now());
+              const health = await sampleIngest(sync.dir, config.media.ffprobePath).catch(() => null);
+              if (health) await prisma.liveStream.updateMany({ where: { id: s.id, status: { in: ['PREVIEW', 'LIVE'] } }, data: { ingestHealth: health as unknown as Prisma.InputJsonValue } });
+            }
           }
-        }
-        else { syncs.delete(s.id); sampled.delete(s.id); await finishLive(prisma, liveStorage, sync, async (videoId) => {
-          const transcode = { name: 'transcode', videoId } as const;
-          await enqueue(transcode);
-        }, log, config.media.ffmpegPath); }
+          else { syncs.delete(s.id); sampled.delete(s.id); await finishLive(prisma, liveStorage, sync, async (videoId) => {
+            const transcode = { name: 'transcode', videoId } as const;
+            await enqueue(transcode);
+          }, log, config.media.ffmpegPath); }
+        } catch (e) { log.warn(`live ${s.id}: ${(e as Error).message}`); }
       }
     } catch (e) { log.warn(`live: ${(e as Error).message}`); } finally { liveBusy = false; }
   }, 1500) : null;
