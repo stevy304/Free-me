@@ -50,15 +50,14 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   expect((await post(admin, '/admin/billing/premium', { email: hostEmail, months: 1 })).ok()).toBe(true);
 
   await host.reload();
-  await expect(host.getByRole('heading', { name: 'Signal Room', exact: true })).toBeVisible();
+  await expect(host.getByRole('heading', { name: 'Go Live', exact: true })).toBeVisible();
   await expect(host.getByRole('region', { name: 'Production monitors' })).toBeVisible();
-  const panels = host.getByRole('complementary', { name: 'Production panels' });
-  await panels.getByRole('button', { name: 'Sources', exact: true }).click();
-  await host.getByRole('button', { name: 'Camera' }).click();
+  await host.getByRole('button', { name: 'Camera', exact: true }).click();
   await host.getByLabel('Title', { exact: true }).fill(`Morning show ${run}`);
-  await panels.getByRole('button', { name: 'Graphics', exact: true }).click();
+  await host.getByRole('button', { name: 'Graphics', exact: true }).click();
   await host.getByLabel('Lower third name').fill('Kigali · Morning show');
-  const swatch = (index: number) => host.locator('canvas').nth(index).evaluate((canvas: HTMLCanvasElement) =>
+  await host.getByRole('dialog', { name: 'Studio tools' }).getByRole('button', { name: 'Close', exact: true }).click();
+  const swatch = (index: number) => host.getByLabel(index === 0 ? 'Scene preview' : 'Broadcast output', { exact: true }).evaluate((canvas: HTMLCanvasElement) =>
     [...canvas.getContext('2d')!.getImageData(34, 582, 1, 1).data]);
   await expect.poll(() => swatch(0)).toEqual([8, 100, 95, 255]);
   await expect.poll(() => swatch(1)).not.toEqual([8, 100, 95, 255]);
@@ -82,7 +81,6 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   // Chat reaches the creator at once.
   await viewer.getByLabel('Chat message').fill('Hello from Musanze!');
   await viewer.getByRole('button', { name: 'Send' }).click();
-  await panels.getByRole('button', { name: 'Chat', exact: true }).click();
   await expect(host.getByText('Hello from Musanze!')).toBeVisible({ timeout: 10_000 });
 
   // Close the host's connection and reject reconnects until both screens show the interruption.
@@ -151,7 +149,7 @@ test('free host adds a signed-in WebRTC guest to the program', async ({ browser 
   await signIn(host, `cohost.${run}@example.com`);
   expect((await post(host, '/channels', { handle: `cohost.${run}`, name: 'Co-stream Kigali' })).status()).toBe(201);
   await host.goto('/go-live');
-  await host.getByRole('button', { name: 'Camera' }).click();
+  await host.getByRole('button', { name: 'Camera', exact: true }).click();
   await host.getByRole('button', { name: 'Create guest invite' }).click();
   const invite = await host.getByRole('textbox', { name: 'Guest invitation link' }).inputValue();
 
