@@ -134,7 +134,7 @@ export class Billing {
   }
 
   /** Creates a payment and asks the provider to collect it. */
-  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_PASS' | 'PLUS' | 'FAMILY'; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }) {
+  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_PASS' | 'PLUS' | 'FAMILY' | 'VERIFICATION'; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }) {
     const provider = (await this.providers())[p.method];
     if (!provider) throw new BillingError(p.method === 'airtel_money' ? 'Airtel Money payments are not set up on this server yet.' : p.method === 'mtn_momo' ? 'MTN MoMo payments are not set up on this server yet.' : p.method === 'flutterwave' ? 'Card payments are not set up on this server yet.' : 'This way of paying is not available.');
     let phone: string | undefined;
@@ -196,6 +196,8 @@ export class Billing {
       await this.extendPremium(tx, p.userId, p.months ?? 1);
     } else if (p.purpose === 'CREATOR_PASS') {
       await this.extendCreatorPass(tx, p.userId, p.months ?? 12);
+    } else if (p.purpose === 'VERIFICATION') {
+      await this.extendVerification(tx, p.userId, p.months ?? 12);
     } else if (p.purpose === 'PLUS' || p.purpose === 'FAMILY') {
       await this.extendPlan(tx, p.userId, p.purpose === 'PLUS' ? 'plusUntil' : 'familyUntil', p.months ?? 1);
     } else if (p.campaignId) {
@@ -244,6 +246,19 @@ export class Billing {
     return this.extendPlan(tx, userId, 'creatorPassUntil', months);
   }
 
+  /**
+   * A paid Verified business badge: the checked business (APPROVED, or ACTIVE when renewing) gets the badge until a
+   * year later (from its current end when renewing early). The badge then overrides a Premium badge on the channel.
+   */
+  private async extendVerification(tx: Prisma.TransactionClient, userId: string, months: number) {
+    const channel = await tx.channel.findUnique({ where: { userId }, include: { businessVerification: true } });
+    const v = channel?.businessVerification;
+    if (!channel || !v || (v.status !== 'APPROVED' && v.status !== 'ACTIVE')) { this.log.warn(`verification paid by ${userId} without an approved request`); return; }
+    const from = v.verifiedUntil && v.verifiedUntil > new Date() ? v.verifiedUntil.getTime() : Date.now();
+    await tx.businessVerification.update({ where: { id: v.id }, data: { status: 'ACTIVE', verifiedUntil: new Date(from + months * MONTH) } });
+    await tx.channel.update({ where: { id: channel.id }, data: { isVerified: true, verificationSource: 'BUSINESS' } });
+  }
+
   /** Gives Plus or Family & TV without a payment (administrators: partners, prizes, support). */
   async grantPlan(userId: string, field: 'plusUntil' | 'familyUntil', months: number) {
     await this.prisma.$transaction((tx) => this.extendPlan(tx, userId, field, months));
@@ -283,11 +298,12 @@ export class Billing {
         const raw = payment.amountMinor.toString().padStart(digits + 1, '0');
         const amount = digits ? `${raw.slice(0, -digits)}.${raw.slice(-digits)}` : raw;
         const item = payment.purpose === 'PREMIUM' ? `Premium (${payment.months ?? 1} month(s))` : payment.purpose === 'CREATOR_PASS' ? `Creator pass (${Math.round((payment.months ?? 12) / 12)} year(s))`
-          : payment.purpose === 'PLUS' ? `Plus (${payment.months ?? 1} month(s))` : payment.purpose === 'FAMILY' ? `Family & TV (${payment.months ?? 1} month(s))` : 'Ad campaign';
+          : payment.purpose === 'PLUS' ? `Plus (${payment.months ?? 1} month(s))` : payment.purpose === 'FAMILY' ? `Family & TV (${payment.months ?? 1} month(s))`
+            : payment.purpose === 'VERIFICATION' ? 'Verified business badge (1 year)' : 'Ad funds';
         await mail.send(noticeMail(payment.user.email, 'Your Free Me payment receipt', [
           item, `Amount paid: ${payment.currency} ${amount}`, `Payment date (UTC): ${payment.paidAt!.toISOString().slice(0, 10)}`,
           `Receipt reference: ${payment.id}`,
-        ], { label: 'View payment history', url: `${this.config.appUrl}${payment.purpose === 'PREMIUM' ? '/premium' : payment.purpose === 'CREATOR_PASS' ? '/hub/pass' : payment.purpose === 'AD_CAMPAIGN' ? '/studio/ads' : '/plans'}` }));
+        ], { label: 'View payment history', url: `${this.config.appUrl}${payment.purpose === 'PREMIUM' ? '/premium' : payment.purpose === 'CREATOR_PASS' ? '/hub/pass' : payment.purpose === 'AD_CAMPAIGN' || payment.purpose === 'VERIFICATION' ? '/studio/ads' : '/plans'}` }));
         await this.prisma.payment.updateMany({
           where: { id: payment.id, receiptDueAt: retryAt }, data: { receiptDueAt: null, receiptSentAt: new Date() },
         });
@@ -347,6 +363,13 @@ export class Billing {
   /** Worker: memberships that ended lose the Premium badge (a badge given by administrators stays). */
   async expirePremium(now = new Date()) {
     const r = await this.prisma.channel.updateMany({ where: { verificationSource: 'PREMIUM', user: { OR: [{ premiumUntil: null }, { premiumUntil: { lte: now } }] } }, data: { isVerified: false, verificationSource: null } });
+    // Verified business badges whose year ended: the badge goes (Premium's comes back), the check stays valid to renew.
+    const lapsed = await this.prisma.businessVerification.findMany({ where: { status: 'ACTIVE', verifiedUntil: { lte: now } }, select: { id: true, channelId: true, channel: { select: { user: { select: { premiumUntil: true } } } } } });
+    for (const v of lapsed) {
+      await this.prisma.businessVerification.update({ where: { id: v.id }, data: { status: 'APPROVED' } });
+      const premium = !!v.channel.user.premiumUntil && v.channel.user.premiumUntil > now;
+      await this.prisma.channel.updateMany({ where: { id: v.channelId, verificationSource: 'BUSINESS' }, data: premium ? { verificationSource: 'PREMIUM' } : { isVerified: false, verificationSource: null } });
+    }
     // Campaigns past their end are done. One priced per 1,000 views may run on to its deliverUntil to deliver the
     // views it paid for, and is done as soon as its budget cannot buy another view.
     await this.prisma.$executeRaw`
@@ -464,7 +487,7 @@ export class Billing {
         await tx.revenueLedger.create({ data: {
           channelId: r.channelId, sourceType: 'SUBSCRIPTION_SHARE', referenceId: label, currency: EARNINGS_CURRENCY, grossAmountCents: amount, creatorShareCents: amount,
           platformShareCents: 0n, reinvestShareCents: 0n, splitBps: `${subs.shareBps}/${10_000 - subs.shareBps}/0`,
-          balanceAfterCents: bal.confirmedBalanceCents, description: `Plus and Family members' share for ${label} (${minutes} ${minutes === 1 ? 'minute' : 'minutes'} watched)`,
+          balanceAfterCents: bal.confirmedBalanceCents, description: `Member viewing earnings for ${label} (${minutes} ${minutes === 1 ? 'minute' : 'minutes'} watched by members)`,
         } });
       }
       for (const r of rows) {

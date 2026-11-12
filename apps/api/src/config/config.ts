@@ -40,8 +40,12 @@ export interface BillingConfig {
   /** Premium per month in some countries (ISO 3166-1 alpha-2 → US cents), e.g. lower where incomes are lower. */
   premiumByCountry: Record<string, number>;
   adDayUsdCents: number;
-  /** What 1,000 ad views cost; a paid day buys `adDayUsdCents * 1000 / adCpmUsdCents` views at most. */
+  /** What 1,000 ad views cost; a campaign's funds buy `budget * 1000 / adCpmUsdCents` views. */
   adCpmUsdCents: number;
+  /** Smallest amount of funds a campaign can start with. */
+  adMinBudgetUsdCents: number;
+  /** Verified business badge, per year (paid after an administrator checked the business). */
+  verificationUsdCents: number;
   /** Smallest balance a creator can withdraw. */
   payoutMinUsdCents: number;
   payouts?: { rwfPerUsd: number; feeRwf: number } | null;
@@ -289,7 +293,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       baseUrl: (env.AIRTEL_BASE_URL?.trim() || 'https://openapiuat.airtel.africa').replace(/\/+$/, ''), clientId: env.AIRTEL_CLIENT_ID!.trim(), clientSecret: env.AIRTEL_CLIENT_SECRET!.trim(),
       country: (env.AIRTEL_COUNTRY?.trim() || 'RW').toUpperCase(), currency: airtelCurrency, perUsd: airtelCurrency === 'USD' ? 1 : airtelPerUsd,
     } : null,
-    premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), adCpmUsdCents: cents('AD_CPM_USD_CENTS', 100), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
+    premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), adCpmUsdCents: cents('AD_CPM_USD_CENTS', 100), adMinBudgetUsdCents: cents('AD_MIN_BUDGET_USD_CENTS', 700), verificationUsdCents: cents('VERIFICATION_PRICE_USD_CENTS', 1000), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
     payouts: payoutRate > 0 ? { rwfPerUsd: payoutRate, feeRwf: payoutFee } : null,
     payoutSandbox: payoutTestKey ? { secretKey: payoutTestKey } : null,
     momo: momoSet.length === momoKeys.length ? {

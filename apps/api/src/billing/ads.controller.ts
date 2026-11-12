@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, IsUUID, IsUrl, Length, Max, Min } from 'class-validator';
-import type { Advertiser, Campaign, Video } from '@prisma/client';
+import type { Advertiser, BusinessVerification, Campaign, Video } from '@prisma/client';
 import { isCountryCode } from '@free-me/shared';
 import { PrismaService } from '../database/prisma.service';
 import { RedisService } from '../database/redis.service';
@@ -27,10 +27,17 @@ class CampaignDto {
   @ApiProperty({ description: 'Short line shown with the ad' }) @IsString() @Length(3, 90) headline!: string;
   @ApiProperty({ description: 'Where "Visit" leads (https)' }) @IsUrl({ protocols: ['https'], require_protocol: true }) destinationUrl!: string;
   @ApiProperty({ description: 'One of your own videos, public or unlisted, 5–90 seconds' }) @IsUUID() videoId!: string;
-  @ApiProperty({ minimum: 1, maximum: 90 }) @IsInt() @Min(1) @Max(90) days!: number;
+  @ApiProperty({ description: 'Funds for this ad in US cents (at least AD_MIN_BUDGET_USD_CENTS), spent per 1,000 views' }) @IsInt() @Min(1) @Max(10_000_000) budgetUsdCents!: number;
+  @ApiPropertyOptional({ minimum: 1, maximum: 90, description: 'Spread the views over this many days (default 7)' }) @IsOptional() @IsInt() @Min(1) @Max(90) days?: number;
   @ApiPropertyOptional({ description: 'Countries to show it in; empty = everywhere' }) @IsOptional() @IsArray() @ArrayMaxSize(50) @IsString({ each: true }) targetCountries?: string[];
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsUUID(undefined, { each: true }) targetVideoIds?: string[];
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @Length(1, 50, { each: true }) targetChannelHandles?: string[];
+}
+class VerificationDto {
+  @ApiProperty({ description: 'The business name as registered' }) @IsString() @Length(2, 100) businessName!: string;
+  @ApiProperty({ description: 'Company registration number (RDB) or tax number (TIN)' }) @IsString() @Length(3, 60) registrationNumber!: string;
+  @ApiProperty({ description: 'A phone number we can call to check' }) @IsString() @Length(6, 24) phone!: string;
+  @ApiPropertyOptional() @IsOptional() @IsUrl({ protocols: ['https', 'http'], require_protocol: true }) website?: string;
 }
 class ImpressionDto { @ApiProperty() @IsUUID() campaignId!: string; @ApiProperty() @IsUUID() videoId!: string }
 class AdEventDto { @ApiProperty({ enum: ['COMPLETE', 'SKIP', 'CLICK'] }) @IsIn(['COMPLETE', 'SKIP', 'CLICK']) type!: string; @ApiProperty() @IsInt() @Min(0) @Max(3_600_000) ms!: number }
@@ -43,7 +50,7 @@ const campaignView = (c: Campaign & { advertiser: Advertiser; video?: Pick<Video
   const limits = adViewLimits(c);
   return {
   id: c.id, status: c.status, businessName: c.advertiser.businessName, headline: c.headline, destinationUrl: c.destinationUrl, days: c.days,
-  dailyRateCents: c.dailyRateCents, totalCents: c.days * c.dailyRateCents, currency: c.currency,
+  dailyRateCents: c.dailyRateCents, totalCents: Number(c.budgetAmountCents), currency: c.currency,
   // Priced per 1,000 views (null for older campaigns priced per day): views bought, per day, and spent so far.
   cpmCents: c.cpmRateCents || null, viewsBought: limits?.total ?? null, viewsPerDay: limits?.perDay ?? null, spentCents: Number(c.spentAmountCents),
   deliverUntil: c.reviewedAt ? c.deliverUntil : null, targetCountries: c.targetCountries, targetVideoIds: c.targetVideoIds, targetChannelIds: c.targetChannelIds,
@@ -77,7 +84,6 @@ export class AdsController {
   @ApiOperation({ summary: 'Create an ad campaign (a draft until it is paid)' })
   async create(@CurrentAuth() auth: AuthContext, @Body() body: CampaignDto) {
     await this.limits.consume(`ads:create:${auth.user.id}`, 30, 3600);
-    if (!hasPremiumAccess(auth.user)) throw new ForbiddenException('Ad Studio is part of Premium.');
     if (!isCountryCode(body.country)) throw new BadRequestException('Choose your business country from the list.');
     const targets = [...new Set((body.targetCountries ?? []).map((c) => c.toUpperCase()))];
     if (targets.some((c) => !isCountryCode(c))) throw new BadRequestException('Choose target countries from the list.');
@@ -95,7 +101,11 @@ export class AdsController {
     if (videoCount !== targetVideoIds.length || channels.length !== handles.length) {
       throw new BadRequestException('Choose existing public videos and valid channel handles for ad placements.');
     }
-    const { adDayUsdCents: rate, adCpmUsdCents: cpm } = await this.billing.settings();
+    const { adCpmUsdCents: cpm, adMinBudgetUsdCents: minimum } = await this.billing.settings();
+    if (body.budgetUsdCents < minimum) throw new BadRequestException(`Add at least $${(minimum / 100).toFixed(2).replace(/\.00$/, '')} of funds.`);
+    const days = body.days ?? 7;
+    // Funds are spread evenly over the days chosen (the daily view limit); dailyRateCents is that share, for display.
+    const rate = Math.ceil(body.budgetUsdCents / days);
     const c = await this.prisma.$transaction(async (tx) => {
       const adv = await tx.advertiser.upsert({
         where: { userId: auth.user.id }, update: { businessName: body.businessName.trim(), country: body.country.toUpperCase() },
@@ -104,11 +114,53 @@ export class AdsController {
       if (!auth.user.roles.includes('ADVERTISER')) await tx.user.update({ where: { id: auth.user.id }, data: { roles: { set: [...auth.user.roles, 'ADVERTISER'] } } });
       const now = new Date();
       return tx.campaign.create({ data: {
-        advertiserId: adv.id, name: body.headline.trim(), headline: body.headline.trim(), destinationUrl: body.destinationUrl, videoId: v.id, days: body.days, dailyRateCents: rate, cpmRateCents: cpm,
-        currency: EARNINGS_CURRENCY, budgetAmountCents: BigInt(rate * body.days), targetCountries: targets, targetVideoIds, targetChannelIds: channels.map((ch) => ch.id), startDate: now, endDate: now,
+        advertiserId: adv.id, name: body.headline.trim(), headline: body.headline.trim(), destinationUrl: body.destinationUrl, videoId: v.id, days, dailyRateCents: rate, cpmRateCents: cpm,
+        currency: EARNINGS_CURRENCY, budgetAmountCents: BigInt(body.budgetUsdCents), targetCountries: targets, targetVideoIds, targetChannelIds: channels.map((ch) => ch.id), startDate: now, endDate: now,
       }, include: { advertiser: true } });
     });
     return { campaign: campaignView({ ...c, video: v }) };
+  }
+
+  private verificationView(v: BusinessVerification | null, priceUsdCents: number) {
+    return {
+      priceUsdCents,
+      request: v ? { status: v.status, businessName: v.businessName, registrationNumber: v.registrationNumber, phone: v.phone, website: v.website, reviewNote: v.reviewNote, verifiedUntil: v.verifiedUntil, createdAt: v.createdAt } : null,
+    };
+  }
+
+  @Get('ads/verification')
+  @RequireAuth()
+  @ApiOperation({ summary: 'My Verified business request: its status, and the price per year' })
+  async verification(@CurrentAuth() auth: AuthContext) {
+    const channel = await this.prisma.channel.findUnique({ where: { userId: auth.user.id }, include: { businessVerification: true } });
+    return this.verificationView(channel?.businessVerification ?? null, (await this.billing.settings()).verificationUsdCents);
+  }
+
+  @Post('ads/verification')
+  @RequireAuth()
+  @ApiOperation({ summary: 'Ask for the Verified business badge: our team checks the details, then you pay for a year' })
+  async requestVerification(@CurrentAuth() auth: AuthContext, @Body() body: VerificationDto) {
+    await this.limits.consume(`verify:${auth.user.id}`, 5, 86_400, 'You sent several requests today. Try again tomorrow.');
+    const channel = await this.prisma.channel.findUnique({ where: { userId: auth.user.id }, include: { businessVerification: true } });
+    if (!channel) throw new BadRequestException('Create your Space first: the badge shows next to its name.');
+    const current = channel.businessVerification;
+    if (current && current.status !== 'REJECTED') throw new BadRequestException(current.status === 'PENDING' ? 'Your request is being checked.' : 'Your business is already checked.');
+    const data = { businessName: body.businessName.trim(), registrationNumber: body.registrationNumber.trim(), phone: body.phone.trim(), website: body.website?.trim() || null, status: 'PENDING', reviewNote: null, reviewedAt: null };
+    const v = await this.prisma.businessVerification.upsert({ where: { channelId: channel.id }, create: { channelId: channel.id, ...data }, update: data });
+    return this.verificationView(v, (await this.billing.settings()).verificationUsdCents);
+  }
+
+  @Post('ads/verification/pay')
+  @RequireAuth()
+  @ApiOperation({ summary: 'Pay for a year of the Verified business badge (after our team approved the request)' })
+  async payVerification(@CurrentAuth() auth: AuthContext, @Body() body: PayDto) {
+    await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
+    const channel = await this.prisma.channel.findUnique({ where: { userId: auth.user.id }, include: { businessVerification: true } });
+    const v = channel?.businessVerification;
+    if (!v || (v.status !== 'APPROVED' && v.status !== 'ACTIVE')) throw new BadRequestException('Our team has to check your business first.');
+    const usdCents = (await this.billing.settings()).verificationUsdCents;
+    const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'VERIFICATION', method: body.method, phone: body.phone, months: 12, usdCents, description: 'Free Me Verified business badge, 1 year', returnPath: '/studio/ads' }));
+    return { payment: paymentView(p) };
   }
 
   private async own(auth: AuthContext, id: string) {
@@ -124,7 +176,7 @@ export class AdsController {
     await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
     const c = await this.own(auth, id);
     if (c.status !== 'DRAFT') throw new BadRequestException('This campaign is already paid.');
-    const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'AD_CAMPAIGN', method: body.method, phone: body.phone, campaignId: c.id, usdCents: c.days * c.dailyRateCents, description: `Free Me ad, ${c.days} ${c.days === 1 ? 'day' : 'days'}`, returnPath: '/studio/ads' }));
+    const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'AD_CAMPAIGN', method: body.method, phone: body.phone, campaignId: c.id, usdCents: Number(c.budgetAmountCents), description: 'Free Me ad funds', returnPath: '/studio/ads' }));
     return { payment: paymentView(p) };
   }
 

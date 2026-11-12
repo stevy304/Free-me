@@ -1,5 +1,12 @@
 # How Free Me makes money, and how creators are paid
 
+> **Internal.** How revenue is divided (creators' shares, what pays for what) is for the team, not for users: the app
+> shows people what they get (quality, uploads, live streaming, badges), never where the money goes. Keep this
+> repository private if these numbers should stay confidential.
+
+**How the app presents plans.** Two groups of three on `/plans`: *For viewers* (Free, Plus, Family & TV) and *For
+creators* (Starter, Creator pass, Pro). Businesses advertise and get verified in Ad Studio.
+
 ## Plans
 
 Watching is free. Plans are **paid ahead** (mobile money cannot renew by itself), for 1, 3, 6 or 12 months (the Creator pass for 1 or 2 years), with MTN MoMo, Airtel Money, a card (Flutterwave) or by hand. Paying early adds the time to the end, and a reminder email goes out three days before a plan ends. Prices are in US cents, with a price per country where incomes differ. The defaults below are set in ENVIRONMENT.md and can be changed by administrators in Administration → Money.
@@ -11,7 +18,8 @@ Watching is free. Plans are **paid ahead** (mobile money cannot renew by itself)
 | **Plus** | RWF 2,500 a month | $3 | Viewers | No ads, every quality; half goes to the creators they watch |
 | **Family & TV** | RWF 9,000 a month | $12 | Homes | Plus for up to 4 people (the holder adds members by email) |
 | **Pro** (Premium) | RWF 6,000 a month | $10 | Creators | Gold Premium badge, ad earnings, Live, unlimited uploads, Plus included |
-| **Business** | on request | on request | Bars, hotels, buses, churches, schools, NGOs | Public screening, private hosting, Verified business badge (contract; not sold in the app) |
+| **Ad funds** | from $7 | from $7 | Businesses | Spent at $1 per 1,000 views as the ad is shown (`AD_MIN_BUDGET_USD_CENTS`, `AD_CPM_USD_CENTS`); any Space can advertise, every ad is reviewed |
+| **Verified business** | $10 a year | $10 a year | Businesses | Teal Verified badge; no other Space can use the name. Checked by an administrator first, paid after approval (`VERIFICATION_PRICE_USD_CENTS`) |
 
 **Round prices.** Mobile money charges in francs are rounded to the nearest RWF 100 (RWF 2,494 becomes 2,500), the same on the page and in the charge.
 
@@ -93,3 +101,19 @@ Creators save their own-name Rwanda MTN wallet in Creator Hub. An administrator 
 `FLW_PAYOUT_TEST_KEY` enables the isolated Flutterwave v3 transfer sandbox. It accepts TEST keys only. Test results never settle creator requests or move ledger balances. Server IP approval and test wallet funding may be required by the provider. The panel keeps the reference on a timeout. Check the provider dashboard before starting another test.
 
 Live automated transfers, additional countries, tips, memberships and brand commissions require separate implementation and commercial arrangements. Market sources and pilot measures are in [the creator pilot analysis](docs/CREATOR_PILOT.md).
+
+## Ad funds
+
+A business adds funds to an ad (at least $7) and chooses how many days to spread the views over (7 by default). The
+ad is shown up to `funds ÷ days` worth of views a day at $1 per 1,000 views; funds not spent in those days keep being
+spent for up to twice as long, and at least 30 days from the start. Advertising no longer needs Premium. For reference,
+YouTube's creators in Rwanda and the region earn roughly $0.30-1.50 per 1,000 views of long videos, and almost nothing
+on Shorts; $1 per 1,000 ad views is in line with that, and Moments carry no ads.
+
+## Verified business
+
+1. In Ad Studio the business sends its registered name, RDB registration or tax number, a phone number and website.
+2. An administrator checks them outside the app (RDB, a call) and approves or rejects with a reason (Administration → Money).
+3. Approved, the business pays for a year; the teal Verified badge turns on. No other Space can then use that name,
+   and the business can only change its name through Free Me.
+4. After a year the badge goes; the approval stays, so renewing needs no new check.

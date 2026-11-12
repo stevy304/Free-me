@@ -107,6 +107,8 @@ To make someone an administrator (everything, including every Premium feature su
 | `AIRTEL_COUNTRY`, `AIRTEL_CURRENCY` | | `RW`, `RWF` | Where the Airtel Money account is |
 | `AIRTEL_RATE_PER_USD` | | `MOMO_RATE_PER_USD` | RWF for one US dollar for Airtel charges |
 | `AD_PRICE_PER_DAY_USD_CENTS` | | `300` ($3) | One day of an ad campaign |
+| `AD_MIN_BUDGET_USD_CENTS` | | `700` ($7) | Smallest funds an ad can start with |
+| `VERIFICATION_PRICE_USD_CENTS` | | `1000` ($10) | Verified business badge, per year, paid after an administrator approved the business |
 | `AD_CPM_USD_CENTS` | | `100` ($1) | Price of 1,000 ad views. A paid day buys `AD_PRICE_PER_DAY_USD_CENTS × 1000 / AD_CPM_USD_CENTS` views at most (3,000 by default); views not delivered in the days bought keep running for as many days again. Administrators can change it in the app |
 | `PAYOUT_MINIMUM_USD_CENTS` | | `1000` ($10) | Smallest withdrawal a creator can ask for |
 | `MOMO_SUBSCRIPTION_KEY`, `MOMO_API_USER`, `MOMO_API_KEY` | for MTN MoMo | off | MTN MoMo **Collections** product: the primary subscription key and the API user and key from momodeveloper.mtn.com (sandbox) or the MTN partner portal (live). Set all three or none |

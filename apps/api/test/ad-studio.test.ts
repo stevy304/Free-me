@@ -12,12 +12,11 @@ beforeAll(async () => { ctx = await makeApp({ redis: false, storageDir: join(dir
 beforeEach(async () => { await resetDb(ctx.prisma); ctx.mail.outbox.length = 0; await ctx.clearLimits(); });
 afterAll(async () => { await ctx.app.close(); rmSync(dir, { recursive: true, force: true }); });
 
-test('an ad video needs Premium, starts unlisted, lives only in Ad Studio and can never be made public', async () => {
+test('any Space can upload an ad video; it starts unlisted, lives only in Ad Studio and can never be made public', async () => {
   const shop = await signIn(ctx.http, ctx.mail, 'shop@example.com');
   await shop.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'shop', name: 'Shop' }).expect(201);
 
-  await shop.agent.post('/api/uploads').set('Origin', WEB).send({ fileName: 'ad.mp4', sizeBytes: 1000, ad: true }).expect(403);
-  await ctx.prisma.user.update({ where: { email: 'shop@example.com' }, data: { premiumUntil: new Date(Date.now() + 86_400_000) } });
+  // Advertising is open to every account with a Space (no Premium needed): the funds pay for the views.
 
   const ad = (await shop.agent.post('/api/uploads').set('Origin', WEB).send({ fileName: 'Summer sale.mp4', sizeBytes: 1000, ad: true }).expect(201)).body;
   const normal = (await shop.agent.post('/api/uploads').set('Origin', WEB).send({ fileName: 'vlog.mp4', sizeBytes: 1000 }).expect(201)).body;
@@ -42,7 +41,7 @@ test('before payments are switched on, an administrator approves an ad without p
   const shopCh = (await shop.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'shop', name: 'Shop' }).expect(201)).body.channel;
   await ctx.prisma.user.update({ where: { email: 'shop@example.com' }, data: { premiumUntil: new Date(Date.now() + 86_400_000) } });
   const ad = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Summer sale', isAd: true, durationSeconds: 15, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date() } });
-  const camp = (await shop.agent.post('/api/ads/campaigns').set('Origin', WEB).send({ businessName: 'Shop', country: 'RW', headline: 'Summer sale', destinationUrl: 'https://shop.example.com', videoId: ad.id, days: 3, targetCountries: [] }).expect(201)).body.campaign;
+  const camp = (await shop.agent.post('/api/ads/campaigns').set('Origin', WEB).send({ businessName: 'Shop', country: 'RW', headline: 'Summer sale', destinationUrl: 'https://shop.example.com', videoId: ad.id, budgetUsdCents: 900, days: 3, targetCountries: [] }).expect(201)).body.campaign;
   expect(camp.status).toBe('DRAFT');
 
   // A creator in the monetisation programme, with a video.

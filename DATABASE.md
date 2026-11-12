@@ -10,6 +10,7 @@ PostgreSQL 16 through Prisma 6. The schema is `prisma/schema.prisma`; every chan
 | `20261106000000_video_pipeline` | Storage keys instead of URLs (`hlsMasterKey`, `thumbnailKey`, rendition `playlistKey`), processing progress, stage and error, media location (public or private prefix), thumbnail choices, size and dimensions, audience flag (`madeForKids`), upload id; feed and channel indexes |
 | `20261108000000_user_interests` | `UserInterest`: the topics a person picked for their For you home |
 | `20261107000000_engagement_and_trust` | Dislike count (private to the creator), comments switch, removal fields on videos; comment reply counts, edits and soft removal; collection kind (`SAVED` or `CUSTOM`, private by default); copyright notice and counter-notice fields, timestamp and decision on reports; video on moderation actions and the `VIDEO_RESTORED` action |
+| `20261129000000_business_verification` | `BusinessVerification` (a business's checked details, status and badge end date) and payment purpose `VERIFICATION` |
 | `20261128000000_plans` | Payment purposes `PLUS` and `FAMILY`; `User.plusUntil`, `familyUntil`, `familyOwnerId` (Family & TV members); `VideoDailyStat.plusWatchSeconds`; subscription pool columns on `AdDaySettlement` |
 | `20261127000000_creator_pass` | `User.creatorPassUntil`, `Channel.uploadCount` (uploads ever started, filled for existing channels), payment purpose `CREATOR_PASS` |
 | `20261126000000_review_hold` | `Video.reviewHoldAt`: hidden until a moderator reviews it, after reports from several established accounts |

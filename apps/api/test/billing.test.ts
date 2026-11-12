@@ -54,7 +54,7 @@ async function creator(email: string, handle: string) {
 
 test('Premium by MTN MoMo: $10 a month charged in RWF, verified badge while it lasts, paid once even if checked twice', async () => {
   const plans = (await request(ctx.http).get('/api/billing/plans').expect(200)).body;
-  expect(plans).toMatchObject({ premium: { usdCents: 1000, months: [1, 3, 6, 12] }, ads: { usdCentsPerDay: 300, maxAdsPerVideo: 2 } });
+  expect(plans).toMatchObject({ premium: { usdCents: 1000, months: [1, 3, 6, 12] }, ads: { usdCentsPer1000Views: 100, minBudgetUsdCents: 700, maxAdsPerVideo: 2 } });
   expect(plans.methods).toEqual([{ name: 'mtn_momo', currency: 'RWF', perUsd: 1450 }, { name: 'flutterwave', currency: 'USD', perUsd: 1 }]);
 
   const a = await creator('maker@example.com', 'maker');
@@ -135,13 +135,14 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   const shopCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'shop' } });
   const adVideo = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Our shop', durationSeconds: 20, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
   const tooLong = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Long', durationSeconds: 300, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
-  const form = { businessName: 'Kigali Shop', country: 'RW', headline: 'Fresh coffee in Kigali', destinationUrl: 'https://shop.example.com', days: 7 };
+  // $21 of funds spread over 7 days: $1 per 1,000 views, so 21,000 views, 3,000 a day.
+  const form = { businessName: 'Kigali Shop', country: 'RW', headline: 'Fresh coffee in Kigali', destinationUrl: 'https://shop.example.com', budgetUsdCents: 2100, days: 7 };
   expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: tooLong.id }).expect(400)).body.message).toBe('An ad must be between 5 and 90 seconds long.');
   await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: short.id }).expect(400); // not theirs
   const camp = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: adVideo.id, targetVideoIds: [short.id] }).expect(201)).body.campaign;
   // $3 a day at $1 per 1,000 views: up to 3,000 views a day, 21,000 in all.
   expect(camp).toMatchObject({ status: 'DRAFT', days: 7, dailyRateCents: 300, totalCents: 2100, cpmCents: 100, viewsBought: 21000, viewsPerDay: 3000, spentCents: 0 });
-  expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.ads).toMatchObject({ usdCentsPerDay: 300, usdCentsPer1000Views: 100, viewsPerDay: 3000 });
+  expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.ads).toMatchObject({ usdCentsPer1000Views: 100, minBudgetUsdCents: 700 });
 
   // Paid by MoMo (21 USD → RWF 30,450, rounded to the nearest 100: 30,500), then waits for review.
   const pay = (await biz.post(`/api/ads/campaigns/${camp.id}/pay`).set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000111' }).expect(201)).body.payment;
@@ -219,15 +220,15 @@ test('ads priced per 1,000 views: a daily view cap, a budget that is never excee
   await new Billing(ctx.prisma as never, ctx.config).grantPremium((await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'pacer@example.com' } })).id, 1);
   const shopCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'pacer' } });
   const adVideo = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Ad', durationSeconds: 15, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
-  const camp = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ businessName: 'Pacer', country: 'RW', headline: 'Paced ad', destinationUrl: 'https://pacer.example.com', days: 2, videoId: adVideo.id }).expect(201)).body.campaign;
+  const camp = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ businessName: 'Pacer', country: 'RW', headline: 'Paced ad', destinationUrl: 'https://pacer.example.com', budgetUsdCents: 700, days: 2, videoId: adVideo.id }).expect(201)).body.campaign;
   // A high price per view keeps the numbers small: $6 buys 6 views, 3 a day.
-  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { cpmRateCents: 100_000 } });
+  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { cpmRateCents: 100_000, budgetAmountCents: 600n } });
   const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
   await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { status: 'PENDING_REVIEW' } }); // as if paid
   await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(200);
   const approved = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: camp.id } });
-  // Views not delivered in the 2 days bought may be delivered for 2 more.
-  expect(approved.deliverUntil!.getTime() - approved.endDate.getTime()).toBe(2 * DAY);
+  // Funds left after the 2 days keep being spent, here until 30 days after the start.
+  expect(approved.deliverUntil!.getTime() - approved.startDate.getTime()).toBe(30 * DAY);
 
   const viewer = request.agent(ctx.http);
   const show = async (v: { id: string }) => (await viewer.post('/api/ads/impressions').set('Origin', WEB).send({ campaignId: camp.id, videoId: v.id }).expect(201)).body.impressionId as string | null;
@@ -382,4 +383,50 @@ test('Creator pass: free uploads, then the pass (paid, given or with Premium); v
   expect((await request(ctx.http).get('/api/channels/passmaker').expect(200)).body.channel).toMatchObject({ isVerified: true, badge: 'premium' });
   await ctx.prisma.channel.update({ where: { handle: 'passmaker' }, data: { verificationSource: 'ADMIN' } });
   expect((await request(ctx.http).get('/api/channels/passmaker').expect(200)).body.channel.badge).toBe('verified');
+});
+
+test('ad funds start at $7; a business is checked, then pays for the Verified badge, which protects its name for a year', async () => {
+  const biz = await creator('bank@example.com', 'bankrw');
+  const ch = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'bankrw' } });
+  const adVideo = await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Ad', durationSeconds: 15, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', isAd: true } });
+  const ad = { businessName: 'Bank RW', country: 'RW', headline: 'Open an account', destinationUrl: 'https://bank.example.com', videoId: adVideo.id };
+  ctx.app.get(BillingService).invalidate();
+  expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...ad, budgetUsdCents: 600 }).expect(400)).body.message).toBe('Add at least $7 of funds.');
+  expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...ad, budgetUsdCents: 700 }).expect(201)).body.campaign).toMatchObject({ totalCents: 700, viewsBought: 7000, days: 7, viewsPerDay: 1000 });
+
+  // Creator earnings do not show how revenue is divided.
+  expect((await biz.get('/api/hub/monetisation').expect(200)).body.programme).not.toHaveProperty('creatorShareBps');
+
+  // Verification: request (free), review, then pay.
+  expect((await biz.get('/api/ads/verification').expect(200)).body).toMatchObject({ priceUsdCents: 1000, request: null });
+  await biz.post('/api/ads/verification/pay').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000444' }).expect(400); // not checked yet
+  const details = { businessName: 'Bank of Rwanda Ltd', registrationNumber: '100123456', phone: '0788000444', website: 'https://bank.example.com' };
+  expect((await biz.post('/api/ads/verification').set('Origin', WEB).send(details).expect(201)).body.request).toMatchObject({ status: 'PENDING', businessName: 'Bank of Rwanda Ltd' });
+  await biz.post('/api/ads/verification').set('Origin', WEB).send(details).expect(400); // already waiting
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  const queue = (await admin.get('/api/admin/billing/verifications').expect(200)).body.requests;
+  expect(queue).toEqual([expect.objectContaining({ businessName: 'Bank of Rwanda Ltd', channel: expect.objectContaining({ handle: 'bankrw', email: 'bank@example.com' }) })]);
+  await admin.post(`/api/admin/billing/verifications/${queue[0].id}`).set('Origin', WEB).send({ approve: false }).expect(400); // a rejection needs a reason
+  await admin.post(`/api/admin/billing/verifications/${queue[0].id}`).set('Origin', WEB).send({ approve: true }).expect(200);
+
+  const pay = (await biz.post('/api/ads/verification/pay').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000444' }).expect(201)).body.payment;
+  expect(pay).toMatchObject({ purpose: 'VERIFICATION', usdCents: 1000, amount: '14500' });
+  [...momo.values()].at(-1)!.status = 'SUCCESSFUL';
+  await biz.get(`/api/billing/payments/${pay.id}`).expect(200);
+  const v = (await biz.get('/api/ads/verification').expect(200)).body.request;
+  expect(v.status).toBe('ACTIVE');
+  expect(new Date(v.verifiedUntil).getTime()).toBeGreaterThan(Date.now() + 359 * 86_400_000);
+  expect((await request(ctx.http).get('/api/channels/bankrw').expect(200)).body.channel).toMatchObject({ isVerified: true, badge: 'verified' });
+
+  // Its name is protected: nobody else can take it, and it can only be changed through Free Me.
+  await ctx.prisma.channel.update({ where: { handle: 'bankrw' }, data: { name: 'Bank of Rwanda Ltd' } });
+  expect((await biz.patch('/api/channels/mine').set('Origin', WEB).send({ name: 'Another Name' }).expect(400)).body.message).toContain('verified under this name');
+  const copycat = (await signIn(ctx.http, ctx.mail, 'copycat@example.com')).agent;
+  expect((await copycat.post('/api/channels').set('Origin', WEB).send({ handle: 'fakebank', name: 'bank of rwanda ltd' }).expect(409)).body.message).toContain('belongs to a verified Space');
+
+  // A year later the badge goes (the check stays valid, so renewing needs no new review).
+  await ctx.prisma.businessVerification.updateMany({ data: { verifiedUntil: new Date(Date.now() - 1000) } });
+  await new Billing(ctx.prisma as never, ctx.config).expirePremium();
+  expect((await ctx.prisma.businessVerification.findFirstOrThrow()).status).toBe('APPROVED');
+  expect((await request(ctx.http).get('/api/channels/bankrw').expect(200)).body.channel).toMatchObject({ isVerified: false, badge: null });
 });

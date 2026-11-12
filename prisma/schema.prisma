@@ -229,6 +229,7 @@ model Channel {
   verificationSource    String?
   /// Uploads ever started (deleting a video does not give a free upload back)
   uploadCount           Int               @default(0)
+  businessVerification  BusinessVerification?
   subscriberCount       Int               @default(0)
   totalViews            BigInt            @default(0)
   createdAt             DateTime          @default(now())
@@ -906,6 +907,7 @@ enum PaymentPurpose {
   CREATOR_PASS
   PLUS
   FAMILY
+  VERIFICATION
 }
 
 model Payment {
@@ -995,4 +997,26 @@ model AppSetting {
   value                 Json
   updatedBy             String?
   updatedAt             DateTime          @updatedAt
+}
+
+/// A business asks for the Verified badge (protects its name): an administrator checks the details, then the business
+/// pays for a year. Status: PENDING (waiting for review), APPROVED (checked; pay to show the badge), ACTIVE (badge on
+/// until verifiedUntil), REJECTED (with the reason).
+model BusinessVerification {
+  id                    String            @id @default(uuid())
+  channelId             String            @unique
+  channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  businessName          String
+  /// Company registration number (RDB in Rwanda) or tax number
+  registrationNumber    String
+  phone                 String
+  website               String?
+  status                String            @default("PENDING")
+  reviewNote            String?
+  reviewedAt            DateTime?
+  verifiedUntil         DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([status])
 }

@@ -72,7 +72,6 @@ export class UploadsController {
     const partSize = this.config.media.driver === 's3' && body.sizeBytes >= 4 * 1024 ** 3
       ? Math.max(this.config.media.partBytes, 64 * 1024 ** 2)
       : this.config.media.partBytes;
-    if (body.ad && !hasPremiumAccess(auth.user)) throw new ForbiddenException('Ad Studio is part of Premium.');
     // Every channel can try Free Me with a few free uploads; after that, uploading needs the Creator pass (or Premium).
     if (!body.ad) {
       // The prices in force: the environment, overridden by what administrators saved (as BillingService reads them).

@@ -15,13 +15,13 @@ interface Me { premium: { active: boolean; until: string | null; admin?: boolean
 
 const PERKS = [
   { icon: 'badge', title: 'Premium badge', text: 'A gold Premium seal on your Space, videos and conversations. (The teal Verified seal is only for Spaces whose identity Free Me checked.)' },
-  { icon: Icon.Wallet, title: 'Earn from your videos', text: 'Eligible creators share 60% of daily ad revenue based on the ads shown on their videos.' },
+  { icon: Icon.Wallet, title: 'Earn from your videos', text: 'Earn from the ads that play on your videos and from the time members spend watching them.' },
   { icon: Icon.Live, title: 'Live Studio', text: 'Stream with OBS or a hardware encoder, and manage your broadcast from Live Studio.' },
   { icon: Icon.Hub, title: 'Premium dashboard', text: 'Your membership, earnings, withdrawals and tools in one place.' },
   { icon: Icon.Upload, title: 'Unlimited uploads and Plus', text: 'No yearly upload limit, every quality at once, and Plus (no ads) included.' },
 ] as const;
 
-const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Premium', AD_CAMPAIGN: 'Ad campaign', CREATOR_PASS: 'Creator pass', PLUS: 'Plus', FAMILY: 'Family & TV' };
+const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Pro', AD_CAMPAIGN: 'Ad funds', CREATOR_PASS: 'Creator pass', PLUS: 'Plus', FAMILY: 'Family & TV', VERIFICATION: 'Verified business' };
 const STATUS: Record<Payment['status'], string> = { PENDING: 'Waiting', SUCCEEDED: 'Paid', FAILED: 'Not paid' };
 
 export function PremiumView({ viewer }: { viewer: Viewer }) {

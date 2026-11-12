@@ -23,7 +23,7 @@ interface Family { holder: { active: boolean; until: string | null; seats: numbe
 type Buyable = 'plus' | 'family';
 
 /** All plans in one place: compare, buy Plus or Family & TV here, and manage the family. */
-export function PlansView({ signedIn, contactEmail }: { signedIn: boolean; contactEmail: string | null }) {
+export function PlansView({ signedIn }: { signedIn: boolean }) {
   const { locale } = useShell();
   const router = useRouter();
   const params = useSearchParams();
@@ -77,48 +77,50 @@ export function PlansView({ signedIn, contactEmail }: { signedIn: boolean; conta
       {error && <p role="alert" className="mt-4 rounded-2xl bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p>}
       {watching?.status === 'PENDING' && watching.method !== 'manual' && <p role="status" className="mt-4 flex items-center gap-2 rounded-2xl bg-surface px-4 py-3 text-[14px]"><Icon.Spinner size={18} className="animate-spin" />Confirming your payment…</p>}
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card title="Free" tag="Everyone">
+      <h2 className="mt-8 font-display text-[22px] font-bold">For viewers</h2>
+      <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Card title="Free" tag="Watch">
           <p className="mt-2"><b className="font-display text-[26px] font-extrabold">{usd(0, locale)}</b></p>
-          <Perks items={['Watch everything, with short ads', 'Up to 720p', `${plans.creatorPass?.freeVideos ?? 3} uploads to try creating`]} />
+          <Perks items={['Watch everything, with short ads', 'Video quality up to 720p', 'Follow, comment and save videos']} />
         </Card>
 
-        <Card title="Plus" tag="For viewers" highlight>
+        <Card title="Plus" tag="Watch without ads" highlight>
           {price(plans.plus, 'a month')}
           {status(!!me?.plans.plus.active, me?.plans.plus.via === 'plus' ? `Active until ${until(me.plans.plus.until)}` : 'Included in your plan')}
-          <Perks items={['No ads', 'Every quality, up to 4K', 'Half of what you pay goes to the creators you watch']} />
+          <Perks items={['No ads', 'Video quality up to 1080p and 4K', 'On your phone, computer and smart TV']} />
           <Choose onClick={() => choose('plus')} label={me?.plans.plus.via === 'plus' ? 'Add more time' : 'Get Plus'} />
         </Card>
 
-        <Card title="Family & TV" tag="For homes">
+        <Card title="Family & TV" tag="For the whole home">
           {plans.family && price(plans.family, 'a month')}
           {status(!!me?.plans.family.active, `Active until ${until(me?.plans.family.until ?? null)}`)}
-          <Perks items={[`Plus for up to ${plans.family?.seats ?? 4} people, you included`, 'Watch on a smart TV’s browser and every phone in the house', 'Add and remove people any time']} />
+          <Perks items={[`Everything in Plus for up to ${plans.family?.seats ?? 4} people`, 'Watch on a smart TV’s browser and every phone at home', 'Add and remove people any time']} />
           <Choose onClick={() => choose('family')} label={me?.plans.family.active ? 'Add more time' : 'Get Family & TV'} />
         </Card>
+      </div>
 
-        <Card title="Pro" tag="For creators" badge>
-          {price(plans.premium, 'a month')}
-          {status(!!me?.premium.active, 'Active')}
-          <Perks items={['Gold Premium badge', 'Earn from ads and members', 'Live Studio', 'Unlimited uploads, every quality at once', 'Plus included']} />
-          <Link href="/premium" className="mt-4 flex h-11 items-center justify-center rounded-2xl border-2 border-brand text-[14px] font-bold text-brand hover:bg-brand-soft">See Pro</Link>
+      <h2 className="mt-10 font-display text-[22px] font-bold">For creators</h2>
+      <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Card title="Starter" tag="Try creating">
+          <p className="mt-2"><b className="font-display text-[26px] font-extrabold">{usd(0, locale)}</b></p>
+          <Perks items={[`${plans.creatorPass?.freeVideos ?? 3} uploads`, `Videos up to ${Math.round((plans.uploadMaxBytes ?? 20 * 1024 ** 3) / 1024 ** 3)} GB each`, '1080p and 4K once your videos take off', 'Creator Hub with your stats']} />
         </Card>
 
-        <Card title="Creator pass" tag="For new creators">
+        <Card title="Creator pass" tag="Keep creating">
           {price(plans.creatorPass, 'a year')}
           {status(!!me?.plans.creatorPass.active, `Active until ${until(me?.plans.creatorPass.until ?? null)}`)}
-          <Perks items={[`Upload up to ${plans.creatorPass?.videosPerYear ?? 50} videos a year`, 'Pays for processing and storing your videos', 'Your videos stay online even if it ends']} />
-          <Link href="/hub/pass" className="mt-4 flex h-11 items-center justify-center rounded-2xl border-2 border-brand text-[14px] font-bold text-brand hover:bg-brand-soft">See the Creator pass</Link>
+          <Perks items={[`${plans.creatorPass?.videosPerYear ?? 50} uploads a year`, `Videos up to ${Math.round((plans.uploadMaxBytes ?? 20 * 1024 ** 3) / 1024 ** 3)} GB each`, '1080p and 4K once your videos take off', 'Your videos stay online even if the pass ends']} />
+          <Link href="/hub/pass" className="mt-4 flex h-11 items-center justify-center rounded-2xl bg-brand text-[14px] font-bold text-on-brand hover:bg-brand-strong">Get the Creator pass</Link>
         </Card>
 
-        <Card title="Business" tag="Venues and organisations">
-          <p className="mt-2"><b className="font-display text-[20px] font-extrabold">On request</b></p>
-          <Perks items={['Show Free Me on screens in bars, hotels, buses, churches and schools', 'Private video hosting for your organisation', 'Verified business badge after an identity check']} />
-          {contactEmail
-            ? <a href={`mailto:${contactEmail}?subject=Free%20Me%20Business`} className="mt-4 flex h-11 items-center justify-center rounded-2xl border-2 border-line text-[14px] font-bold hover:bg-surface">Talk to us</a>
-            : <p className="mt-4 text-[13px] text-muted">Contact the Free Me team.</p>}
+        <Card title="Pro" tag="Grow and earn" badge highlight>
+          {price(plans.premium, 'a month')}
+          {status(!!me?.premium.active, 'Active')}
+          <Perks items={['Unlimited uploads', '1080p and 4K from the first minute', 'Live streaming', 'Earn from your videos', 'Gold Premium badge', 'No ads when you watch']} />
+          <Link href="/premium" className="mt-4 flex h-11 items-center justify-center rounded-2xl bg-brand text-[14px] font-bold text-on-brand hover:bg-brand-strong">Get Pro</Link>
         </Card>
       </div>
+      <p className="mt-6 text-[14px] text-muted">A business? Advertise and protect your name with a Verified badge in <Link href="/studio/ads" className="font-semibold text-brand">Ad Studio</Link>.</p>
 
       {buying && choice && (
         <section aria-labelledby="checkout" className="mt-8 rounded-3xl border border-line bg-elevated p-5 sm:p-6">

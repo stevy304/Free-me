@@ -2,7 +2,6 @@ import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCod
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
 import { payoutView } from './payouts';
-import { PROPOSED_SPLIT } from '@free-me/shared';
 import { PrismaService } from '../database/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { CurrentAuth, RequireAuth } from '../common/auth.guard';
@@ -16,6 +15,7 @@ class ReviewDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) note?: string;
   @ApiPropertyOptional({ description: 'Approve an unpaid ad without payment (a test, a partner or Free Me itself). It runs at $0 a day, so it adds nothing to the revenue shared with creators.' }) @IsOptional() @IsBoolean() free?: boolean;
 }
+class VerificationReviewDto { @IsBoolean() approve!: boolean; @IsOptional() @IsString() @MaxLength(1000) note?: string }
 class GrantDto { @ApiProperty() @IsEmail() email!: string; @ApiProperty({ enum: PREMIUM_MONTHS }) @IsInt() @Min(1) @Max(12) months!: number }
 
 class VerificationDto {
@@ -56,7 +56,7 @@ export class MonetisationController {
       adsShownLast28Days: impressions,
       earnings: ledger.map((l) => ({ id: l.id, kind: l.sourceType, amountCents: Number(l.creatorShareCents), day: l.referenceId, description: l.description, at: l.createdAt })),
       payouts: payouts.map(payoutView),
-      programme: { creatorShareBps: PROPOSED_SPLIT.creatorPoolBps, adDayUsdCents: b.adDayUsdCents, maxAdsPerVideo: MAX_ADS_PER_VIDEO, payoutMinimumUsdCents: b.payoutMinUsdCents, premiumUsdCents: premiumPriceFor(b, (await this.prisma.profile.findUnique({ where: { userId: u.id }, select: { country: true } }))?.country) },
+      programme: { maxAdsPerVideo: MAX_ADS_PER_VIDEO, payoutMinimumUsdCents: b.payoutMinUsdCents, premiumUsdCents: premiumPriceFor(b, (await this.prisma.profile.findUnique({ where: { userId: u.id }, select: { country: true } }))?.country) },
     };
   }
 
@@ -131,7 +131,7 @@ export class AdminBillingController {
   async campaigns(@Query('status') status = 'PENDING_REVIEW') {
     const rows = await this.prisma.campaign.findMany({ where: status === 'all' ? {} : { status: status as never }, orderBy: { createdAt: 'desc' }, take: 100, include: { advertiser: { include: { user: { select: { email: true } } } } } });
     const videos = new Map((await this.prisma.video.findMany({ where: { id: { in: rows.map((r) => r.videoId!).filter(Boolean) } }, select: { id: true, title: true, durationSeconds: true } })).map((v) => [v.id, v]));
-    return { campaigns: rows.map((c) => ({ id: c.id, status: c.status, businessName: c.advertiser.businessName, email: c.advertiser.user.email, country: c.advertiser.country, headline: c.headline, destinationUrl: c.destinationUrl, days: c.days, totalCents: c.days * c.dailyRateCents, targetCountries: c.targetCountries, video: c.videoId ? videos.get(c.videoId) ?? null : null, impressions: Number(c.impressionsCount), clicks: Number(c.clicksCount), reviewNote: c.reviewNote, createdAt: c.createdAt })) };
+    return { campaigns: rows.map((c) => ({ id: c.id, status: c.status, businessName: c.advertiser.businessName, email: c.advertiser.user.email, country: c.advertiser.country, headline: c.headline, destinationUrl: c.destinationUrl, days: c.days, totalCents: Number(c.budgetAmountCents), targetCountries: c.targetCountries, video: c.videoId ? videos.get(c.videoId) ?? null : null, impressions: Number(c.impressionsCount), clicks: Number(c.clicksCount), reviewNote: c.reviewNote, createdAt: c.createdAt })) };
   }
 
   @Post('campaigns/:id/review')
@@ -147,7 +147,8 @@ export class AdminBillingController {
     await this.prisma.campaign.update({ where: { id }, data: body.approve
       ? { status: 'ACTIVE', reviewedAt: now, startDate: now, endDate: new Date(now.getTime() + c.days * 86_400_000),
         // Priced per 1,000 views: views not delivered in the days bought may still be delivered for as many days again.
-        deliverUntil: c.cpmRateCents ? new Date(now.getTime() + 2 * c.days * 86_400_000) : null, reviewNote: body.note?.trim() || (free ? 'Approved without payment by Free Me' : null),
+        // Funds left after the days chosen keep being spent for a while: twice as long, and at least 30 days.
+        deliverUntil: c.cpmRateCents ? new Date(now.getTime() + Math.max(2 * c.days, 30) * 86_400_000) : null, reviewNote: body.note?.trim() || (free ? 'Approved without payment by Free Me' : null),
         // Unpaid: $0 a day, so no revenue (and nothing for creators) is counted for money that never came in.
         ...(free && c.status === 'DRAFT' ? { dailyRateCents: 0 } : {}) }
       : { status: 'REJECTED', reviewedAt: now, reviewNote: body.note!.trim() } });
@@ -184,6 +185,27 @@ export class AdminBillingController {
     await this.billing.grantPlan(u.id, field, body.months);
     await this.audit.record({ userId: auth.user.id, action: plan === 'plus' ? 'PLUS_GRANTED' : 'FAMILY_GRANTED', entityType: 'User', entityId: u.id, req, details: { months: body.months } });
     return { until: (await this.prisma.user.findUniqueOrThrow({ where: { id: u.id } }))[field] };
+  }
+
+  @Get('verifications')
+  @ApiOperation({ summary: 'Verified business requests (default: waiting for review)' })
+  async verifications(@Query('status') status = 'PENDING') {
+    const rows = await this.prisma.businessVerification.findMany({ where: status === 'all' ? {} : { status }, orderBy: { createdAt: 'asc' }, take: 100,
+      include: { channel: { select: { handle: true, name: true, user: { select: { email: true } } } } } });
+    return { requests: rows.map((v) => ({ id: v.id, status: v.status, businessName: v.businessName, registrationNumber: v.registrationNumber, phone: v.phone, website: v.website,
+      reviewNote: v.reviewNote, verifiedUntil: v.verifiedUntil, createdAt: v.createdAt, channel: { handle: v.channel.handle, name: v.channel.name, email: v.channel.user.email } })) };
+  }
+
+  @Post('verifications/:id')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Approve (the business can then pay for the badge) or reject a Verified business request, after checking it outside the app' })
+  async reviewVerification(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: VerificationReviewDto, @Req() req: AppRequest) {
+    const v = await this.prisma.businessVerification.findUnique({ where: { id } });
+    if (!v || v.status !== 'PENDING') throw new BadRequestException('This request is not waiting for review.');
+    if (!body.approve && !body.note?.trim()) throw new BadRequestException('Say why it is rejected; the business will see it.');
+    await this.prisma.businessVerification.update({ where: { id }, data: { status: body.approve ? 'APPROVED' : 'REJECTED', reviewNote: body.note?.trim() || null, reviewedAt: new Date() } });
+    await this.audit.record({ userId: auth.user.id, action: body.approve ? 'BUSINESS_APPROVED' : 'BUSINESS_REJECTED', entityType: 'BusinessVerification', entityId: id, req, details: { note: body.note ?? null } });
+    return { ok: true };
   }
 
   @Post('creator-pass')

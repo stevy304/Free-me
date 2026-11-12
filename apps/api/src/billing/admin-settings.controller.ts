@@ -48,7 +48,7 @@ export class AdminPaymentSettingsController {
     const source = (k: 'momo' | 'flutterwave') => (stored[k] !== undefined ? 'app' : env[k] ? 'environment' : 'none');
     const m = stored.momo ?? null;
     return {
-      prices: { plusUsdCents: eff.plusUsdCents, plusByCountry: eff.plusByCountry, familyUsdCents: eff.familyUsdCents, familyByCountry: eff.familyByCountry, creatorPassUsdCents: eff.creatorPassUsdCents, creatorFreeVideos: eff.creatorFreeVideos, premiumUsdCents: eff.premiumUsdCents, premiumByCountry: eff.premiumByCountry, adDayUsdCents: eff.adDayUsdCents, adCpmUsdCents: eff.adCpmUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
+      prices: { plusUsdCents: eff.plusUsdCents, plusByCountry: eff.plusByCountry, familyUsdCents: eff.familyUsdCents, familyByCountry: eff.familyByCountry, creatorPassUsdCents: eff.creatorPassUsdCents, creatorFreeVideos: eff.creatorFreeVideos, premiumUsdCents: eff.premiumUsdCents, premiumByCountry: eff.premiumByCountry, adDayUsdCents: eff.adDayUsdCents, adCpmUsdCents: eff.adCpmUsdCents, adMinBudgetUsdCents: eff.adMinBudgetUsdCents, verificationUsdCents: eff.verificationUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
       momo: {
         source: source('momo'), active: !!eff.momo,
         enabled: m ? m.enabled : !!env.momo, sandbox: (m?.baseUrl ?? env.momo?.baseUrl ?? SANDBOX).includes('sandbox'),
@@ -93,6 +93,8 @@ export class AdminPaymentSettingsController {
       }
       next.adDayUsdCents = cents(prices.adDayUsdCents, 'Ad price per day') ?? next.adDayUsdCents;
       next.adCpmUsdCents = cents(prices.adCpmUsdCents, 'Price per 1,000 ad views') ?? next.adCpmUsdCents;
+      next.adMinBudgetUsdCents = cents(prices.adMinBudgetUsdCents, 'Smallest ad funds') ?? next.adMinBudgetUsdCents;
+      next.verificationUsdCents = cents(prices.verificationUsdCents, 'Verified business badge') ?? next.verificationUsdCents;
       next.payoutMinUsdCents = cents(prices.payoutMinUsdCents, 'Smallest withdrawal') ?? next.payoutMinUsdCents;
     }
     const m = obj(body.momo);

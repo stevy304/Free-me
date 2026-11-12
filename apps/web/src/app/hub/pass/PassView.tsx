@@ -55,7 +55,7 @@ export function PassView() {
       <h1 className="mt-2 font-display text-[30px] font-extrabold">Creator pass</h1>
       <p className="mt-1 text-[16px] text-muted">
         <b className="text-ink">{usd(status.usdCents, locale)}</b> a year to keep uploading after your {status.freeVideos} free {status.freeVideos === 1 ? 'video' : 'videos'}.
-        It pays for turning your uploads into every quality and keeping them stored.
+
       </p>
 
       <ul className="mt-4 space-y-2 text-[15px]">
