@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import request from 'supertest';
 import { makeApp, resetDb, signIn, WEB } from './helpers';
 import { Billing } from '../src/billing/billing';
+import { BillingService } from '../src/billing/billing.controller';
 
 // Stand-ins for MTN MoMo (Collections) and Flutterwave, speaking their HTTP APIs.
 let provider: Server;
@@ -318,4 +319,21 @@ test('payment settings in the app: manual payments confirmed by an administrator
   // Leaving secrets empty keeps them.
   await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ momo: { enabled: true, sandbox: false, baseUrl: base, currency: 'RWF', perUsd: 1500 } }).expect(200);
   expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.methods.find((m: any) => m.name === 'mtn_momo')).toMatchObject({ currency: 'RWF', perUsd: 1500 });
+});
+
+test('Premium priced per country: the viewer\'s profile country sets the price shown and charged; administrators can change it', async () => {
+  const rw = await creator('price-rw@example.com', 'pricerw');
+  await ctx.prisma.profile.update({ where: { userId: (await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'price-rw@example.com' } })).id }, data: { country: 'RW' } });
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  ctx.app.get(BillingService).invalidate(); // prices saved by an earlier test are cached for 15 s
+  // No country prices yet: everyone pays the standard price.
+  expect((await rw.get('/api/billing/plans').expect(200)).body.premium).toMatchObject({ usdCents: 1000, country: null });
+  await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ prices: { premiumByCountry: 'RW=bad' } }).expect(400);
+  await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ prices: { premiumByCountry: 'rw=300, KE=500' } }).expect(200);
+  expect((await admin.get('/api/admin/billing/settings').expect(200)).body.prices.premiumByCountry).toEqual({ RW: 300, KE: 500 });
+  ctx.app.get(BillingService).invalidate();
+  expect((await rw.get('/api/billing/plans').expect(200)).body.premium).toMatchObject({ usdCents: 300, standardUsdCents: 1000, country: 'RW' });
+  expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.premium.usdCents).toBe(1000); // visitors
+  const pay = (await rw.post('/api/billing/premium').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000222', months: 3 }).expect(201)).body.payment;
+  expect(pay).toMatchObject({ usdCents: 900, amount: String(9 * 1450) });
 });

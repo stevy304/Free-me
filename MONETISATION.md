@@ -37,6 +37,8 @@ When campaigns deliver all their views, the creator pool is `campaigns running �
 | 500 | $900 | $27,000 | $270 | $1,350 |
 | 2,000 | $3,600 | $108,000 | $1,080 | $5,400 |
 
+**Prices per country.** $10 a month is a lot in many countries. `PREMIUM_PRICE_BY_COUNTRY` (or Administration → Money → Prices) sets a lower price where the viewer's profile country is listed, e.g. `RW=300` for $3 in Rwanda. A profile country can be changed, so keep regional prices modest. Paying by MoMo in RWF needs a Rwandan number, which limits misuse.
+
 Premium is the steadier income: 1,000 members bring $10,000 a month. That pays for servers and video delivery long before ads reach volume. It also makes monetisation self-selecting: a creator who earns more than $10 a month from ads gains from joining.
 
 **Are $3 a day and $1 per 1,000 views right?** Treat both as pilot hypotheses. Measure valid impressions and advertiser outcomes before changing them. A paid day buys *up to* its views (3,000 by default); it does not guarantee them unless the campaign terms explicitly say so. As the audience grows, raise the price per 1,000 views towards market rates: delivery costs money for every view, and a flat daily price with unlimited views would sell ads for less than they cost to show.

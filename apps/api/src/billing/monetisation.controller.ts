@@ -8,7 +8,7 @@ import { AuditService } from '../common/audit.service';
 import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import type { AppRequest, AuthContext } from '../common/request';
 import { BillingService, paymentView, premiumView } from './billing.controller';
-import { EARNINGS_CURRENCY, hasPremiumAccess, isPremium, PREMIUM_MONTHS, utcDay } from './billing';
+import { EARNINGS_CURRENCY, hasPremiumAccess, isPremium, PREMIUM_MONTHS, premiumPriceFor, utcDay } from './billing';
 import { MAX_ADS_PER_VIDEO } from './ads.controller';
 
 class ReviewDto {
@@ -56,7 +56,7 @@ export class MonetisationController {
       adsShownLast28Days: impressions,
       earnings: ledger.map((l) => ({ id: l.id, kind: l.sourceType, amountCents: Number(l.creatorShareCents), day: l.referenceId, description: l.description, at: l.createdAt })),
       payouts: payouts.map(payoutView),
-      programme: { creatorShareBps: PROPOSED_SPLIT.creatorPoolBps, adDayUsdCents: b.adDayUsdCents, maxAdsPerVideo: MAX_ADS_PER_VIDEO, payoutMinimumUsdCents: b.payoutMinUsdCents, premiumUsdCents: b.premiumUsdCents },
+      programme: { creatorShareBps: PROPOSED_SPLIT.creatorPoolBps, adDayUsdCents: b.adDayUsdCents, maxAdsPerVideo: MAX_ADS_PER_VIDEO, payoutMinimumUsdCents: b.payoutMinUsdCents, premiumUsdCents: premiumPriceFor(b, (await this.prisma.profile.findUnique({ where: { userId: u.id }, select: { country: true } }))?.country) },
     };
   }
 

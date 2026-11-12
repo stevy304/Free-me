@@ -8,6 +8,7 @@ import type { AppRequest, AuthContext } from '../common/request';
 import { BillingService, paymentView } from './billing.controller';
 import { createMomoSandboxUser, ProviderError, testFlutterwave, testMomo } from './providers';
 import { effective, loadStored, mask, saveStored, type ManualAccount, type StoredBilling } from './settings';
+import { parseCountryPrices } from '../config/config';
 
 const SANDBOX = 'https://sandbox.momodeveloper.mtn.com';
 class SandboxDto { @ApiProperty({ description: 'Primary key of your Collections subscription (momodeveloper.mtn.com → Profile)' }) @IsString() @MaxLength(100) subscriptionKey!: string }
@@ -47,7 +48,7 @@ export class AdminPaymentSettingsController {
     const source = (k: 'momo' | 'flutterwave') => (stored[k] !== undefined ? 'app' : env[k] ? 'environment' : 'none');
     const m = stored.momo ?? null;
     return {
-      prices: { premiumUsdCents: eff.premiumUsdCents, adDayUsdCents: eff.adDayUsdCents, adCpmUsdCents: eff.adCpmUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
+      prices: { premiumUsdCents: eff.premiumUsdCents, premiumByCountry: eff.premiumByCountry, adDayUsdCents: eff.adDayUsdCents, adCpmUsdCents: eff.adCpmUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
       momo: {
         source: source('momo'), active: !!eff.momo,
         enabled: m ? m.enabled : !!env.momo, sandbox: (m?.baseUrl ?? env.momo?.baseUrl ?? SANDBOX).includes('sandbox'),
@@ -76,6 +77,11 @@ export class AdminPaymentSettingsController {
     const prices = obj(body.prices);
     if (prices) {
       next.premiumUsdCents = cents(prices.premiumUsdCents, 'Premium price') ?? next.premiumUsdCents;
+      if (prices.premiumByCountry !== undefined) {
+        const byCountry = typeof prices.premiumByCountry === 'string' ? parseCountryPrices(prices.premiumByCountry) : null;
+        if (byCountry === null || Object.values(byCountry).some((v) => v > 10_000_000)) throw new BadRequestException('Premium by country: write it like RW=300, KE=500 (country code = US cents a month).');
+        next.premiumByCountry = byCountry;
+      }
       next.adDayUsdCents = cents(prices.adDayUsdCents, 'Ad price per day') ?? next.adDayUsdCents;
       next.adCpmUsdCents = cents(prices.adCpmUsdCents, 'Price per 1,000 ad views') ?? next.adCpmUsdCents;
       next.payoutMinUsdCents = cents(prices.payoutMinUsdCents, 'Smallest withdrawal') ?? next.payoutMinUsdCents;

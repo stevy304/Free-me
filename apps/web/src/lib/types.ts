@@ -15,7 +15,7 @@ export interface Viewer {
 
 export interface PayAccount { label: string; number: string; name: string }
 export interface PayMethod { name: 'mtn_momo' | 'flutterwave' | 'manual'; currency: string; perUsd: number; accounts?: PayAccount[]; instructions?: string | null }
-export interface Plans { premium: { usdCents: number; months: number[] }; ads: { usdCentsPerDay: number; usdCentsPer1000Views?: number; viewsPerDay?: number; maxAdsPerVideo: number }; payoutMinimumUsdCents: number; methods: PayMethod[] }
+export interface Plans { premium: { usdCents: number; months: number[]; standardUsdCents?: number; country?: string | null }; ads: { usdCentsPerDay: number; usdCentsPer1000Views?: number; viewsPerDay?: number; maxAdsPerVideo: number }; payoutMinimumUsdCents: number; methods: PayMethod[] }
 export interface Payment {
   id: string; purpose: 'PREMIUM' | 'AD_CAMPAIGN'; method: PayMethod['name']; status: 'PENDING' | 'SUCCEEDED' | 'FAILED'; amount: string; currency: string; usdCents: number;
   months: number | null; campaignId: string | null; checkoutUrl: string | null; failureReason: string | null; createdAt: string; paidAt: string | null;

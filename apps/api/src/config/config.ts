@@ -18,6 +18,8 @@ export interface SafetyConfig {
 /** Prices and payment providers (see ENVIRONMENT.md → Payments). Money is in US cents unless named otherwise. */
 export interface BillingConfig {
   premiumUsdCents: number;
+  /** Premium per month in some countries (ISO 3166-1 alpha-2 → US cents), e.g. lower where incomes are lower. */
+  premiumByCountry: Record<string, number>;
   adDayUsdCents: number;
   /** What 1,000 ad views cost; a paid day buys `adDayUsdCents * 1000 / adCpmUsdCents` views at most. */
   adCpmUsdCents: number;
@@ -136,6 +138,17 @@ export interface MediaConfig {
 
 export class ConfigError extends Error {}
 
+/** "RW=300, KE=500" → { RW: 300, KE: 500 }; null when malformed. Empty → {}. */
+export function parseCountryPrices(raw: string): Record<string, number> | null {
+  const out: Record<string, number> = {};
+  for (const part of raw.split(',').map((p) => p.trim()).filter(Boolean)) {
+    const m = /^([A-Za-z]{2})\s*=\s*(\d{1,7})$/.exec(part);
+    if (!m || Number(m[2]) < 1) return null;
+    out[m[1].toUpperCase()] = Number(m[2]);
+  }
+  return out;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const problems: string[] = [];
   const nodeEnv = (env.NODE_ENV === 'production' || env.NODE_ENV === 'test' ? env.NODE_ENV : 'development') as AppConfig['nodeEnv'];
@@ -227,7 +240,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (!Number.isSafeInteger(payoutFee) || payoutFee < 0 || payoutFee > 1_000_000) problems.push('PAYOUT_FEE_RWF must be a whole number from 0 to 1000000.');
   const payoutTestKey = env.FLW_PAYOUT_TEST_KEY?.trim() || null;
   if (payoutTestKey && !payoutTestKey.startsWith('FLWSECK_TEST-')) problems.push('FLW_PAYOUT_TEST_KEY must be a Flutterwave TEST key.');
+  const premiumByCountry = parseCountryPrices(env.PREMIUM_PRICE_BY_COUNTRY ?? '');
+  if (premiumByCountry === null) problems.push('PREMIUM_PRICE_BY_COUNTRY must look like RW=300,KE=500 (country code = US cents a month).');
   const billing: BillingConfig = {
+    premiumByCountry: premiumByCountry ?? {},
     premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), adCpmUsdCents: cents('AD_CPM_USD_CENTS', 100), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
     payouts: payoutRate > 0 ? { rwfPerUsd: payoutRate, feeRwf: payoutFee } : null,
     payoutSandbox: payoutTestKey ? { secretKey: payoutTestKey } : null,

@@ -90,6 +90,7 @@ To make someone an administrator (everything, including every Premium feature su
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `PREMIUM_PRICE_USD_CENTS` | | `1000` ($10) | Premium, per month |
+| `PREMIUM_PRICE_BY_COUNTRY` | | none | Premium per month in some countries, in US cents: `RW=300,KE=500`. People whose profile country is listed pay that price; everyone else pays `PREMIUM_PRICE_USD_CENTS`. Administrators can change it in the app |
 | `AD_PRICE_PER_DAY_USD_CENTS` | | `300` ($3) | One day of an ad campaign |
 | `AD_CPM_USD_CENTS` | | `100` ($1) | Price of 1,000 ad views. A paid day buys `AD_PRICE_PER_DAY_USD_CENTS × 1000 / AD_CPM_USD_CENTS` views at most (3,000 by default); views not delivered in the days bought keep running for as many days again. Administrators can change it in the app |
 | `PAYOUT_MINIMUM_USD_CENTS` | | `1000` ($10) | Smallest withdrawal a creator can ask for |

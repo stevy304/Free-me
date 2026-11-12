@@ -103,7 +103,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
             ) : (
               <>
                 <h1 className="mt-1 font-display text-[30px] font-extrabold leading-tight sm:text-[40px]">Premium for creators</h1>
-                <p className="mt-2 text-[16px] text-[#c9d6d4]"><b className="text-[22px] text-white">{usd(plans.premium.usdCents, locale)}</b> per month.</p>
+                <p className="mt-2 text-[16px] text-[#c9d6d4]"><b className="text-[22px] text-white">{usd(plans.premium.usdCents, locale)}</b> per month{plans.premium.country ? <> · your price in {(() => { try { return new Intl.DisplayNames([locale], { type: 'region' }).of(plans.premium.country!) ?? plans.premium.country; } catch { return plans.premium.country; } })()}</> : null}.</p>
               </>
             )}
           </div>

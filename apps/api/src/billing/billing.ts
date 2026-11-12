@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type Campaign, type Payment, type PrismaClient, type User } from '@prisma/client';
 import { PROPOSED_SPLIT, allocatePool, splitRevenue } from '@free-me/shared';
-import type { AppConfig } from '../config/config';
+import type { AppConfig, BillingConfig } from '../config/config';
 import { createProviders, currencyDigits, ProviderError, type PaymentProvider, type ProviderName } from './providers';
 import { type MailService, noticeMail } from '../mail/mail.service';
 
@@ -45,6 +45,10 @@ export function adViewLimits(c: Pick<Campaign, 'cpmRateCents' | 'budgetAmountCen
 export const cpmRevenue = (views: bigint, cpmRateCents: number) => (views * BigInt(cpmRateCents)) / 1000n;
 /** Redis counter of a campaign's ad views on one UTC day. */
 export const adDayKey = (campaignId: string, t = new Date()) => `ads:day:${campaignId}:${t.toISOString().slice(0, 10)}`;
+
+/** Premium per month for someone in `country` (their profile's country): the country's own price, else the standard one. */
+export const premiumPriceFor = (b: Pick<BillingConfig, 'premiumUsdCents' | 'premiumByCountry'>, country: string | null | undefined) =>
+  (country && b.premiumByCountry?.[country.toUpperCase()]) || b.premiumUsdCents;
 
 /** Manual payments wait this long for the payer's proof and an administrator's check. */
 const MANUAL_WAIT = 7 * DAY;

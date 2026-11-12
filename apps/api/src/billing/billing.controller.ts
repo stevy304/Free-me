@@ -9,7 +9,7 @@ import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import { Webhook } from '../common/origin.guard';
 import { RateLimitService } from '../common/rate-limit.service';
 import type { AuthContext } from '../common/request';
-import { Billing, BillingError, isPremium, PREMIUM_MONTHS } from './billing';
+import { Billing, BillingError, isPremium, PREMIUM_MONTHS, premiumPriceFor } from './billing';
 import type { ProviderName } from './providers';
 
 @Injectable()
@@ -44,12 +44,19 @@ class PremiumDto extends PayDto { @ApiProperty({ enum: PREMIUM_MONTHS }) @IsInt(
 export class BillingController {
   constructor(private readonly prisma: PrismaService, private readonly billing: BillingService, private readonly limits: RateLimitService) {}
 
+  /** The viewer's country (from their profile), which sets their Premium price. */
+  private async country(auth: AuthContext | null) {
+    return auth ? (await this.prisma.profile.findUnique({ where: { userId: auth.user.id }, select: { country: true } }))?.country ?? null : null;
+  }
+
   @Get('plans')
-  @ApiOperation({ summary: 'Prices and the payment methods this server accepts' })
-  async plans() {
+  @ApiOperation({ summary: 'Prices (Premium in the signed-in viewer\'s country) and the payment methods this server accepts' })
+  async plans(@CurrentAuth() auth: AuthContext | null) {
     const b = await this.billing.settings();
+    const country = await this.country(auth);
+    const usdCents = premiumPriceFor(b, country);
     return {
-      premium: { usdCents: b.premiumUsdCents, months: PREMIUM_MONTHS },
+      premium: { usdCents, months: PREMIUM_MONTHS, standardUsdCents: b.premiumUsdCents, country: usdCents !== b.premiumUsdCents ? country : null },
       // A paid day buys up to viewsPerDay ad views (priced per 1,000 views); views not delivered run on afterwards.
       ads: { usdCentsPerDay: b.adDayUsdCents, usdCentsPer1000Views: b.adCpmUsdCents, viewsPerDay: Math.floor((b.adDayUsdCents * 1000) / b.adCpmUsdCents), maxAdsPerVideo: 2 },
       payoutMinimumUsdCents: b.payoutMinUsdCents,
@@ -76,7 +83,7 @@ export class BillingController {
   @ApiOperation({ summary: 'Pay for Premium (MoMo prompt on the phone, or a card checkout link)' })
   async premium(@CurrentAuth() auth: AuthContext, @Body() body: PremiumDto) {
     await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
-    const usdCents = (await this.billing.settings()).premiumUsdCents * body.months;
+    const usdCents = premiumPriceFor(await this.billing.settings(), await this.country(auth)) * body.months;
     const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'PREMIUM', method: body.method, phone: body.phone, months: body.months, usdCents, description: `Free Me Premium, ${body.months} ${body.months === 1 ? 'month' : 'months'}`, returnPath: '/premium' }));
     return { payment: paymentView(p) };
   }
