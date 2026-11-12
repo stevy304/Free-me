@@ -76,16 +76,6 @@ export function Health({ rttMs, reconnecting }: { rttMs: number | null; reconnec
   );
 }
 
-/** One line of the pre-flight checklist. */
-export function Check({ ok, label, hint }: { ok: boolean; label: string; hint?: string }) {
-  return (
-    <li className="flex items-start gap-2.5 text-[14px]">
-      <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ${ok ? 'bg-brand text-on-brand' : 'border-2 border-line'}`}>{ok && <Icon.Check size={13} strokeWidth={3} />}</span>
-      <span><span className={ok ? 'font-semibold' : 'text-muted'}>{label}</span>{!ok && hint && <span className="block text-[12px] text-faint">{hint}</span>}</span>
-    </li>
-  );
-}
-
 /** "End the stream?" with how many people are watching, so a stream is never ended by a stray tap. */
 export function EndDialog({ viewers, onCancel, onEnd }: { viewers: number; onCancel: () => void; onEnd: () => void }) {
   const cancel = useRef<HTMLButtonElement>(null);

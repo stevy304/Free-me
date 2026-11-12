@@ -32,7 +32,7 @@ export function AppShell({ viewer, locale, children }: { viewer: Viewer | null; 
     <ShellProvider viewer={viewer} locale={locale}>
       <UploadsProvider>
         <Header />
-        <main className="min-h-[calc(100dvh-4rem)] pb-28 md:pb-10">{children}</main>
+        <main className="min-h-[calc(100dvh-4rem-1px)] pb-28 md:pb-10">{children}</main>
         <MiniDock />
         <MobileDock />
         {viewer?.channel && <UploadDialog />}

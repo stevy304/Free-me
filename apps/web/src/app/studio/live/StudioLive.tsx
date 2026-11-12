@@ -8,9 +8,10 @@ import styles from '@/components/live/ControlRoom.module.css';
 import { ControlRoom } from '@/components/live/ControlRoom';
 import { LiveChat } from '@/components/live/LiveChat';
 import { LivePlayer } from '@/components/live/LivePlayer';
-import { Check, EndDialog, Health, MicMeter, useDevices } from '@/components/live/GoLiveParts';
+import { EndDialog, Health, MicMeter, useDevices } from '@/components/live/GoLiveParts';
 import { EncoderConnection } from '@/components/live/EncoderConnection';
-import { LiveSettings, type LiveStreamSettings } from '@/components/live/LiveSettings';
+import { HostCaptions, LiveSettings, type LiveStreamSettings } from '@/components/live/LiveSettings';
+import { HostPoll } from '@/components/live/LivePoll';
 import { api } from '@/lib/client-api';
 import { getSocket, useRealtime } from '@/lib/realtime';
 import { useShell } from '@/components/shell/ShellContext';
@@ -43,7 +44,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   const [camId, setCamId] = useState('');
   const [micId, setMicId] = useState('');
   const [heard, setHeard] = useState(false);
-  const [tab, setTab] = useState<'chat' | 'settings' | 'share'>('settings');
+  const [tab, setTab] = useState<'chat' | 'settings' | 'interact' | 'share'>('settings');
   const [confirmEnd, setConfirmEnd] = useState(false);
   const devices = useDevices(!!media);
   // On air, the host mostly needs the chat.
@@ -358,9 +359,11 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   const select = 'h-10 w-full min-w-0 rounded-xl border border-line bg-bg px-3 text-[14px] outline-none focus:border-brand disabled:opacity-60';
 
   return (
-    <div className="mx-auto max-w-[1500px] px-4 pb-16 pt-4 sm:px-6">
-      {/* Control bar: what is happening, and the one button that matters. */}
-      <header className="sticky top-16 z-20 -mx-4 mb-4 flex flex-wrap items-center gap-3 border-b border-line bg-bg/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+    // Laptops and larger: exactly one screen (the header is 4rem, the page keeps 2.5rem below); nothing scrolls the
+    // page. The preview takes the space left and scales to fit; only a long side-panel tab scrolls inside itself.
+    // Phones stack everything and scroll as usual.
+    <div className="mx-auto flex max-w-[1600px] flex-col px-4 sm:px-6 lg:h-[calc(100dvh-6.5rem-1px)] lg:overflow-hidden">
+      <header className="sticky top-16 z-20 -mx-4 flex shrink-0 flex-wrap items-center gap-3 border-b border-line bg-bg/90 px-4 py-2.5 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:bg-transparent lg:backdrop-blur-none">
         <h1 className="flex items-center gap-2 font-display text-[22px] font-extrabold"><Icon.Live size={24} className={onAir ? 'text-[#e5484d]' : ''} />Go live</h1>
         {statusPill}
         {onAir && <span className="flex items-center gap-1.5 text-[14px] font-semibold"><Icon.Eye size={18} />{viewers.toLocaleString(locale)}<span className="hidden font-normal text-muted sm:inline">watching</span></span>}
@@ -372,80 +375,96 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
             : <button type="button" onClick={() => void goLive()} disabled={!ready || busy || live} title={ready ? undefined : 'Finish the checklist first'} className="flex h-11 items-center gap-2 rounded-xl bg-[#e5484d] px-6 text-[15px] font-bold text-white shadow-[0_6px_20px_rgb(229_72_77/0.35)] hover:bg-[#d13d42] disabled:opacity-40 disabled:shadow-none">{state === 'starting' ? <Icon.Spinner size={16} className="animate-spin" /> : <Icon.Live size={18} />}Go live</button>}
         </span>
       </header>
-      {error && <p role="alert" className="mb-4 rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
-      {signal && <div className="mb-4">{signal}</div>}
+      {error && <p role="alert" className="mt-3 shrink-0 rounded-2xl bg-danger/10 px-4 py-2.5 text-[14px] text-danger">{error}</p>}
+      {signal && <div className="mt-3 shrink-0">{signal}</div>}
 
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_400px]">
-        <div className="min-w-0 space-y-4">
-          {/* What viewers will see. */}
-          <ControlRoom streamId={st.stream.id} basic host={media} capture={capture} active={state === 'live'} />
+      <div className="mt-3 grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="flex min-h-0 min-w-0 flex-col gap-3">
+          {/* What viewers will see: as large as the screen allows. */}
+          <div className="lg:min-h-0 lg:flex-1">
+            <ControlRoom streamId={st.stream.id} basic host={media} capture={capture} active={state === 'live'} />
+          </div>
 
-          {/* Inputs: source, devices, level. */}
-          <section aria-labelledby="inputs-heading" className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 id="inputs-heading" className="mr-auto font-display text-[17px] font-bold">Camera and sound</h2>
-              {(['camera', 'screen'] as const).map((k) => (
-                <button key={k} type="button" disabled={lockInputs} onClick={() => void pick(k)} aria-pressed={source === k && !!media}
-                  className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold disabled:opacity-50 ${source === k && media ? 'bg-brand text-on-brand' : 'bg-surface hover:bg-surface-hover'}`}>
-                  {k === 'camera' ? <Icon.Camera size={18} /> : <Icon.ScreenShare size={18} />}{k === 'camera' ? 'Camera' : 'Screen'}
-                </button>
-              ))}
-            </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <label className="block min-w-0"><span className="text-[13px] font-semibold">Camera</span>
-                <select className={`mt-1 ${select}`} value={camId} disabled={lockInputs || source === 'screen' || !devices.cameras.length}
+          {/* Inputs on one row: source, camera, microphone, level. */}
+          <section aria-label="Camera and sound" className="shrink-0 rounded-2xl border border-line bg-elevated p-3">
+            <div className="grid items-end gap-2 sm:grid-cols-2 xl:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_minmax(150px,auto)]">
+              <div className="flex gap-2 sm:col-span-2 xl:col-span-1">
+                {(['camera', 'screen'] as const).map((k) => (
+                  <button key={k} type="button" disabled={lockInputs} onClick={() => void pick(k)} aria-pressed={source === k && !!media}
+                    className={`flex h-10 items-center gap-2 rounded-xl px-3.5 text-[14px] font-semibold disabled:opacity-50 ${source === k && media ? 'bg-brand text-on-brand' : 'bg-surface hover:bg-surface-hover'}`}>
+                    {k === 'camera' ? <Icon.Camera size={18} /> : <Icon.ScreenShare size={18} />}{k === 'camera' ? 'Camera' : 'Screen'}
+                  </button>
+                ))}
+              </div>
+              <label className="block min-w-0"><span className="sr-only">Camera</span>
+                <select aria-label="Camera" className={select} value={camId} disabled={lockInputs || source === 'screen' || !devices.cameras.length}
                   onChange={(e) => { setCamId(e.target.value); if (media && source === 'camera') void pick('camera', { cam: e.target.value }); }}>
-                  <option value="">{devices.cameras.length ? 'Default camera' : 'Allow the camera to choose'}</option>
+                  <option value="">{devices.cameras.length ? 'Default camera' : 'Camera: allow to choose'}</option>
                   {devices.cameras.filter((d) => d.deviceId).map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>)}
                 </select>
               </label>
-              <label className="block min-w-0"><span className="text-[13px] font-semibold">Microphone</span>
-                <select className={`mt-1 ${select}`} value={micId} disabled={lockInputs || !devices.mics.length}
+              <label className="block min-w-0"><span className="sr-only">Microphone</span>
+                <select aria-label="Microphone" className={select} value={micId} disabled={lockInputs || !devices.mics.length}
                   onChange={(e) => { setMicId(e.target.value); if (media) void pick(source, { mic: e.target.value }); }}>
-                  <option value="">{devices.mics.length ? 'Default microphone' : 'Allow the microphone to choose'}</option>
+                  <option value="">{devices.mics.length ? 'Default microphone' : 'Microphone: allow to choose'}</option>
                   {devices.mics.filter((d) => d.deviceId).map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${i + 1}`}</option>)}
                 </select>
               </label>
+              <div className="flex h-10 items-center gap-2 rounded-xl bg-surface px-3 sm:col-span-2 xl:col-span-1" title={!media ? 'No input yet' : heard ? 'We can hear you' : 'Say something to test'}>
+                <Icon.Mic size={16} className="shrink-0 text-muted" />
+                <MicMeter stream={media} onSound={setHeard} />
+                <span className="ml-auto whitespace-nowrap text-[12px] text-muted">{!media ? 'No input' : heard ? 'Hearing you' : 'Say something'}</span>
+              </div>
             </div>
-            <div className="mt-4 flex items-center gap-3 rounded-2xl bg-surface px-4 py-3">
-              <Icon.Mic size={18} className="shrink-0 text-muted" />
-              <MicMeter stream={media} onSound={setHeard} />
-              <span className="ml-auto text-[13px] text-muted">{!media ? 'No input yet' : heard ? 'We can hear you' : 'Say something to test'}</span>
-            </div>
-            {onAir && <p className="mt-2 text-[12px] text-muted">Inputs are locked while you are live, so the stream is not interrupted.</p>}
           </section>
 
-          {!onAir && (
-            <section aria-labelledby="check-heading" className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
-              <h2 id="check-heading" className="font-display text-[17px] font-bold">Before you go live</h2>
-              <ul className="mt-3 grid gap-3 sm:grid-cols-2">{checks.map((c) => <Check key={c.label} {...c} />)}</ul>
-            </section>
-          )}
+          {/* Pre-flight, as a row of chips; once on air, a short note instead. */}
+          {onAir
+            ? <p className="shrink-0 text-[12px] text-muted">Inputs are locked while you are live, so the stream is not interrupted.</p>
+            : (
+              <ul aria-label="Before you go live" className="flex shrink-0 flex-wrap gap-2">
+                {checks.map((c) => (
+                  <li key={c.label} title={c.ok ? undefined : c.hint} className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] ${c.ok ? 'bg-brand-soft font-semibold text-brand' : 'border border-line text-muted'}`}>
+                    {c.ok ? <Icon.Check size={14} strokeWidth={3} /> : <span className="h-2 w-2 rounded-full border-2 border-faint" />}{c.label}
+                  </li>
+                ))}
+              </ul>
+            )}
         </div>
 
-        {/* Side panel: talk to viewers, set up the stream, share it. */}
-        <aside className="min-w-0 space-y-3 lg:sticky lg:top-36">
-          <label className="block rounded-3xl border border-line bg-elevated p-4"><span className="text-[13px] font-semibold">Title</span>
-            <input className={`mt-1 ${inputClass}`} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={100} disabled={state !== 'idle' || live} placeholder="What are you streaming?" />
+        {/* Side panel: title, then one tab at a time; only a long tab scrolls, inside the panel. */}
+        <aside className="flex min-h-0 min-w-0 flex-col gap-3 pb-3">
+          <label className="block shrink-0 rounded-2xl border border-line bg-elevated px-3 py-2"><span className="text-[12px] font-semibold text-muted">Title</span>
+            <input className="block h-8 w-full bg-transparent text-[15px] font-semibold outline-none disabled:opacity-70" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={100} disabled={state !== 'idle' || live} placeholder="What are you streaming?" />
           </label>
-          <div role="tablist" aria-label="Stream panels" className="flex gap-1 rounded-2xl bg-surface p-1">{[tabBtn('chat', 'Chat'), tabBtn('settings', 'Settings'), tabBtn('share', 'Share')]}</div>
-          {tab === 'chat' && <LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-[560px]" />}
-          {tab === 'settings' && <LiveSettings key={st.stream.id} stream={st.stream} live={live || state === 'live'} onSaved={() => void load()} narrow />}
-          {tab === 'share' && (
-            <section className="rounded-3xl border border-line bg-elevated p-4">
-              <h2 className="font-display text-[17px] font-bold">Share your stream</h2>
-              <p className="mt-1 text-[13px] text-muted">The link works now: people who open it early see “Starting soon”, and the stream begins for them when you go live.</p>
-              <div className="mt-3 flex items-center gap-2 rounded-xl border border-line bg-bg p-1 pl-3">
-                <span className="min-w-0 flex-1 truncate text-[14px]">{watchUrl.replace(/^https?:\/\//, '')}</span>
-                <button type="button" onClick={() => void copy('link', watchUrl)} className="h-9 shrink-0 rounded-lg bg-brand px-3 text-[13px] font-bold text-on-brand">{copied === 'link' ? 'Copied' : 'Copy link'}</button>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {typeof navigator !== 'undefined' && 'share' in navigator && <button type="button" onClick={() => void navigator.share({ title: title || st.stream.title, url: watchUrl }).catch(() => undefined)} className="flex h-9 items-center gap-2 rounded-xl bg-surface px-3 text-[13px] font-semibold hover:bg-surface-hover"><Icon.Share size={16} />Share…</button>}
-                <a href={`https://wa.me/?text=${encodeURIComponent(`${title || st.stream.title} ${watchUrl}`)}`} target="_blank" rel="noreferrer" className="flex h-9 items-center gap-2 rounded-xl bg-surface px-3 text-[13px] font-semibold hover:bg-surface-hover">WhatsApp</a>
-                <a href={watchUrl} target="_blank" rel="noreferrer" className="flex h-9 items-center gap-2 rounded-xl bg-surface px-3 text-[13px] font-semibold hover:bg-surface-hover"><Icon.ExternalLink size={16} />Open watch page</a>
-              </div>
-            </section>
-          )}
+          <div role="tablist" aria-label="Stream panels" className="flex shrink-0 gap-1 rounded-2xl bg-surface p-1">{[tabBtn('chat', 'Chat'), tabBtn('settings', 'Settings'), tabBtn('interact', 'Interact'), tabBtn('share', 'Share')]}</div>
+          <div role="tabpanel" className="h-[520px] min-h-0 overflow-y-auto overscroll-contain rounded-3xl lg:h-auto lg:flex-1">
+            {tab === 'chat' && <LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-full" />}
+            {tab === 'settings' && <LiveSettings key={st.stream.id} stream={st.stream} live={live || state === 'live'} onSaved={() => void load()} narrow tools={false} />}
+            {tab === 'interact' && (
+              <section className="rounded-3xl border border-line bg-elevated p-4">
+                <h2 className="font-display text-[17px] font-bold">Talk with viewers</h2>
+                <p className="mt-1 text-[13px] text-muted">Live captions of what you say, and polls. Both start once you are live.</p>
+                {st.stream.captionsEnabled ? <HostCaptions streamId={st.stream.id} live={live || state === 'live'} /> : <p className="mt-4 rounded-2xl bg-surface p-3 text-[13px] text-muted">Live captions are off. Turn them on in Settings.</p>}
+                <HostPoll streamId={st.stream.id} live={live || state === 'live'} />
+              </section>
+            )}
+            {tab === 'share' && (
+              <section className="rounded-3xl border border-line bg-elevated p-4">
+                <h2 className="font-display text-[17px] font-bold">Share your stream</h2>
+                <p className="mt-1 text-[13px] text-muted">The link works now: people who open it early see “Starting soon”, and the stream begins for them when you go live.</p>
+                <div className="mt-3 flex items-center gap-2 rounded-xl border border-line bg-bg p-1 pl-3">
+                  <span className="min-w-0 flex-1 truncate text-[14px]">{watchUrl.replace(/^https?:\/\//, '')}</span>
+                  <button type="button" onClick={() => void copy('link', watchUrl)} className="h-9 shrink-0 rounded-lg bg-brand px-3 text-[13px] font-bold text-on-brand">{copied === 'link' ? 'Copied' : 'Copy link'}</button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {typeof navigator !== 'undefined' && 'share' in navigator && <button type="button" onClick={() => void navigator.share({ title: title || st.stream.title, url: watchUrl }).catch(() => undefined)} className="flex h-9 items-center gap-2 rounded-xl bg-surface px-3 text-[13px] font-semibold hover:bg-surface-hover"><Icon.Share size={16} />Share…</button>}
+                  <a href={`https://wa.me/?text=${encodeURIComponent(`${title || st.stream.title} ${watchUrl}`)}`} target="_blank" rel="noreferrer" className="flex h-9 items-center gap-2 rounded-xl bg-surface px-3 text-[13px] font-semibold hover:bg-surface-hover">WhatsApp</a>
+                  <a href={watchUrl} target="_blank" rel="noreferrer" className="flex h-9 items-center gap-2 rounded-xl bg-surface px-3 text-[13px] font-semibold hover:bg-surface-hover"><Icon.ExternalLink size={16} />Open watch page</a>
+                </div>
+              </section>
+            )}
+          </div>
         </aside>
       </div>
       {confirmEnd && <EndDialog viewers={viewers} onCancel={() => setConfirmEnd(false)} onEnd={() => { setConfirmEnd(false); end(); }} />}

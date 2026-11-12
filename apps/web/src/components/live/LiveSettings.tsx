@@ -23,7 +23,8 @@ const toLocalInput = (iso: string | null) => { if (!iso) return ''; const d = ne
  * chat rules can change during the stream; viewers see the change at once.
  */
 /** `narrow`: one column, for a side panel (two columns would cut the choices short). */
-export function LiveSettings({ stream, live, onSaved, narrow = false }: { stream: LiveStreamSettings; live: boolean; onSaved: () => void; narrow?: boolean }) {
+/** `tools`: also show live captions and polls (off where a page shows them in their own place). */
+export function LiveSettings({ stream, live, onSaved, narrow = false, tools = true }: { stream: LiveStreamSettings; live: boolean; onSaved: () => void; narrow?: boolean; tools?: boolean }) {
   const [f, setF] = useState(() => ({
     description: stream.description ?? '', visibility: stream.visibility, scheduledFor: toLocalInput(stream.scheduledFor),
     chatMode: stream.chat.mode, slowModeSeconds: stream.chat.slowModeSeconds, captionsEnabled: stream.captionsEnabled,
@@ -103,8 +104,8 @@ export function LiveSettings({ stream, live, onSaved, narrow = false }: { stream
         <button type="button" disabled={busy} onClick={() => void save()} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-5 text-[14px] font-bold text-on-brand disabled:opacity-50">{busy && <Icon.Spinner size={16} className="animate-spin" />}Save settings</button>
         {note && <span role="status" className="text-[13px] font-semibold text-brand">{note}</span>}
       </div>
-      {f.captionsEnabled && <HostCaptions streamId={stream.id} live={live} />}
-      <HostPoll streamId={stream.id} live={live} />
+      {tools && f.captionsEnabled && <HostCaptions streamId={stream.id} live={live} />}
+      {tools && <HostPoll streamId={stream.id} live={live} />}
     </section>
   );
 }
@@ -117,7 +118,7 @@ type Recognition = { lang: string; continuous: boolean; interimResults: boolean;
  * sent to viewers as caption lines. Chrome and Edge support it (they use their speech service for this). The
  * recording also gets automatic English captions afterwards, from the media server.
  */
-function HostCaptions({ streamId, live }: { streamId: string; live: boolean }) {
+export function HostCaptions({ streamId, live }: { streamId: string; live: boolean }) {
   const [on, setOn] = useState(false);
   const [lang, setLang] = useState('en-US');
   const [last, setLast] = useState('');

@@ -435,8 +435,8 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
   };
 
   const greenRoom = (
-    <div className="space-y-2 rounded-xl bg-surface p-3">
-      <h2 className="font-bold">{basic ? 'Co-stream guests · up to 2' : 'Guest green room'}</h2>
+    <div className={basic ? 'flex flex-wrap items-center gap-2 rounded-xl bg-surface px-3 py-2' : 'space-y-2 rounded-xl bg-surface p-3'}>
+      <h2 className={basic ? 'mr-auto text-[13px] font-bold' : 'font-bold'}>{basic ? 'Co-stream guests · up to 2' : 'Guest green room'}</h2>
       {!invite ? <button type="button" className={button} onClick={() => void open()}>Create guest invite</button> :
         <div className="flex flex-wrap gap-2"><input readOnly aria-label="Guest invitation link" value={invite} className="min-w-0 flex-1 rounded-lg bg-elevated p-2 text-sm" /><button type="button" className={button} onClick={() => void navigator.clipboard.writeText(invite).then(() => setStatus('Invite copied.')).catch(() => setStatus('Select the invitation link to copy it.'))}>Copy invite</button></div>}
       {basic && <button type="button" className={button} aria-pressed={gain.host === 0} onClick={() => setGain({ ...gain, host: gain.host === 0 ? 1 : 0 })}>{gain.host === 0 ? 'Unmute microphone' : 'Mute microphone'}</button>}
@@ -450,10 +450,13 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
     </div>
   );
 
-  if (basic) return <section className="space-y-4 rounded-3xl border border-line bg-elevated p-4">
-    <h2 className="text-xs font-bold uppercase text-danger">{active ? 'Program · On air' : 'Program'}</h2>
-    <canvas ref={output} width={W} height={H} className="aspect-video w-full rounded-xl bg-black" />
-    {greenRoom}
+  // Free co-stream: the program fills the space it is given (scaled down to fit, 16:9 kept), guests on one row below.
+  if (basic) return <section className="flex h-full min-h-0 flex-col gap-3 rounded-3xl border border-line bg-elevated p-3">
+    <h2 className="shrink-0 text-xs font-bold uppercase text-danger">{active ? 'Program · On air' : 'Program'}</h2>
+    <div className="grid min-h-0 flex-1 place-items-center lg:grid-rows-[minmax(0,1fr)]">
+      <canvas ref={output} width={W} height={H} className="h-auto w-full rounded-xl bg-black lg:max-h-full lg:w-auto lg:max-w-full" />
+    </div>
+    <div className="shrink-0">{greenRoom}</div>
   </section>;
 
   const sceneEditor = (
