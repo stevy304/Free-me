@@ -977,6 +977,7 @@ enum LiveStatus {
   IDLE
   LIVE
   ENDED
+  PREVIEW
 }
 
 model LiveStream {
@@ -999,6 +1000,13 @@ model LiveStream {
   /// Keep the recording as a video afterwards, and how visible that video is at first
   saveReplay            Boolean           @default(true)
   replayVisibility      Visibility        @default(PRIVATE)
+  /// Encoder rehearsal is private until the creator explicitly publishes it.
+  finalizedAt           DateTime?
+  encoderConnectedAt    DateTime?
+  encoderHeartbeatAt    DateTime?
+  /// First HLS media sequence allowed in public playback and the replay.
+  encoderStartSequence  Int?
+  ingestHealth          Json?
   status                LiveStatus        @default(IDLE)
   /// "browser" or "rtmp", while live.
   source                String?

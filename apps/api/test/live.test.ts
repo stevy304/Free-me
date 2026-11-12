@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import request from 'supertest';
 import { io, type Socket } from 'socket.io-client';
 import { makeApp, resetDb, signIn, WEB } from './helpers';
+import { STORAGE } from '../src/media/queue';
+import type { Storage } from '../src/media/storage';
 import { Billing } from '../src/billing/billing';
 
 // Instant updates and live streams over a real socket, with real encoding (local storage, jobs inside the API).
@@ -31,8 +33,17 @@ async function connect(cookie?: string) {
   await new Promise((r) => setTimeout(r, 100)); // the server signs the socket in
   return s;
 }
+async function readyEncoder(id: string) {
+  await ctx.app.get<Storage>(STORAGE).putBuffer(`prv/live/${id}/index.m3u8`, Buffer.from('#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2,\n0.ts\n'), { contentType: 'application/vnd.apple.mpegurl' });
+  await ctx.prisma.liveStream.update({ where: { id }, data: { ingestHealth: { sampledAt: new Date().toISOString(), lastSegmentAt: new Date().toISOString(), width: 1280, height: 720, fps: 30, videoCodec: 'h264', audioCodec: 'aac', hasAudio: true, deliveredKbps: 2500, segments: 1 } } });
+}
+
 const cookieOf = (res: request.Response) => (res.headers['set-cookie'] as unknown as string[]).map((c) => c.split(';')[0]).join('; ');
-const next = <T = any>(s: Socket, event: string, ms = 10_000) => new Promise<T>((ok, fail) => { const t = setTimeout(() => fail(new Error(`no ${event}`)), ms); s.once(event, (d: T) => { clearTimeout(t); ok(d); }); });
+const next = <T = any>(s: Socket, event: string, ms = 10_000, accept: (data: T) => boolean = () => true) => new Promise<T>((ok, fail) => {
+  const heard = (data: T) => { if (!accept(data)) return; clearTimeout(t); s.off(event, heard); ok(data); };
+  const t = setTimeout(() => { s.off(event, heard); fail(new Error(`no matching ${event}`)); }, ms);
+  s.on(event, heard);
+});
 
 test('instant updates: the creator hears about a comment at once; viewers of the video hear about new comments and Sparks', async () => {
   const maker = await signIn(ctx.http, ctx.mail, 'maker@example.com');
@@ -87,7 +98,7 @@ test('Free browser streaming; recording pieces become HLS for viewers, with chat
   const size = 64 * 1024;
   const firstChunk = data.subarray(0, size);
   expect(await hostSocket.emitWithAck('live:chunk', [id, 0, firstChunk])).toEqual({ ok: true });
-  const interrupted = next(viewer, 'live:signal');
+  const interrupted = next<{ reconnectUntil: number | null }>(viewer, 'live:signal', 10_000, (data) => data.reconnectUntil !== null);
   hostSocket.disconnect();
   expect(await interrupted).toEqual({ reconnectUntil: expect.any(Number) });
   expect((await request(ctx.http).get(`/api/live/${id}`).expect(200)).body.stream.status).toBe('LIVE');
@@ -157,7 +168,7 @@ test('Free browser streaming; recording pieces become HLS for viewers, with chat
   expect(again.encoder).toBeNull();
 }, 120_000);
 
-test('OBS and TV encoders: nginx-rtmp asks the API; a valid key goes live under the stream id, never the key', async () => {
+test('encoder keys open a private preview; only the owner can explicitly publish it', async () => {
   const host = await signIn(ctx.http, ctx.mail, 'host@example.com');
   await host.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'host', name: 'Host' }).expect(201);
   const u = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'host@example.com' } });
@@ -170,7 +181,12 @@ test('OBS and TV encoders: nginx-rtmp asks the API; a valid key goes live under 
   await request(ctx.http).post('/api/live/rtmp/publish?secret=rtmp-secret-0123456789abcdef').type('form').send({ name: 'fm_guess' }).expect(403);
   const ok = await request(ctx.http).post('/api/live/rtmp/publish?secret=rtmp-secret-0123456789abcdef').type('form').send({ app: 'live', name: encoder.streamKey, call: 'publish', flashver: 'FMLE/3.0', tcurl: encoder.server, pageurl: '', swfurl: '', clientid: '12' }).expect(302);
   expect(ok.headers.location).toBe(stream.id);
-  expect(await ctx.prisma.liveStream.findUniqueOrThrow({ where: { id: stream.id } })).toMatchObject({ status: 'LIVE', source: 'rtmp' });
+  expect(await ctx.prisma.liveStream.findUniqueOrThrow({ where: { id: stream.id } })).toMatchObject({ status: 'PREVIEW', source: 'rtmp', startedAt: null });
+  await host.agent.post('/api/hub/live/publish').set('Origin', WEB).send({}).expect(400);
+  expect((await request(ctx.http).get(`/api/live/${stream.id}`).expect(200)).body.stream).toMatchObject({ status: 'IDLE', playbackUrl: null });
+  await readyEncoder(stream.id);
+  await host.agent.post('/api/hub/live/publish').set('Origin', WEB).send({}).expect(200);
+  expect(await ctx.prisma.liveStream.findUniqueOrThrow({ where: { id: stream.id } })).toMatchObject({ status: 'LIVE', encoderStartSequence: null });
   await host.agent.post('/api/hub/live/key').set('Origin', WEB).send({}).expect(400);
   await request(ctx.http).post('/api/live/rtmp/update?secret=wrong').type('form').send({ name: stream.id }).expect(403);
   await request(ctx.http).post('/api/live/rtmp/update?secret=rtmp-secret-0123456789abcdef').type('form').send({ name: stream.id, call: 'update_publish', time: '10', timestamp: '10000', clientid: '12' }).expect(200);
@@ -274,6 +290,8 @@ test('unlisted streams do not notify followers and old scheduled times do not bl
   const scheduledFor = new Date(Date.now() - 3600_000);
   await ctx.prisma.liveStream.update({ where: { id: stream.id }, data: { visibility: 'UNLISTED', scheduledFor } });
   await request(ctx.http).post('/api/live/rtmp/publish?secret=rtmp-secret-0123456789abcdef').type('form').send({ name: encoder.streamKey }).expect(302);
+  await readyEncoder(stream.id);
+  await host.agent.post('/api/hub/live/publish').set('Origin', WEB).send({}).expect(200);
   expect(await ctx.prisma.notification.count({ where: { liveStreamId: stream.id } })).toBe(0);
   await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ scheduledFor: scheduledFor.toISOString(), description: 'Updated while live' }).expect(200);
   await host.agent.patch('/api/hub/live').set('Origin', WEB).send({ title: '   ' }).expect(400);

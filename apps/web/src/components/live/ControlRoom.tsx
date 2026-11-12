@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import * as Icon from '@/components/icons';
 import styles from './ControlRoom.module.css';
+import desk from './StudioWorkspace.module.css';
+import { Dialog } from '@/components/Dialog';
 import { api } from '@/lib/client-api';
 import { getSocket } from '@/lib/realtime';
 import { guestPeer, type GuestSignal } from './guest-peer';
@@ -45,21 +47,25 @@ function LayoutIcon({ layout }: { layout: Layout }) {
  * layouts, graphics (logo, animated lower third, ticker, clock), transitions, an audio mixer, guests over WebRTC,
  * a rundown, and recording the program to this computer. `basic` is the free co-stream: one program, up to 2 guests.
  */
-export function ControlRoom({ streamId, basic, host, capture, active, sources, chat }: {
+export function ControlRoom({ streamId, basic, host, capture, active, sources, chat, health, externalPreview, external = false, cameraOn = false, microphoneOn = false, deviceBusy = false, onCameraToggle, onMicrophoneToggle }: {
   streamId: string; basic: boolean; host: MediaStream | null;
-  capture: RefObject<(() => Promise<{ stream: MediaStream; stop: () => void }>) | null>; active: boolean; sources?: ReactNode; chat?: ReactNode;
+  capture: RefObject<(() => Promise<{ stream: MediaStream; stop: () => void }>) | null>; active: boolean; sources?: ReactNode; chat?: ReactNode; health?: ReactNode; externalPreview?: ReactNode; external?: boolean; cameraOn?: boolean; microphoneOn?: boolean; deviceBusy?: boolean; onCameraToggle?: () => void; onMicrophoneToggle?: () => void;
 }) {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [invite, setInvite] = useState('');
   const [status, setStatus] = useState('');
   const [show] = useState(loadShow);
   const [scenes, setScenes] = useState<SceneDef[]>(show.scenes);
-  const [previewId, setPreviewId] = useState(show.scenes[Math.min(1, show.scenes.length - 1)].id);
-  const [program, setProgram] = useState<SceneDef>(() => cloneScene(show.scenes[0]));
+  const initialScene = show.scenes.find((s) => s.layout === 'solo' && s.main === 'camera') ?? show.scenes[0];
+  const [previewId, setPreviewId] = useState(initialScene.id);
+  const [program, setProgram] = useState<SceneDef>(() => cloneScene(initialScene));
   const [programGuests, setProgramGuests] = useState<string[]>([]);
   const [draft, setDraft] = useState<Graphics>(show.graphics);
   const [onAir, setOnAir] = useState<Graphics>(() => ({ ...cloneGraphics(show.graphics), lower: { ...show.graphics.lower, show: false } }));
-  const [panel, setPanel] = useState('Sources');
+  const [panel, setPanel] = useState('');
+  const [showDraft, setShowDraft] = useState(false);
+  const thumbnails = useRef(new Map<string, HTMLCanvasElement>());
+  const localRecorder = useRef<MediaRecorder | null>(null);
   const [transition, setTransition] = useState<Transition>('fade');
   const [fadeMs, setFadeMs] = useState(1000);
   const [rundown, setRundown] = useState<Cue[]>([]);
@@ -105,6 +111,8 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
   useEffect(() => { syncTiming(previewTiming.current, draft, performance.now(), ['logo']); }, [draft.logo.anim, draft.logo.corner]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { syncTiming(programTiming.current, onAir); }, [onAir]);
   useEffect(() => { if (!recording) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [recording]);
+  useEffect(() => () => { if (media?.url) URL.revokeObjectURL(media.url); }, [media?.url]);
+  useEffect(() => () => { if (music?.url) URL.revokeObjectURL(music.url); }, [music?.url]);
   useEffect(() => () => { screen?.getTracks().forEach((t) => t.stop()); }, [screen]);
 
   // Guests: invitations, WebRTC connections and the return feed each guest hears.
@@ -171,6 +179,7 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
     const noGraphics = newTiming();
     let destination: MediaStreamAudioDestinationNode | undefined;
     let lastMeter = 0;
+    let lastThumbnail = 0;
 
     const stop = () => { captured?.getTracks().forEach((track) => track.stop()); captured = undefined; };
     const readyAudio = async () => {
@@ -217,7 +226,7 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
       }
       const selected = s.guests.filter((g) => g.onAir).map((g) => g.id);
       const programOn = s.basic ? selected : s.programGuests.filter((id) => streams.has(id));
-      const showing: SceneDef = s.basic ? { ...s.program, layout: programOn.length ? 'grid' : 'solo', main: 'camera', hostMic: true } : s.program;
+      const showing: SceneDef = s.basic ? { ...s.program, layout: s.program.layout === 'card' ? 'card' : programOn.length ? 'grid' : s.program.layout, hostMic: s.program.hostMic } : s.program;
 
       // Sound: every source has a meter and a fader; what is heard follows the program scene.
       const meterAt = performance.now();
@@ -287,11 +296,21 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
         if (p < 1) drawTransition(ctx, tr.frame, tr.kind, p); else trans.current = null;
       }
       if (pctx) drawFrame(pctx, s.scene, s.draft, inputsFor(selected), previewTiming.current, t);
+      if (t - lastThumbnail > 600) {
+        lastThumbnail = t;
+        for (const item of s.scenes) {
+          const thumb = thumbnails.current.get(item.id)?.getContext('2d');
+          if (thumb) { thumb.save(); thumb.scale(256 / W, 144 / H); drawFrame(thumb, item, programGraphics, inputsFor(selected), noGraphics, t); thumb.restore(); }
+        }
+      }
     };
     const timer = setInterval(frame, 1000 / 30);
     frame();
     return () => { clearInterval(timer); capture.current = null; enableAudio.current = null; recordLocal.current = null; context.current = null; stop(); if (audio) void audio.close(); for (const v of elements.values()) v.srcObject = null; elements.clear(); };
   }, [basic, capture]);
+
+  useEffect(() => { if (host) void enableAudio.current?.().catch(() => setStatus('Use Enable meters to activate audio monitoring.')); }, [host]);
+  useEffect(() => () => { if (localRecorder.current?.state === 'recording') localRecorder.current.stop(); mediaEl.current instanceof HTMLVideoElement && mediaEl.current.pause(); musicEl.current?.pause(); }, []);
 
   const open = async () => {
     try {
@@ -366,10 +385,14 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
 
   const shareScreen = async () => {
     try {
+      if (!navigator.mediaDevices?.getDisplayMedia) throw new Error('Screen sharing needs a supported browser over HTTPS or localhost.');
       const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
-      s.getVideoTracks()[0]?.addEventListener('ended', () => setScreen(null));
-      setScreen(s); setStatus('Screen ready: use “Screen share” in a scene, such as Screen + Host.');
-    } catch { setStatus('Screen sharing was not allowed.'); }
+      s.getVideoTracks()[0]?.addEventListener('ended', () => setScreen((current) => current === s ? null : current));
+      setScreen(s);
+      const item = scenes.find((item) => item.main === 'screen');
+      if (item) { setPreviewId(item.id); if (!active) setProgram(cloneScene(item)); else setShowDraft(true); }
+      setStatus(active ? 'Screen ready in preview. Choose Take to air when you are ready to share it.' : 'Screen connected. Choose the Screen + Host scene to include it.');
+    } catch (error) { setStatus(error instanceof DOMException ? 'Screen sharing was cancelled or not allowed.' : (error as Error).message); }
   };
   const pickMedia = (file: File | undefined) => {
     if (!file) return;
@@ -396,23 +419,31 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
     if (a.paused) void a.play().then(() => setMusic({ ...music, playing: true })).catch(() => undefined);
     else { a.pause(); setMusic({ ...music, playing: false }); }
   };
-  const toggleRecording = () => {
+  const toggleRecording = async () => {
     if (recording) { recording.rec.stop(); setRecording(null); return; }
-    const stream = recordLocal.current?.();
-    if (!stream) return;
-    const type = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].find((t) => MediaRecorder.isTypeSupported(t));
-    const rec = new MediaRecorder(stream, { ...(type ? { mimeType: type } : {}), videoBitsPerSecond: 6_000_000 });
-    const chunks: Blob[] = [];
-    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    rec.onstop = () => {
-      stream.getTracks().forEach((t) => t.stop());
-      const blob = new Blob(chunks, { type: rec.mimeType || 'video/webm' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = `free-me-live-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.${blob.type.includes('mp4') ? 'mp4' : 'webm'}`;
-      a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
-    };
-    void enableAudio.current?.();
-    rec.start(1000); setRecording({ rec, since: Date.now() }); setNow(Date.now());
+    try {
+      if (typeof MediaRecorder === 'undefined') throw new Error('Local recording is not supported by this browser.');
+      await enableAudio.current?.();
+      const stream = recordLocal.current?.();
+      if (!stream) throw new Error('The program is not ready for recording.');
+      const type = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].find((t) => MediaRecorder.isTypeSupported(t));
+      let rec: MediaRecorder;
+      try { rec = new MediaRecorder(stream, { ...(type ? { mimeType: type } : {}), videoBitsPerSecond: 6_000_000 }); }
+      catch (error) { stream.getTracks().forEach((t) => t.stop()); throw error; }
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop()); localRecorder.current = null; setRecording(null);
+        if (!chunks.length) return;
+        const blob = new Blob(chunks, { type: rec.mimeType || 'video/webm' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = `free-me-live-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.${blob.type.includes('mp4') ? 'mp4' : 'webm'}`;
+        a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
+      };
+      rec.onerror = () => setStatus('Local recording failed. Check available memory and try again.');
+      try { rec.start(1000); } catch (error) { stream.getTracks().forEach((t) => t.stop()); throw error; }
+      localRecorder.current = rec; setRecording({ rec, since: Date.now() }); setNow(Date.now());
+    } catch (error) { setStatus((error as Error).message); }
   };
 
   const fader = (id: string, label: string, icon: ReactNode) => {
@@ -450,14 +481,9 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
     </div>
   );
 
-  if (basic) return <section className="space-y-4 rounded-3xl border border-line bg-elevated p-4">
-    <h2 className="text-xs font-bold uppercase text-danger">{active ? 'Program · On air' : 'Program'}</h2>
-    <canvas ref={output} width={W} height={H} className="aspect-video w-full rounded-xl bg-black" />
-    {greenRoom}
-  </section>;
-
   const sceneEditor = (
     <div className="space-y-3">
+      <label className="block text-[12px] font-semibold">Choose scene<select className={field} value={previewId} onChange={(e) => { setPreviewId(e.target.value); setShowDraft(true); }}>{scenes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label className="block text-[12px] font-semibold">Scene name<input className={field} value={scene.name} maxLength={40} onChange={(e) => updateScene({ name: e.target.value })} /></label>
       <div>
         <p className="text-[12px] font-semibold">Layout</p>
@@ -588,67 +614,87 @@ export function ControlRoom({ streamId, basic, host, capture, active, sources, c
     </section>
   );
 
-  const panels = ['Crew', 'Scene', 'Sources', 'Graphics', 'Guests', 'Rundown', 'Chat'] as const;
+  const panels = basic ? ['Crew', 'Scene', 'Sources', 'Guests'] : ['Crew', 'Scene', 'Sources', 'Graphics', 'Guests', 'Rundown'];
   const recClock = recording ? Math.max(0, Math.floor((now - recording.since) / 1000)) : 0;
+  const chooseScene = (item: SceneDef) => {
+    setPreviewId(item.id);
+    if (!active) { if (program.id !== item.id) programTiming.current.sceneSince = performance.now(); setProgram(cloneScene(item)); setProgramGuests(guests.filter((g) => g.onAir).map((g) => g.id)); }
+    else setShowDraft(true);
+  };
   return (
-    <div className={styles.desk}>
-      <section className={styles.production} aria-label="Production monitors">
-        <div className={styles.monitors} data-broadcasting={active}>
-          <div className={styles.monitor}><h2>Preview <small>{scene.name}</small></h2><canvas aria-label="Scene preview" ref={preview} width={W} height={H} /></div>
-          <div className={styles.monitor}><h2>Program <small>{program.name}</small> {active && <span>● LIVE</span>}</h2><canvas aria-label="Broadcast output" ref={output} width={W} height={H} /></div>
+    <div className={desk.workspace} aria-label="Broadcast workspace">
+      <section className={`${desk.card} ${desk.monitor}`} aria-label="Production monitors">
+        <header className={desk.cardHead}><h2>{external ? 'ENCODER PREVIEW' : active ? 'PROGRAM · ON AIR' : 'PROGRAM PREVIEW'}</h2><small>{external ? 'Owner monitor' : active ? program.name : 'Only you can see this'}</small></header>
+        <div className={desk.picture}>
+          <div className={desk.draft} hidden={!showDraft || external}><span>Next: {scene.name}</span><canvas aria-label="Scene preview" ref={preview} width={W} height={H} /></div>
+          <canvas aria-label="Broadcast output" ref={output} width={W} height={H} style={{ visibility: external ? 'hidden' : 'visible' }} />
+          {external && <div className={desk.external}>{externalPreview}</div>}
+          {!external && !host && !screen && !media && program.layout !== 'card' && <div className={desk.placeholder}><Icon.Camera size={42} /><h3>Set up your camera</h3><p>Connect a webcam, USB capture card, or virtual camera using the Camera button below.</p></div>}
         </div>
-        <div className={styles.switcher}>
-          <button type="button" className={styles.take} onClick={take} title="Space"><Icon.Live size={21} />Take to air</button>
-          <div className={styles.transitions} role="radiogroup" aria-label="Transition">
-            {TRANSITIONS.map((t) => <button key={t} type="button" role="radio" aria-checked={transition === t} aria-pressed={transition === t} onClick={() => setTransition(t)}>{t[0].toUpperCase() + t.slice(1)}</button>)}
-            <label>Duration<select value={fadeMs} disabled={transition === 'cut'} onChange={(e) => setFadeMs(Number(e.target.value))}><option value={300}>0.3 s</option><option value={500}>0.5 s</option><option value={1000}>1.0 s</option><option value={2000}>2.0 s</option></select></label>
-          </div>
-          <button type="button" className={styles.ghost} onClick={sendGraphics} title="Lower third, ticker and logo from the preview, without changing the scene">Graphics to air</button>
-          <button type="button" className={`${styles.ghost} ${recording ? styles.recOn : ''}`} onClick={toggleRecording} aria-pressed={!!recording}>
-            <span className={styles.recDot} />{recording ? `Stop recording · ${Math.floor(recClock / 60)}:${String(recClock % 60).padStart(2, '0')}` : 'Record locally'}
-          </button>
+        <div className={desk.toolbar}>
+          {external ? <span className="text-xs text-[#a0bac3]">Control camera, sound and graphics in your external encoder.</span> : <>
+            <button type="button" disabled={deviceBusy} onClick={onCameraToggle} aria-pressed={cameraOn} aria-label="Camera"><Icon.Camera size={17} />Camera <span>{cameraOn ? 'On' : 'Off'}</span></button>
+            <button type="button" disabled={deviceBusy} onClick={onMicrophoneToggle} aria-pressed={microphoneOn} aria-label="Microphone"><Icon.Mic size={17} />Microphone <span>{microphoneOn ? 'On' : 'Off'}</span></button>
+            <button type="button" aria-pressed={!!screen} onClick={() => screen ? (screen.getTracks().forEach((t) => t.stop()), setScreen(null)) : void shareScreen()}><Icon.ScreenShare size={17} />{screen ? 'Stop sharing' : 'Screen share'}</button>
+            <button type="button" onClick={() => setPanel('Sources')}><Icon.Settings size={16} />Devices</button>
+          </>}
+          <small>{external ? 'Muted monitor' : '720p · 30 fps output'}</small>
         </div>
-        <section className={styles.scenes} aria-label="Scenes">
-          <h2>Scenes</h2>
-          {scenes.map((item, i) => <button key={item.id} type="button" aria-pressed={scene.id === item.id} onClick={() => setPreviewId(item.id)} onDoubleClick={() => { setPreviewId(item.id); setPanel('Scene'); }} title={`${item.name} · key ${i + 1}`}>
-            <span className="flex min-w-0 items-center gap-1.5"><LayoutIcon layout={item.layout} /><span className="truncate">{item.name}</span></span>
-            {program.id === item.id ? <span className={styles.airDot} title="On air">●</span> : i < 9 ? <kbd className={styles.key}>{i + 1}</kbd> : null}
-          </button>)}
-          <button type="button" className={styles.addScene} onClick={addScene}><Icon.Plus size={14} />New scene</button>
-        </section>
-        <section className={styles.mixer} aria-label="Audio mixer">
-          <header><h2>Audio Mixer</h2><label><input type="checkbox" checked={monitor} onChange={(e) => setMonitor(e.target.checked)} /> Monitor (headphones)</label></header>
-          <div className={styles.channels}>
-            {fader('host', 'Host', <Icon.Mic size={14} />)}
-            {guests.map((g, i) => fader(g.id, `Guest ${i + 1}`, <Icon.Person size={14} />))}
-            {screen?.getAudioTracks().length ? fader('screen', 'Screen', <Icon.ScreenShare size={14} />) : null}
-            {media?.kind === 'video' && fader('media', 'Video', <Icon.Play size={14} />)}
-            {music && fader('music', 'Music', <Icon.VolumeHigh size={14} />)}
-          </div>
-        </section>
       </section>
-      <aside className={styles.sidebar} aria-label="Production panels">
-        <header className={styles.panelHeader}>
-          <p>Production desk</p>
-          <h2>Controls</h2>
-        </header>
-        <nav aria-label="Production panels">
-          {panels.map((item) => <button type="button" key={item} aria-pressed={panel === item} onClick={() => setPanel(item)}>{item}</button>)}
-        </nav>
-        <div className={styles.panel} hidden={panel !== 'Crew'}>
-          <div className={styles.operator}><span>FM</span><div><strong>Host · You</strong><small>{active ? 'On air' : 'In Signal Room'}</small></div></div>
-          {guests.map((g, i) => <div key={g.id} className={styles.operator}><span>G{i + 1}</span><div><strong>Guest {i + 1}</strong><small>{programGuests.includes(g.id) && uses(program, 'guests') ? 'On air' : g.onAir ? 'In preview' : g.stream ? 'Waiting in green room' : 'Connecting'}</small></div></div>)}
-          <button type="button" className={styles.small} onClick={() => setPanel('Guests')}>Open green room</button>
-          <p className="mt-3 text-[11px] leading-relaxed text-[#8fb0b6]">Keys: <kbd className={styles.key}>Space</kbd> take to air · <kbd className={styles.key}>1</kbd>–<kbd className={styles.key}>9</kbd> pick a scene. Your scenes and graphics are kept on this computer.</p>
+      <div className={desk.middle}>
+        <section className={`${desk.card} ${desk.health}`} aria-label="Input status">{health}</section>
+        <section className={`${desk.card} ${desk.guests}`} aria-label="Guest green room">
+          <header className={desk.cardHead}><h2><Icon.Person size={18} />Guests</h2><small>{guests.length}/{basic ? 2 : 6}</small></header>
+          <div className={desk.guestBody}>
+            {external ? <p className="text-xs text-[#a0bac3]">Add guests in your encoder. Browser guests do not enter an external feed.</p> : <>
+              {!guests.length && <>{[1, 2].map((i) => <div className={desk.seat} key={i}><Icon.Person size={23} /><div>Guest seat {i}<small className="block">Empty</small></div></div>)}</>}
+              <div className="studio-guest-controls">{greenRoom}</div>
+            </>}
+          </div>
+        </section>
+      </div>
+      <div className={desk.chat}>{chat}</div>
+      <section className={`${desk.card} ${desk.scenes}`} aria-label="Scenes">
+        <header className={desk.cardHead}><h2><Icon.Monitor size={18} />Scenes</h2><div className="flex items-center gap-3"><button type="button" disabled={external} onClick={() => { take(); setShowDraft(false); }} title="Space">Take to air</button><button type="button" disabled={external} onClick={() => setPanel('Scene')}>Edit scenes</button>{!basic && <button type="button" disabled={external} onClick={() => setPanel('Graphics')}>Graphics</button>}</div></header>
+        <div className={desk.sceneList}>
+          {[...['host', 'guests', 'opening'].flatMap((id) => scenes.filter((s) => s.id === id)), ...scenes.filter((s) => !['host', 'guests', 'opening'].includes(s.id))].slice(0, 3).map((item) => <button type="button" className={desk.sceneButton} key={item.id} aria-label={`Select ${item.id === 'host' ? 'Camera' : item.id === 'guests' ? 'Interview' : item.id === 'opening' ? 'Starting soon' : item.name} scene`} disabled={external} aria-pressed={scene.id === item.id} onClick={() => chooseScene(item)} onDoubleClick={() => { setPreviewId(item.id); setPanel('Scene'); }}>
+            <canvas ref={(node) => { if (node) thumbnails.current.set(item.id, node); else thumbnails.current.delete(item.id); }} width={256} height={144} aria-hidden />
+            <span>{item.id === 'host' ? 'Camera' : item.id === 'guests' ? 'Interview' : item.id === 'opening' ? 'Starting soon' : item.name}</span>
+          </button>)}
         </div>
-        <div className={styles.panel} hidden={panel !== 'Scene'}>{sceneEditor}</div>
-        <div className={styles.panel} hidden={panel !== 'Sources'}>{sourcesPanel}</div>
-        <div className={styles.panel} hidden={panel !== 'Graphics'}>{graphics}</div>
-        <div className={styles.panel} hidden={panel !== 'Guests'}>{greenRoom}</div>
-        <div className={styles.panel} hidden={panel !== 'Rundown'}>{cues}</div>
-        <div className={styles.panel} hidden={panel !== 'Chat'}>{chat}</div>
-        {status && <p role="status" className="border-t border-[#19353c] px-3 py-2 text-[12px] text-[#9fb9be]">{status}</p>}
-      </aside>
+      </section>
+      <section className={`${desk.card} ${desk.mixer}`} aria-label="Audio mixer">
+        <header className={desk.cardHead}><h2><Icon.Mic size={17} />Audio mixer</h2><button type="button" disabled={external} onClick={() => void enableAudio.current?.().catch((e) => setStatus((e as Error).message))}>Enable meters</button></header>
+        <fieldset disabled={external} className={desk.mixChannels}>
+          {fader('host', 'Mic', <Icon.Mic size={14} />)}
+          {screen?.getAudioTracks().length ? fader('screen', 'Desktop', <Icon.ScreenShare size={14} />) : null}
+          {guests.map((g, i) => fader(g.id, `Guest ${i + 1}`, <Icon.Person size={14} />))}
+          {media?.kind === 'video' && fader('media', 'Video', <Icon.Play size={14} />)}
+          {music && fader('music', 'Music', <Icon.VolumeHigh size={14} />)}
+          {!screen && !music && !guests.length && <p className="text-[10px] text-[#a0bac3]">Share system audio to add a Desktop channel.</p>}
+        </fieldset>
+      </section>
+      <section className={`${desk.card} ${desk.sources}`} aria-label="Sources">
+        <header className={desk.cardHead}><h2><Icon.Monitor size={18} />Sources</h2><button type="button" disabled={external} onClick={() => setPanel('Sources')}>+ Add source</button></header>
+        <div className={desk.sourceList}>
+          <div className={desk.sourceRow}><Icon.Camera size={17} /><span>Camera</span><small>{external ? 'Encoder' : cameraOn ? 'Active' : 'Off'}</small><button type="button" disabled={external} aria-label="Camera settings" onClick={() => setPanel('Sources')}>•••</button></div>
+          <div className={desk.sourceRow}><Icon.Mic size={17} /><span>Microphone</span><small>{external ? 'Encoder' : microphoneOn ? 'Active' : 'Off'}</small><button type="button" disabled={external} aria-label="Microphone settings" onClick={() => setPanel('Sources')}>•••</button></div>
+          <div className={desk.sourceRow}><Icon.ScreenShare size={17} /><span>Screen share</span><small>{screen ? 'Active' : 'Off'}</small><button type="button" disabled={external} aria-label="Screen share settings" onClick={() => setPanel('Sources')}>•••</button></div>
+          {!basic && <button type="button" disabled={external} onClick={() => void toggleRecording()} className="mt-2 text-[11px] text-[#81efdc]">{recording ? `Stop recording · ${Math.floor(recClock / 60)}:${String(recClock % 60).padStart(2, '0')}` : 'Record locally'}</button>}
+        </div>
+      </section>
+      <Dialog open={!!panel} onClose={() => setPanel('')} title="Studio tools" wide>
+        <aside aria-label="Production panels">
+          <nav className={desk.toolTabs} aria-label="Production panels">{panels.map((item) => <button type="button" key={item} aria-pressed={panel === item} onClick={() => setPanel(item)}>{item}</button>)}</nav>
+          {panel === 'Crew' && <div><p>You are the host. Guests enter the green room before you add them to the program.</p><p className="mt-3 text-xs text-muted">Space takes the preview to air. Keys 1–9 select scenes. Use headphones to prevent feedback.</p></div>}
+          {panel === 'Scene' && <>{sceneEditor}<div className={`${styles.transitions} mt-4`} role="radiogroup" aria-label="Transition">{TRANSITIONS.map((t) => <button key={t} type="button" role="radio" aria-checked={transition === t} onClick={() => setTransition(t)}>{t}</button>)}<label>Duration<select value={fadeMs} onChange={(e) => setFadeMs(Number(e.target.value))}><option value={300}>0.3 s</option><option value={500}>0.5 s</option><option value={1000}>1 s</option></select></label></div></>}
+          {panel === 'Sources' && sourcesPanel}
+          {panel === 'Graphics' && graphics}
+          {panel === 'Guests' && <p className="text-sm">Use the guest green room on the main desk to create invitations and admit your guests.</p>}
+          {panel === 'Rundown' && cues}
+        </aside>
+      </Dialog>
+      {status && <div role="status" className={desk.toast}><span>{status}</span><button type="button" aria-label="Dismiss studio message" onClick={() => setStatus('')}><Icon.Close size={16} /></button></div>}
     </div>
   );
 }

@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Icon from '@/components/icons';
-import { inputClass } from '@/components/Pickers';
-import styles from '@/components/live/ControlRoom.module.css';
+import { Dialog } from '@/components/Dialog';
+import { useLiveDevices } from '@/components/live/useLiveDevices';
+import desk from '@/components/live/StudioWorkspace.module.css';
 import { ControlRoom } from '@/components/live/ControlRoom';
 import { LiveChat, LiveVideo } from '@/components/live/LiveChat';
+import { StreamHealth, type StreamHealthData } from '@/components/live/StreamHealth';
 import { EncoderConnection } from '@/components/live/EncoderConnection';
 import { LiveSettings, type LiveStreamSettings } from '@/components/live/LiveSettings';
 import { api } from '@/lib/client-api';
@@ -15,7 +17,9 @@ import { useShell } from '@/components/shell/ShellContext';
 
 interface Studio {
   premium: boolean;
-  stream: LiveStreamSettings & { status: 'IDLE' | 'LIVE' | 'ENDED'; startedAt: string | null; viewers: number; peakViewers: number; source: string | null; playbackUrl: string | null };
+  stream: LiveStreamSettings & { status: 'IDLE' | 'PREVIEW' | 'LIVE' | 'ENDED'; startedAt: string | null; viewers: number; peakViewers: number; source: string | null; playbackUrl: string | null };
+  privatePreviewUrl: string | null;
+  ingest: StreamHealthData;
   encoder: { server: string; streamKey: string } | null;
   past: Array<{ id: string; title: string; startedAt: string | null; endedAt: string | null; peakViewers: number; replayVideoId: string | null }>;
 }
@@ -28,52 +32,36 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   const { locale } = useShell();
   const [st, setSt] = useState<Studio | null>(null);
   const [title, setTitle] = useState('');
-  const [source, setSource] = useState<'camera' | 'screen'>('camera');
-  const [media, setMedia] = useState<MediaStream | null>(null);
   const [state, setState] = useState<'idle' | 'starting' | 'live' | 'ending'>('idle');
   const [reconnectUntil, setReconnectUntil] = useState<number | null>(null);
   const [encoderRtt, setEncoderRtt] = useState<number | null>(null);
   const [viewers, setViewers] = useState(0);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [picking, setPicking] = useState(false);
-  const pickRequest = useRef(0);
+  const devices = useLiveDevices(setError);
+  const { media } = devices;
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'details' | 'encoder' | 'history'>('details');
   const [now, setNow] = useState(Date.now());
   const capture = useRef<(() => Promise<{ stream: MediaStream; stop: () => void }>) | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
-  useEffect(() => () => { pickRequest.current += 1; if (recorder.current?.state === 'recording') recorder.current.stop(); }, []);
+  useEffect(() => () => { if (recorder.current?.state === 'recording') recorder.current.stop(); }, []);
 
   const load = useCallback(async () => {
     try { const r = await api<Studio>('/hub/live'); setSt(r); setTitle((t) => t || r.stream.title); setViewers(r.stream.viewers); } catch (e) { setError((e as Error).message); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { const previous = document.body.style.overflow; document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = previous; }; }, []);
   // Polling also catches encoder starts/ends when a socket event is missed.
-  useEffect(() => { if (basic) return; const timer = setInterval(() => void load(), 5000); return () => clearInterval(timer); }, [basic, load]);
+  useEffect(() => { const timer = setInterval(() => void load(), 5000); return () => clearInterval(timer); }, [basic, load]);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   useRealtime<{ count: number }>('viewers', (d) => setViewers(d.count), st ? `live:${st.stream.id}` : null, !!st);
   useRealtime('started', () => void load(), st ? `live:${st.stream.id}` : null, !!st);
   useRealtime('ended', () => { if (recorder.current?.state === 'recording') recorder.current.stop(); setState('idle'); void load(); }, st ? `live:${st.stream.id}` : null, !!st);
-  useEffect(() => () => { media?.getTracks().forEach((t) => t.stop()); }, [media]);
-
-  const pick = async (kind: 'camera' | 'screen') => {
-    const request = ++pickRequest.current;
-    setError(null); setPicking(true);
-    let next: MediaStream | undefined;
-    try {
-      if (!navigator.mediaDevices) throw new Error('Open Free Me over HTTPS or localhost to use your camera and microphone.');
-      if (kind === 'camera') next = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: { echoCancellation: true, noiseSuppression: true } });
-      else {
-        next = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
-        const mic = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
-        mic?.getAudioTracks().forEach((track) => next!.addTrack(track));
-      }
-      if (request !== pickRequest.current) { next.getTracks().forEach((track) => track.stop()); return; }
-      setSource(kind); setMedia(next);
-    } catch (e) {
-      next?.getTracks().forEach((track) => track.stop());
-      setError(e instanceof Error && e.message.includes('HTTPS') ? e.message : kind === 'camera' ? 'Allow the camera and microphone to go live from this browser.' : 'Screen sharing was not allowed.');
-    } finally { if (request === pickRequest.current) setPicking(false); }
-  };
+  useEffect(() => {
+    if (st?.stream.source === 'rtmp' && (st.stream.status === 'PREVIEW' || st.stream.status === 'LIVE')) devices.disconnect();
+    // Device ownership is independent of studio polling; disconnect once when an external encoder takes over.
+  }, [st?.stream.source, st?.stream.status]);
 
   const goLive = async () => {
     if (!st || !media || !capture.current) return;
@@ -216,6 +204,12 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       void load();
     } catch (e) { output?.stop(); setError((e as Error).message); setState('idle'); }
   };
+  const publishEncoder = async () => {
+    setState('starting'); setError(null);
+    try { const next = await api<Studio>('/hub/live/publish', { body: {} }); setSt(next); }
+    catch (e) { setError((e as Error).message); }
+    finally { setState('idle'); }
+  };
   const end = () => { setState('ending'); setError(null); if (recorder.current?.state === 'recording') recorder.current.stop(); else void api('/hub/live/end', { body: {} }).catch((e) => setError((e as Error).message)).finally(() => { setState('idle'); void load(); }); };
   const copy = async (what: string, text: string) => { try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(null), 1500); } catch { setError('Clipboard access is unavailable. Select and copy the link manually.'); } };
 
@@ -234,131 +228,87 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
     );
   }
   const live = st.stream.status === 'LIVE';
-  const signal = reconnectUntil !== null && (
-    <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-amber-500/40 bg-amber-950 px-4 py-3 text-sm text-amber-100">
-      <strong>Reconnecting · {Math.max(0, Math.ceil((reconnectUntil - now) / 1000))}s</strong>
-      <span>Your watch page and chat are still open. Keep this tab open while we restore your signal.</span>
-    </div>
-  );
   const watchUrl = typeof window !== 'undefined' ? `${window.location.origin}/live/${st.stream.id}` : `/live/${st.stream.id}`;
 
-  const external = live && st.stream.source === 'rtmp';
-  const encoderPanel = <EncoderConnection encoder={st.encoder} live={live || state !== 'idle'} external={live && st.stream.source === 'rtmp'} busy={picking}
-            onKey={(streamKey) => setSt((current) => current?.encoder ? { ...current, encoder: { ...current.encoder, streamKey } } : current)}
-            onPrepare={async () => {
-              if (!title.trim()) throw new Error('Enter a broadcast title first.');
-              await api('/hub/live', { method: 'PATCH', body: { title: title.trim() } });
-              await load();
-            }} />;
-
-  if (!basic) return (
-    <main className={`dark ${styles.studio}`}>
-      <header className={styles.top}>
-        <div className={styles.identity}>
-          <Link href="/" className={styles.brand}><Icon.Live size={17} /> Free Me</Link>
-          <h1>Signal Room</h1>
-        </div>
-        <label className={styles.titleField}>
-          <span>Title</span>
-          <input className={styles.title} value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} disabled={state !== 'idle' || live} />
-        </label>
-        <div className={styles.status}>
-          {reconnectUntil !== null ? <span className={styles.interrupted}>Signal interrupted</span> : live ? <span className={styles.onAir}>● ON AIR {clock(st.stream.startedAt, now)}</span> : <span className={styles.standby}>{media ? 'Source ready' : 'Standby'}</span>}
-          {state === 'live' && encoderRtt !== null && <span title="Latest encoder response" className={styles.latency}>Encoder {encoderRtt} ms</span>}
-          {live || state === 'live' || state === 'ending' ?
-            <button type="button" onClick={end} disabled={state === 'ending'}>{state === 'ending' ? 'Ending…' : 'End broadcast'}</button> :
-            <button type="button" onClick={() => void goLive()} disabled={!media || picking || state !== 'idle' || live}>{state === 'starting' ? 'Starting…' : 'Go live'}</button>}
-        </div>
-      </header>
-      {error && <p role="alert" className="rounded-md bg-red-950 px-3 py-2 text-sm text-red-200">{error}</p>}
-      {signal}
-      {external && st.stream.playbackUrl ? (
-        <section className={styles.desk} aria-label="External broadcast control room">
-          <div className="min-w-0 space-y-4">
-            <section className="overflow-hidden rounded-2xl border border-[#34555c] bg-[#010809]">
-              <div className="flex items-center justify-between gap-3 bg-[#10383d] px-4 py-3"><h2 className="font-bold">Encoder program</h2><span className="text-xs text-[#9fe8df]">Viewer playback · muted preview</span></div>
-              <LiveVideo src={st.stream.playbackUrl} muted className="aspect-video w-full" />
-              <p className="px-4 py-3 text-xs leading-relaxed text-[#afc4c9]">Video and graphics come from your encoder. Playback appears after the first segments arrive and has a short delay.</p>
-            </section>
-            <LiveSettings key={st.stream.id} stream={st.stream} live onSaved={() => void load()} />
-          </div>
-          <aside className="min-w-0 space-y-4" aria-label="Encoder broadcast controls">{encoderPanel}<LiveChat streamId={st.stream.id} initial={[]} live className="h-96" /></aside>
-        </section>
-      ) : <ControlRoom streamId={st.stream.id} basic={false} host={media} capture={capture} active={state === 'live'}
-        chat={<LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-96" />}
-        sources={<div className="space-y-3">
-          <h3 className="font-bold">Choose your input</h3>
-          <div className="flex flex-wrap gap-2">
-                <button type="button" disabled={picking || state === 'starting' || state === 'ending' || (live && state !== 'live')} onClick={() => void pick('camera')} aria-pressed={source === 'camera' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'camera' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.Camera size={18} />Camera</button>
-                <button type="button" disabled={picking || state === 'starting' || state === 'ending' || (live && state !== 'live')} onClick={() => void pick('screen')} aria-pressed={source === 'screen' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'screen' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.ScreenShare size={18} />Screen</button>
-
-          </div>
-          <LiveSettings key={st.stream.id} stream={st.stream} live={live || state === 'live'} onSaved={() => void load()} />
-          {encoderPanel}
-
-          {st.past.length > 0 && (
-            <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
-              <h2 className="font-display text-[18px] font-bold">Past streams</h2>
-              <ul className="mt-2 divide-y divide-line text-[14px]">
-                {st.past.map((p) => (
-                  <li key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
-                    <span className="flex-1 font-semibold">{p.title}</span>
-                    <span className="text-muted">{p.startedAt ? new Date(p.startedAt).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }) : ''} · peak {p.peakViewers}</span>
-                    {p.replayVideoId ? <Link href="/hub" className="font-semibold text-brand">Recording in Creator Hub</Link> : <span className="text-faint">No recording</span>}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-2 text-[12px] text-muted">Recordings are saved as videos (with English captions) as set in Stream settings. Manage them in Creator Hub.</p>
-            </section>
-          )}
-
-        </div>} />}
-      <footer className={styles.footer}>
-        <span><Icon.Live size={16} /> Primary feed <strong>{reconnectUntil !== null ? 'Reconnecting' : state === 'live' ? 'Broadcasting' : live ? 'External broadcast' : media ? 'Source ready' : 'No source'}</strong></span>
-        <span><Icon.Eye size={16} /> {viewers.toLocaleString(locale)} watching</span>
-        <span>Replay <strong>{st.stream.saveReplay ? live ? 'Will be saved' : 'Enabled' : 'Off'}</strong></span>
-        <a href={watchUrl} target="_blank" rel="noreferrer">Open watch page ↗</a>
-      </footer>
-    </main>
-  );
+  const preview = st.stream.status === 'PREVIEW';
+  const external = (live || preview) && st.stream.source === 'rtmp';
+  const openSettings = (tab: typeof settingsTab = 'details') => { setSettingsTab(tab); setSettingsOpen(true); };
+  const devicePanel = <div className={desk.deviceFields}>
+    <h3 className="text-base font-bold">Camera and microphone</h3>
+    <p>Connect a webcam, USB capture card, or a phone configured as a virtual webcam. Grant camera and microphone permission when your browser asks.</p>
+    <label>Camera device<select aria-label="Camera device" value={devices.cameraId} disabled={devices.busy} onChange={(e) => void devices.connect(true, e.target.value, devices.microphoneId, !media || !!media.getAudioTracks().length)}>
+      <option value="">System default camera</option>{devices.devices.filter((d) => d.kind === 'videoinput').map((d, i) => <option key={`${d.deviceId}-${i}`} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>)}
+    </select></label>
+    <label>Microphone device<select aria-label="Microphone device" value={devices.microphoneId} disabled={devices.busy} onChange={(e) => void devices.connect(!!media?.getVideoTracks().length, devices.cameraId, e.target.value)}>
+      <option value="">System default microphone</option>{devices.devices.filter((d) => d.kind === 'audioinput').map((d, i) => <option key={`${d.deviceId}-${i}`} value={d.deviceId}>{d.label || `Microphone ${i + 1}`}</option>)}
+    </select></label>
+    <div className={desk.deviceActions}>
+      <button type="button" disabled={devices.busy} onClick={() => void devices.connect()}>{devices.busy ? 'Connecting…' : 'Connect camera and microphone'}</button>
+      <button type="button" disabled={devices.busy} onClick={() => void devices.connect(true, devices.cameraId, devices.microphoneId, false)}>Camera only</button>
+      <button type="button" disabled={devices.busy} onClick={() => void devices.connect(false)}>Microphone only</button>
+      <button type="button" onClick={() => void devices.refresh()}>Refresh devices</button>
+      <button type="button" disabled={!media || state !== 'idle'} onClick={devices.disconnect}>Disconnect devices</button>
+    </div>
+    <p>HDMI cameras need a USB capture card. Network/RTSP cameras can connect through OBS or Streamlabs using the encoder setup. Bluetooth microphones appear here when supported by your operating system.</p>
+    {error && <p role="alert" className="text-danger">{error}</p>}
+  </div>;
+  const browserHealth = <>
+    <h2><Icon.Live size={18} />Stream health</h2>
+    <dl>
+      <div><dt>Camera input</dt><dd>{devices.info?.width && devices.info.height ? `${devices.info.width} × ${devices.info.height}` : 'Not connected'}</dd></div>
+      <div><dt>Frame rate</dt><dd>{devices.info?.frameRate ? `${Math.round(devices.info.frameRate)} fps` : 'Not measured'}</dd></div>
+      <div><dt>Microphone</dt><dd>{devices.microphoneOn ? 'Active' : 'Off'}</dd></div>
+      <div><dt>Encoder response</dt><dd>{encoderRtt !== null ? `${encoderRtt} ms` : 'Not broadcasting'}</dd></div>
+    </dl>
+    <p>{reconnectUntil ? 'Signal interrupted. Keep this tab open while the connection returns.' : state === 'live' ? 'Browser program is broadcasting. Check the watch page for viewer playback.' : 'Private rehearsal. No video is being sent to viewers.'}</p>
+  </>;
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 pb-16 pt-6 sm:px-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="flex flex-1 items-center gap-2 font-display text-[28px] font-extrabold"><Icon.Live size={28} className={live ? 'text-[#e5484d]' : ''} />Go live</h1>
-        {live && <span className="flex items-center gap-2 rounded-full bg-[#e5484d] px-3 py-1.5 text-[13px] font-extrabold uppercase tracking-wide text-white"><span className="h-2 w-2 animate-pulse rounded-full bg-white" />Live · {clock(st.stream.startedAt, now)}</span>}
-        {live && <span className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-[13px] font-semibold"><Icon.Eye size={16} />{viewers.toLocaleString(locale)} watching</span>}
+    <main className={`dark ${desk.shell}`} data-testid="live-studio">
+      <header className={desk.header}>
+        <Link href="/" className={desk.brand} aria-label="Free Me home"><Icon.Play size={30} /><span>Free Me</span></Link>
+        <h1>Go Live</h1>
+        <label className={desk.title}><span className="sr-only">Title</span><input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={100} placeholder="Name your broadcast" disabled={state !== 'idle' || live} /><Icon.Pencil size={16} /></label>
+        <span className={`${desk.badge} ${live ? desk.onAir : ''}`}>{reconnectUntil ? 'Reconnecting' : live ? `● ON AIR ${clock(st.stream.startedAt, now)}` : '● Private preview'}</span>
+        <button type="button" className={desk.settings} aria-label="Settings" onClick={() => openSettings()}><Icon.Settings size={19} /><span>Settings</span></button>
+        {live || state === 'live' || state === 'ending' ? <button type="button" className={`${desk.go} ${desk.stop}`} disabled={state === 'ending'} onClick={end}>{state === 'ending' ? 'Ending…' : 'End broadcast'}</button> : <button type="button" className={desk.go} disabled={state !== 'idle' || (preview ? !st.ingest.ready : !media || devices.busy)} onClick={() => void (preview ? publishEncoder() : goLive())}><Icon.Live size={18} />{state === 'starting' ? 'Starting…' : 'Go live'}</button>}
+        {preview && <button type="button" onClick={end} className="text-xs font-semibold">End preview</button>}
+      </header>
+      {error && !settingsOpen && <p role="alert" className={desk.notice}>{error}</p>}
+      {reconnectUntil && <div role="status" className={desk.notice}>Reconnecting · {Math.max(0, Math.ceil((reconnectUntil - now) / 1000))}s — Keep this tab open.</div>}
+      <div className={desk.body}>
+        <nav className={desk.rail} aria-label="Studio navigation">
+          <Link href="/" aria-label="Home" title="Home"><Icon.Home size={23} /></Link>
+          <Link href="/hub" aria-label="Creator Hub" title="Creator Hub"><Icon.Videos size={23} /></Link>
+          <span className={desk.selected} aria-label="Go Live" title="Go Live"><Icon.Live size={24} /></span>
+          {st.premium && <button type="button" aria-label="Encoder setup" title="Streamlabs / OBS" onClick={() => openSettings('encoder')}><Icon.Monitor size={23} /></button>}
+          <Link href="/live" aria-label="Browse live streams" title="Browse live"><Icon.Person size={23} /></Link>
+          <button type="button" aria-label="Broadcast settings" title="Settings" onClick={() => openSettings()}><Icon.Settings size={23} /></button>
+        </nav>
+        <ControlRoom streamId={st.stream.id} basic={basic} host={media} capture={capture} active={state === 'live'} sources={devicePanel}
+          cameraOn={devices.cameraOn} microphoneOn={devices.microphoneOn} deviceBusy={devices.busy} onCameraToggle={devices.toggleCamera} onMicrophoneToggle={devices.toggleMicrophone}
+          external={external} externalPreview={st.privatePreviewUrl ? <LiveVideo src={st.privatePreviewUrl} muted className="h-full w-full" /> : null}
+          health={external ? <StreamHealth health={st.ingest} /> : browserHealth}
+          chat={<LiveChat key={st.stream.id} streamId={st.stream.id} initial={[]} live={live} rules={st.stream.chat} className="h-full" />} />
       </div>
-      {error && <p role="alert" className="mt-4 rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
-
-      {st.premium && <Link href="/studio/live" className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-brand"><Icon.Monitor size={16} />Open Signal Room</Link>}
-
-      <div className="mt-5 grid gap-5">
-        {signal}
-        <div className="space-y-5">
-          <section className="overflow-hidden rounded-3xl border border-line bg-elevated">
-            <div className="space-y-3 p-4 sm:p-5">
-              <label className="block"><span className="text-[13px] font-semibold">Title</span><input className={`mt-1 ${inputClass}`} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={100} disabled={state !== 'idle' || live} /></label>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" disabled={picking || state === 'starting' || state === 'ending' || (live && state !== 'live')} onClick={() => void pick('camera')} aria-pressed={source === 'camera' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'camera' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.Camera size={18} />Camera</button>
-                <button type="button" disabled={picking || state === 'starting' || state === 'ending' || (live && state !== 'live')} onClick={() => void pick('screen')} aria-pressed={source === 'screen' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'screen' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.ScreenShare size={18} />Screen</button>
-                <span className="ml-auto flex gap-2">
-                  {state === 'live' || (live && st.stream.startedAt) ? (
-                    <button type="button" onClick={end} disabled={state === 'ending'} className="h-10 rounded-xl bg-[#e5484d] px-5 text-[14px] font-bold text-white disabled:opacity-60">{state === 'ending' ? 'Ending…' : 'End stream'}</button>
-                  ) : (
-                    <button type="button" onClick={() => void goLive()} disabled={!media || picking || state !== 'idle' || live} className="flex h-10 items-center gap-2 rounded-xl bg-[#e5484d] px-5 text-[14px] font-bold text-white disabled:opacity-50">{state === 'starting' && <Icon.Spinner size={16} className="animate-spin" />}Go live</button>
-                  )}
-                </span>
-              </div>
-              <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted">Viewers watch at <a href={watchUrl} target="_blank" rel="noreferrer" className="font-semibold text-brand">{watchUrl.replace(/^https?:\/\//, '')}</a><button type="button" onClick={() => void copy('link', watchUrl)} className="rounded-lg px-2 py-0.5 font-semibold hover:bg-surface">{copied === 'link' ? 'Copied' : 'Copy'}</button></p>
-            </div>
-          </section>
-
-          <LiveSettings key={st.stream.id} stream={st.stream} live={live || state === 'live'} onSaved={() => void load()} />
-          <ControlRoom streamId={st.stream.id} basic host={media} capture={capture} active={state === 'live'} />
-
-        </div>
-      </div>
-    </div>
+      <footer className={desk.footer}>
+        <span><Icon.Live size={15} />{reconnectUntil ? 'Signal interrupted' : live ? 'Broadcasting' : 'Private rehearsal · Not broadcasting'}</span>
+        <span><Icon.Eye size={15} />{viewers.toLocaleString(locale)} watching</span>
+        <button type="button" onClick={() => void copy('link', watchUrl)}>{copied === 'link' ? 'Watch link copied' : 'Copy watch link'}</button>
+        <a href={watchUrl} target="_blank" rel="noreferrer">Open watch page ↗</a>
+        <span><Icon.Monitor size={15} />Replay {st.stream.saveReplay ? 'enabled' : 'off'}</span>
+      </footer>
+      <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Broadcast settings" wide>
+        <nav className={desk.toolTabs} aria-label="Broadcast settings tabs">
+          <button type="button" aria-pressed={settingsTab === 'details'} onClick={() => setSettingsTab('details')}>Details</button>
+          {st.premium && <><button type="button" aria-pressed={settingsTab === 'encoder'} onClick={() => setSettingsTab('encoder')}>Streamlabs / OBS</button><button type="button" aria-pressed={settingsTab === 'history'} onClick={() => setSettingsTab('history')}>Past streams</button></>}
+        </nav>
+        {settingsTab === 'details' && <LiveSettings key={st.stream.id} stream={st.stream} live={live || state === 'live'} onSaved={() => void load()} />}
+        {settingsTab === 'encoder' && st.premium && <EncoderConnection encoder={st.encoder} live={live || state !== 'idle'} external={live && external} preview={preview} busy={devices.busy}
+          onKey={(streamKey) => setSt((current) => current?.encoder ? { ...current, encoder: { ...current.encoder, streamKey } } : current)}
+          onPrepare={async () => { if (!title.trim()) throw new Error('Enter a broadcast title first.'); await api('/hub/live', { method: 'PATCH', body: { title: title.trim() } }); await load(); }} />}
+        {settingsTab === 'history' && <div className="space-y-3 py-2">{st.past.length ? st.past.map((p) => <div key={p.id} className="rounded-xl border border-line p-3"><strong>{p.title}</strong><p className="mt-1 text-xs text-muted">{p.startedAt ? new Date(p.startedAt).toLocaleString(locale) : ''} · Peak {p.peakViewers}</p>{p.replayVideoId && <Link href="/hub" className="mt-2 inline-block text-sm text-brand">Recording in Creator Hub</Link>}</div>) : <p className="text-muted">Your past broadcasts will appear here.</p>}</div>}
+      </Dialog>
+    </main>
   );
 }

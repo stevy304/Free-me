@@ -68,6 +68,8 @@ export function LiveVideo({ src, muted = false, className = '' }: { src: string;
   useEffect(() => {
     const v = el.current!;
     let off = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
     setErr(null);
     setQualities([]);
     setSelected(-1);
@@ -75,6 +77,12 @@ export function LiveVideo({ src, muted = false, className = '' }: { src: string;
     const play = () => { v.play().catch(() => { if (!off) { v.muted = true; v.play().catch(() => undefined); } }); };
     if (v.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) {
       v.src = src;
+      v.onerror = () => {
+        if (off) return;
+        setErr('Waiting for the live video signal…');
+        clearTimeout(retry);
+        retry = setTimeout(() => { if (!off) { v.load(); play(); } }, Math.min(10_000, 1000 * 2 ** Math.min(attempts++, 4)));
+      };
       play();
     } else import('hls.js').then(({ default: H }) => {
       if (off) return;
@@ -82,20 +90,31 @@ export function LiveVideo({ src, muted = false, className = '' }: { src: string;
       const x = new H({ liveSyncDurationCount: 3, lowLatencyMode: false, maxBufferLength: 20, startLevel: -1 });
       player.current = x;
       x.on(H.Events.MANIFEST_PARSED, (_, data) => {
+        attempts = 0; setErr(null);
         setQualities(data.levels.map((level) => level.height));
         play();
       });
       x.on(H.Events.LEVEL_SWITCHED, (_, data) => setCurrent(x.levels[data.level]?.height ?? null));
-      x.on(H.Events.ERROR, (_e, d) => { if (d.fatal) { if (d.type === H.ErrorTypes.NETWORK_ERROR) x.startLoad(); else x.recoverMediaError(); } });
+      x.on(H.Events.ERROR, (_e, d) => {
+        if (!d.fatal || off) return;
+        if (d.type === H.ErrorTypes.NETWORK_ERROR) {
+          setErr('Waiting for the live video signal…'); clearTimeout(retry);
+          retry = setTimeout(() => {
+            if (off) return;
+            if (d.details === H.ErrorDetails.MANIFEST_LOAD_ERROR || d.details === H.ErrorDetails.MANIFEST_LOAD_TIMEOUT) x.loadSource(src);
+            else x.startLoad();
+          }, Math.min(10_000, 1000 * 2 ** Math.min(attempts++, 4)));
+        } else x.recoverMediaError();
+      });
       x.loadSource(src);
       x.attachMedia(v);
     }).catch(() => { if (!off) setErr('The live player could not load.'); });
-    return () => { off = true; player.current?.destroy(); player.current = null; v.removeAttribute('src'); v.load(); };
+    return () => { off = true; clearTimeout(retry); v.onerror = null; player.current?.destroy(); player.current = null; v.removeAttribute('src'); v.load(); };
   }, [src]);
 
   return (
     <div className={`relative overflow-hidden bg-black ${className}`}>
-      <video ref={el} controls playsInline muted={muted} className="h-full w-full" />
+      <video ref={el} controls playsInline onPlaying={() => setErr(null)} muted={muted} className="h-full w-full" />
       {qualities.length > 1 && (
         <label className="absolute right-3 top-3 flex items-center gap-2 rounded-lg bg-black/85 px-2 py-1.5 text-xs font-semibold text-white">
           Quality
