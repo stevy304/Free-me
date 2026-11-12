@@ -7,7 +7,8 @@
     "build": "next build && node scripts/standalone-assets.mjs",
     "start": "node .next/standalone/apps/web/server.js",
     "lint": "tsc --noEmit",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "test": "node --import tsx --test src/i18n/i18n.test.ts"
   },
   "dependencies": {
     "@free-me/shared": "0.1.0",

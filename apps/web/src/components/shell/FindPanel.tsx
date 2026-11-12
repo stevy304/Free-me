@@ -20,7 +20,7 @@ const remember = (q: string) => { try { localStorage.setItem(RECENT, JSON.string
  */
 export function FindPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
-  const { locale } = useShell();
+  const { locale, t } = useShell();
   const [q, setQ] = useState('');
   const [res, setRes] = useState<Results | null>(null);
   const [suggest, setSuggest] = useState<string[]>([]);
@@ -74,14 +74,14 @@ export function FindPanel({ open, onClose }: { open: boolean; onClose: () => voi
       <div className="flex h-full w-full flex-col overflow-hidden bg-elevated shadow-[var(--shadow)] sm:h-auto sm:max-h-[78vh] sm:max-w-[720px] sm:rounded-3xl">
         <div className="flex items-center gap-3 border-b border-line px-5 py-4">
           <Icon.Search size={24} className="shrink-0 text-brand" />
-          <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} placeholder="Find videos, Spaces and topics" aria-label="Find" autoComplete="off" spellCheck={false}
+          <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} placeholder={t('find.placeholder')} aria-label={t('header.find')} autoComplete="off" spellCheck={false}
             className="min-w-0 flex-1 bg-transparent font-display text-[20px] font-semibold outline-none placeholder:font-sans placeholder:text-[17px] placeholder:font-normal placeholder:text-faint" />
           <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-[12px] font-semibold text-muted hover:bg-surface"><span className="hidden sm:inline">esc</span><Icon.Close size={20} className="sm:hidden" /></button>
         </div>
         <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3">
           {res && res.videos.length > 0 && (
             <section className="mb-2">
-              <h4 className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Videos</h4>
+              <h4 className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{t('find.videos')}</h4>
               {res.videos.map((v) => { i++; const on = i === active; return (
                 <Link key={v.id} href={`/watch?v=${v.id}`} onClick={() => go(`/watch?v=${v.id}`, term)} className={row(on)}>
                   <div className="relative aspect-[16/10] w-24 shrink-0 overflow-hidden rounded-lg bg-surface">{v.thumbnailUrl && <img src={v.thumbnailUrl} alt="" className="h-full w-full object-cover" />}</div>
@@ -93,7 +93,7 @@ export function FindPanel({ open, onClose }: { open: boolean; onClose: () => voi
           )}
           {res && res.channels.length > 0 && (
             <section className="mb-2">
-              <h4 className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Spaces</h4>
+              <h4 className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{t('find.spaces')}</h4>
               {res.channels.map((c) => { i++; return (
                 <Link key={c.id} href={`/@${c.handle}`} onClick={() => go(`/@${c.handle}`, term)} className={row(i === active)}>
                   <Avatar name={c.name} src={c.avatarUrl} size={40} />
@@ -105,7 +105,7 @@ export function FindPanel({ open, onClose }: { open: boolean; onClose: () => voi
           {term.length >= 2 && res && !res.videos.length && !res.channels.length && <p className="px-3 py-6 text-center text-[14px] text-muted">Nothing matches &ldquo;{term}&rdquo; yet. Press Enter to search everything.</p>}
           {(term.length >= 2 ? suggest : recent).length > 0 && (
             <section>
-              <h4 className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{term.length >= 2 ? 'Try' : 'Recent'}</h4>
+              <h4 className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{term.length >= 2 ? t('find.try') : t('find.recent')}</h4>
               <div className="flex flex-wrap gap-2 px-3 pt-1">
                 {(term.length >= 2 ? suggest : recent).map((s) => { i++; return (
                   <Link key={s} href={`/results?q=${encodeURIComponent(s)}`} onClick={() => go(`/results?q=${encodeURIComponent(s)}`, s)} className={`rounded-xl px-3 py-1.5 text-[13px] font-medium ${i === active ? 'bg-brand text-on-brand' : 'bg-surface hover:bg-surface-hover'}`}>{s}</Link>
@@ -113,7 +113,7 @@ export function FindPanel({ open, onClose }: { open: boolean; onClose: () => voi
               </div>
             </section>
           )}
-          {term.length < 2 && !recent.length && <p className="px-3 py-6 text-center text-[14px] text-muted">Type at least two letters.</p>}
+          {term.length < 2 && !recent.length && <p className="px-3 py-6 text-center text-[14px] text-muted">{t('find.twoLetters')}</p>}
         </div>
         <div className="hidden gap-5 bg-surface px-5 py-2.5 text-[12px] text-muted sm:flex">
           <span><kbd className="rounded-md border border-line bg-elevated px-1.5 font-sans">↑</kbd> <kbd className="rounded-md border border-line bg-elevated px-1.5 font-sans">↓</kbd> move</span>

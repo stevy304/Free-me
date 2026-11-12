@@ -36,7 +36,8 @@ test('a creator signs in, creates a channel; a viewer tunes in, edits their prof
   await expect(creator.getByRole('heading', { name: 'End to End Kitchen' })).toBeVisible();
   await expect(creator.getByRole('link', { name: 'Edit your Space' })).toBeVisible();
 
-  const viewer = await (await browser.newContext({ locale: 'fr-FR' })).newPage();
+  // A browser language Free Me does not translate (German): the interface stays English, numbers and dates still render alike on server and browser.
+  const viewer = await (await browser.newContext({ locale: 'de-DE' })).newPage();
   const errors: string[] = [];
   viewer.on('pageerror', (e) => errors.push(e.message));
   await signIn(viewer, `viewer.${run}@example.com`);
@@ -78,4 +79,19 @@ test('unknown pages and channels show a clear message; phones get the floating d
   await page.goto('/');
   await expect(page.getByRole('navigation', { name: 'Main' }).last().getByRole('link', { name: 'Current' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+});
+
+test('the interface follows the browser language (French), and the language menu switches it (Kinyarwanda) for good', async ({ browser }) => {
+  const page = await (await browser.newContext({ locale: 'fr-FR' })).newPage();
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
+  await expect(page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'À la une' })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('link', { name: 'Se connecter' })).toBeVisible();
+  await page.getByRole('button', { name: 'Langue' }).click();
+  await page.getByRole('menuitemradio', { name: 'Kinyarwanda' }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'rw');
+  await expect(page.getByRole('banner').getByRole('link', { name: 'Injira' })).toBeVisible();
+  await page.goto('/login');
+  await expect(page.getByRole('heading', { name: 'Injira kuri Free Me' })).toBeVisible();
+  await expect(page.getByLabel('Aderesi imeyili')).toBeVisible();
 });
