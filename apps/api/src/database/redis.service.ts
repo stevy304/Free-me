@@ -32,6 +32,41 @@ export class RedisService implements OnModuleDestroy {
     return { count: cur.n, ttl: Math.ceil((cur.until - now) / 1000) };
   }
 
+  private readonly memo = new Map<string, { until: number; value: unknown }>();
+  private readonly inflight = new Map<string, Promise<unknown>>();
+
+  /**
+   * A value computed once and shared for `ttlSec` by every API instance (in this process only without Redis): for
+   * answers that are the same for everyone, such as the home page's topic shelves and trending. Concurrent misses
+   * in one process share one computation. The value must survive JSON (no BigInt, Date becomes a string).
+   */
+  async cached<T>(key: string, ttlSec: number, compute: () => Promise<T>): Promise<T> {
+    if (ttlSec <= 0) return compute();
+    const k = `fm:cache:${key}`;
+    const local = this.memo.get(k);
+    if (local && local.until > Date.now()) return local.value as T;
+    const running = this.inflight.get(k);
+    if (running) return running as Promise<T>;
+    const job = (async () => {
+      if (this.client) {
+        const hit = await this.client.get(k).catch(() => null);
+        if (hit !== null) return JSON.parse(hit) as T;
+      }
+      const value = await compute();
+      const text = JSON.stringify(value);
+      if (this.client) await this.client.set(k, text, 'EX', ttlSec).catch(() => undefined);
+      return JSON.parse(text) as T;
+    })();
+    this.inflight.set(k, job);
+    try {
+      const value = await job;
+      // A short local copy saves the Redis round trip on busy pages (a few seconds, well inside the TTL).
+      this.memo.set(k, { until: Date.now() + Math.min(5, ttlSec) * 1000, value });
+      if (this.memo.size > 5000) this.memo.clear();
+      return value;
+    } finally { this.inflight.delete(k); }
+  }
+
   /** Current values of several `hit` counters (0 when missing or expired), without changing them. */
   async peek(keys: string[]): Promise<number[]> {
     if (!keys.length) return [];

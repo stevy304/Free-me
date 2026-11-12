@@ -8,6 +8,8 @@ Values for local development are in [.env.example](.env.example). In production 
 | --- | --- | --- | --- |
 | `NODE_ENV` | | `development` | `production` turns on the strict checks below |
 | `PORT` | | `4000` | Listening port |
+| `API_PROCESSES` | | `1` | API processes sharing the port; `auto` = one per CPU core (a Node process uses one core). Set `auto` on app servers |
+| `FEED_CACHE_SECONDS` | | `60` (`0` in tests) | How long parts of the home page and Rising that are the same for everyone are reused. New videos appear on the home page within this time |
 | `DATABASE_URL` | yes | | PostgreSQL connection string (private address of server 3) |
 | `REDIS_URL` | production | | Redis: shared rate limits, the video job queue and view counting. Without it (development only) limits are per process and the API processes uploads itself |
 | `APP_URL` | production | `http://localhost:3000` | Public origin of the web app, e.g. `https://freeme.example`. Must be https in production |

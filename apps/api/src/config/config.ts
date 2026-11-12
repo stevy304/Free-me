@@ -68,6 +68,8 @@ export interface AppConfig {
   /** Number of proxies in front of the API (Caddy = 1), so client IPs come from X-Forwarded-For. */
   trustProxy: number;
   docsEnabled: boolean;
+  /** How long answers that are the same for everyone (home shelves, trending) are reused, in seconds; 0 = never (tests). */
+  feedCacheSeconds: number;
   /** Bearer token for /api/metrics and the worker's metrics port (Prometheus); null turns /api/metrics off. */
   metricsToken: string | null;
   /** Port where the worker serves its metrics (bind it to the private network); null: none. */
@@ -275,7 +277,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
     sessionTtlDays: Math.min(90, Math.max(1, Number(env.SESSION_TTL_DAYS || 30))),
     google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,
-    mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)), metricsToken, workerMetricsPort, workerMetricsHost: env.WORKER_METRICS_HOST?.trim() || '127.0.0.1',
+    mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)), feedCacheSeconds: nodeEnv === 'test' && !env.FEED_CACHE_SECONDS ? 0 : count('FEED_CACHE_SECONDS', 60), metricsToken, workerMetricsPort, workerMetricsHost: env.WORKER_METRICS_HOST?.trim() || '127.0.0.1',
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
     media, legal, billing, live,
     safety: {
