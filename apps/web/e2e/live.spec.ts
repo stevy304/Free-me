@@ -128,14 +128,23 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   if (supportsH264) {
     const restoredAt = await playbackTime();
     await expect.poll(playbackTime, { timeout: 20_000 }).toBeGreaterThan(restoredAt + 1);
-    const quality = viewer.getByLabel('Quality', { exact: true });
+    // The live player's quality menu (controls show while the pointer is over the picture).
+    const quality = viewer.getByRole('button', { name: 'Quality', exact: true });
+    const pick = async (label: string) => {
+      await viewer.getByLabel('Live video').hover();
+      await quality.click();
+      await viewer.getByRole('menuitemradio', { name: label, exact: true }).click();
+    };
     const height = () => video.evaluate((element) => (element as HTMLVideoElement).videoHeight);
-    await quality.selectOption({ label: '360p' });
+    await pick('360p');
     await expect.poll(height, { timeout: 30_000 }).toBe(360);
-    await quality.selectOption({ label: '720p' });
+    await pick('720p');
     await expect.poll(height, { timeout: 30_000 }).toBe(720);
-    await quality.selectOption('-1');
-    await expect(quality).toHaveValue('-1');
+    await pick('Auto');
+    await expect(quality).toHaveText(/^Auto/);
+    // At the newest pieces the player says Live; after rewinding it offers to go back.
+    await viewer.getByLabel('Live video').hover();
+    await expect(viewer.getByRole('button', { name: 'Live', exact: true })).toBeVisible();
   }
   expect(viewer.url()).toBe(watchPage);
 

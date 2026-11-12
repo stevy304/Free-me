@@ -5,7 +5,9 @@ import { useEffect, useState } from 'react';
 import * as Icon from '@/components/icons';
 import { Avatar } from '@/components/Avatar';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
-import { LiveChat, LiveVideo, type ChatLine } from '@/components/live/LiveChat';
+import { LiveChat, type ChatLine } from '@/components/live/LiveChat';
+import { LivePlayer } from '@/components/live/LivePlayer';
+import { PollCard, type Poll } from '@/components/live/LivePoll';
 import { api } from '@/lib/client-api';
 import { useRealtime } from '@/lib/realtime';
 import { useShell } from '@/components/shell/ShellContext';
@@ -13,7 +15,7 @@ import type { LiveInfo } from '../types';
 
 /** Watching a live stream: the picture, who is live, viewers and chat; when it ends, the replay once it is ready. */
 export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[] }) {
-  const { locale } = useShell();
+  const { locale, viewer } = useShell();
   const [s, setS] = useState(initial);
   const [reconnecting, setReconnecting] = useState(false);
   const room = `live:${s.id}`;
@@ -22,7 +24,8 @@ export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[
   useRealtime('started', reload, room);
   useRealtime('ended', () => setS((x) => ({ ...x, status: 'ENDED', playbackUrl: null })), room);
   useRealtime<{ title: string }>('title', (d) => setS((x) => ({ ...x, title: d.title })), room);
-  useRealtime<Pick<LiveInfo, 'title' | 'description' | 'chat' | 'captionsEnabled'>>('settings', (d) => setS((x) => ({ ...x, ...d })), room);
+  useRealtime<Pick<LiveInfo, 'title' | 'description' | 'chat' | 'captionsEnabled' | 'latencyMode'>>('settings', (d) => setS((x) => ({ ...x, ...d })), room);
+  useRealtime<{ poll: Poll | null }>('poll', (d) => setS((x) => ({ ...x, poll: d.poll })), room);
   // Live captions: the latest line from the host, shown over the picture while the viewer has them on.
   const [cc, setCc] = useState(() => { try { return localStorage.getItem('fm:live-cc') !== 'off'; } catch { return true; } });
   const [caption, setCaption] = useState<{ text: string; at: number } | null>(null);
@@ -37,9 +40,9 @@ export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[
       <div className="min-w-0">
         {live ? (
           <div className="relative">
-            <LiveVideo src={s.playbackUrl!} className="aspect-video w-full sm:rounded-[24px]" />
+            <LivePlayer src={s.playbackUrl!} latency={s.latencyMode ?? 'normal'} className="aspect-video w-full sm:rounded-[24px]" />
             {cc && caption && s.captionsEnabled !== false && (
-              <p aria-live="polite" className="pointer-events-none absolute inset-x-0 bottom-14 mx-auto w-fit max-w-[88%] rounded-lg bg-black/75 px-3 py-1.5 text-center text-[clamp(14px,2.2vw,22px)] font-semibold leading-snug text-white">{caption.text}</p>
+              <p aria-live="polite" className="pointer-events-none absolute inset-x-0 bottom-20 mx-auto w-fit max-w-[88%] rounded-lg bg-black/75 px-3 py-1.5 text-center text-[clamp(14px,2.2vw,22px)] font-semibold leading-snug text-white">{caption.text}</p>
             )}
             {s.captionsEnabled !== false && (
               <button type="button" onClick={toggleCc} aria-pressed={cc} aria-label="Live captions" title="Live captions"
@@ -72,6 +75,7 @@ export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[
             <Link href={`/@${s.channel.handle}`} className="flex min-w-0 items-center gap-3"><Avatar name={s.channel.name} src={s.channel.avatarUrl} size={44} /><span className="min-w-0"><span className="flex items-center gap-1 truncate font-semibold">{s.channel.name}{s.channel.isVerified && <VerifiedBadge size={15} />}</span><span className="block text-[13px] text-muted">@{s.channel.handle}</span></span></Link>
             <Link href={`/@${s.channel.handle}`} className="ml-auto flex h-10 items-center rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover">Visit Space</Link>
           </div>
+          {live && s.poll && <div className="mt-4"><PollCard key={s.poll.id} streamId={s.id} poll={s.poll} signedIn={!!viewer} /></div>}
           {s.description && <p className="mt-4 whitespace-pre-line rounded-2xl bg-surface p-4 text-[14px] leading-relaxed">{s.description}</p>}
         </div>
       </div>

@@ -999,6 +999,8 @@ model LiveStream {
   /// Keep the recording as a video afterwards, and how visible that video is at first
   saveReplay            Boolean           @default(true)
   replayVisibility      Visibility        @default(PRIVATE)
+  /// "normal" (about 10-15 s behind, steadiest on weak connections) or "low" (about 4-6 s, for talking with chat)
+  latencyMode           String            @default("normal")
   status                LiveStatus        @default(IDLE)
   /// "browser" or "rtmp", while live.
   source                String?

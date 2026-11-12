@@ -5,11 +5,12 @@ import * as Icon from '@/components/icons';
 import { inputClass } from '@/components/Pickers';
 import { api } from '@/lib/client-api';
 import { getSocket } from '@/lib/realtime';
+import { HostPoll } from './LivePoll';
 
 export interface LiveStreamSettings {
   id: string; title: string; description: string | null; visibility: 'PUBLIC' | 'UNLISTED'; scheduledFor: string | null;
   chat: { mode: 'everyone' | 'followers' | 'off'; slowModeSeconds: number }; captionsEnabled: boolean;
-  saveReplay?: boolean; replayVisibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+  saveReplay?: boolean; replayVisibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE'; latencyMode?: 'normal' | 'low';
 }
 
 const SLOW = [0, 5, 10, 30, 60, 120];
@@ -25,7 +26,7 @@ export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSett
   const [f, setF] = useState(() => ({
     description: stream.description ?? '', visibility: stream.visibility, scheduledFor: toLocalInput(stream.scheduledFor),
     chatMode: stream.chat.mode, slowModeSeconds: stream.chat.slowModeSeconds, captionsEnabled: stream.captionsEnabled,
-    saveReplay: stream.saveReplay ?? true, replayVisibility: stream.replayVisibility ?? 'PRIVATE',
+    saveReplay: stream.saveReplay ?? true, replayVisibility: stream.replayVisibility ?? 'PRIVATE', latencyMode: stream.latencyMode ?? 'normal',
   }));
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -57,6 +58,13 @@ export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSett
         </label>
         <label className="block"><span className={label}>Planned start (optional)</span>
           <input type="datetime-local" className={`mt-1 ${inputClass}`} value={f.scheduledFor} onChange={(e) => set('scheduledFor', e.target.value)} disabled={live} />
+        </label>
+        <label className="block sm:col-span-2"><span className={label}>Delay for viewers</span>
+          <select className={select} value={f.latencyMode} onChange={(e) => set('latencyMode', e.target.value as typeof f.latencyMode)} disabled={live}>
+            <option value="normal">Normal: about 10–15 seconds, steadiest on weak connections</option>
+            <option value="low">Low latency: about 4–6 seconds, for talking with chat</option>
+          </select>
+          {live && <span className="mt-1 block text-[12px] text-muted">Change it before you go live.</span>}
         </label>
         <label className="block"><span className={label}>Who can chat</span>
           <select className={select} value={f.chatMode} onChange={(e) => set('chatMode', e.target.value as typeof f.chatMode)}>
@@ -92,6 +100,7 @@ export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSett
         {note && <span role="status" className="text-[13px] font-semibold text-brand">{note}</span>}
       </div>
       {f.captionsEnabled && <HostCaptions streamId={stream.id} live={live} />}
+      <HostPoll streamId={stream.id} live={live} />
     </section>
   );
 }
