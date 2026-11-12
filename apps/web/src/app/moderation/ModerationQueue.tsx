@@ -13,7 +13,7 @@ interface Item {
   id: string; reason: string; reasonLabel: string; details: string | null; timestampSeconds: number | null; status: string; createdAt: string; resolvedAt: string | null; resolution: string | null; reporterEmail: string | null; automatic?: boolean;
   notice: { claimantName: string; claimantEmail: string; claimantAddress: string; originalWork: string; signature: string } | null;
   counter: { name: string; address: string; statement: string; submittedAt: string } | null;
-  video: { id: string; title: string; status: string; visibility: string; takenDownAt: string | null; takedownReason: string | null; thumbnailUrl: string | null; durationSeconds: number };
+  video: { id: string; title: string; status: string; visibility: string; takenDownAt: string | null; takedownReason: string | null; thumbnailUrl: string | null; durationSeconds: number; heldForReviewAt?: string | null };
   channel: { handle: string; name: string; strikes: { copyright: number; guidelines: number } };
   openReportsOnVideo: number;
 }
@@ -72,6 +72,7 @@ export function ModerationQueue() {
                   <span className={`rounded-full px-2.5 py-0.5 text-[12px] font-semibold ${r.reason === 'COPYRIGHT' ? 'bg-brand-soft text-brand' : 'bg-danger/10 text-danger'}`}>{r.reasonLabel}</span>
                   <span className="text-muted" suppressHydrationWarning>{timeAgo(r.createdAt, locale)}</span>
                   {r.openReportsOnVideo > 1 && <span className="text-[12px] font-medium text-danger">{r.openReportsOnVideo} open reports on this video</span>}
+                  {r.video.heldForReviewAt && !r.video.takenDownAt && <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[12px] font-semibold text-danger">Hidden until you decide (many reports)</span>}
                   {r.video.takenDownAt && <span className="rounded-full bg-surface px-2.5 py-0.5 text-[12px] font-medium">Removed</span>}
                 </div>
                 <p className="mt-1.5 text-[16px] font-semibold">{r.video.title}</p>

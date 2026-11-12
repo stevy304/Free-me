@@ -8,6 +8,8 @@ Values for local development are in [.env.example](.env.example). In production 
 | --- | --- | --- | --- |
 | `NODE_ENV` | | `development` | `production` turns on the strict checks below |
 | `PORT` | | `4000` | Listening port |
+| `API_PROCESSES` | | `1` | API processes sharing the port; `auto` = one per CPU core (a Node process uses one core). Set `auto` on app servers |
+| `FEED_CACHE_SECONDS` | | `60` (`0` in tests) | How long parts of the home page and Rising that are the same for everyone are reused. New videos appear on the home page within this time |
 | `DATABASE_URL` | yes | | PostgreSQL connection string (private address of server 3) |
 | `REDIS_URL` | production | | Redis: shared rate limits, the video job queue and view counting. Without it (development only) limits are per process and the API processes uploads itself |
 | `APP_URL` | production | `http://localhost:3000` | Public origin of the web app, e.g. `https://freeme.example`. Must be https in production |
@@ -40,6 +42,9 @@ Values for local development are in [.env.example](.env.example). In production 
 | `MAX_UPLOAD_MB` | | `20480` (20 GB) | Largest upload |
 | `UPLOAD_PART_MB` | | `16` | Base upload part size in MiB (5 or more). New S3 uploads of at least 4 GiB use at least 64 MiB per part. |
 | `SCRATCH_DIR` | | `/tmp/freeme-scratch` | Worker's working folder (source and renditions while processing): put it on a fast local disk with room for the largest uploads |
+| `METRICS_TOKEN` | | none | 24+ random characters (`openssl rand -hex 24`). Turns on `/api/metrics` and the worker's metrics port for Prometheus, which sends it as `Authorization: Bearer …`. Without it both are off. See [MONITORING.md](MONITORING.md) |
+| `WORKER_METRICS_PORT` | | none | Port where each worker serves `/metrics` (e.g. `9464`; one port per worker process). Needs `METRICS_TOKEN` |
+| `WORKER_METRICS_HOST` | | `127.0.0.1` | Address that port listens on: the media node's private address when Prometheus runs on another server |
 | `WORKER_CONCURRENCY` | | `2` | Foreground jobs, including first-playable video processing, per worker instance |
 | `WORKER_UPGRADE_CONCURRENCY` | | `1` | Background quality upgrades and caption backfills per worker instance |
 | `TRANSCODE_PRESET` | | `veryfast` | x264 preset: faster = quicker processing, slightly larger files |
@@ -49,17 +54,22 @@ Values for local development are in [.env.example](.env.example). In production 
 | `CHUNK_SECONDS` | | `30` | Length of one piece (rounded to an even number, so keyframes stay on the 2-second grid) |
 | `CHUNK_CONCURRENCY` | | `1` | Pieces one worker instance encodes at once (x264 already uses every core, so 1 is right for most servers) |
 | `NODE_NAME` | | the host name | Name of this media server. Pieces encoded on the server that planned the work skip object storage; set it only if two servers share a host name |
+| `HD_MIN_VIEWS` | | `100` | Popularity-based encoding: 1080p and above are made only once a video has this many views (checked every minute by the worker). Premium creators' uploads get them at once. `0` makes every quality straight away |
+| `FREE_MAX_QUALITY` | | `720` | Highest quality free viewers get (`144`, `240`, `360`, `480`, `720`, `1080`, `1440` or `2160`); Premium members and the video's owner get every quality. `0` = no limit. Applies to videos processed after it is set. It saves delivery cost, it is not protection: the higher-quality files of public videos are still on the CDN |
+| `SOURCE_RETENTION_DAYS` | | `0` (keep) | Delete a ready video's original upload after this many days, keeping its renditions. Originals are often the largest file, so this can cut storage a lot. A video that has not reached `HD_MIN_VIEWS` by then keeps up to 720p for good, and the original cannot be used again (for example for new formats later). Try `90` once you are sure |
 | `COPY_TOP_RUNG` | | `true` | Use the upload's own H.264 as the top quality when it is suitable (exact size, 8-bit, normal colour, keyframe at least every 4.5 s, bitrate viewers can stream): the most expensive encode is skipped. `false` always re-encodes |
 | `VIDEO_ENCODER` | | `libx264` | `nvenc` (NVIDIA GPU) or `qsv` (Intel Quick Sync) for a media server with a GPU: several times faster. Falls back to `libx264` by itself if the GPU encoder fails |
 | `FFMPEG_PATH`, `FFPROBE_PATH` | | `ffmpeg`, `ffprobe` | Binaries |
 | `QUEUE_PREFIX` | | `fm` | Redis key prefix for the job queue |
 | `WHISPER_CPP_PATH`, `WHISPER_MODEL` | | off | Automatic captions on the media server: the whisper.cpp program (e.g. `/opt/whisper.cpp/build/bin/whisper-cli`) and a model file (e.g. `ggml-small.bin`). Set both or neither. See DEPLOYMENT.md → Automatic captions |
+| `AUTO_CAPTIONS_ENGLISH` | | `true` | With automatic captions: videos spoken in another language also get English captions (Whisper's translation). Use a multilingual model (not an `.en` one). `false` keeps only the spoken language |
 | `WHISPER_THREADS` | | `4` | CPU threads for one transcription |
 | `SAFETY_SCAN_URL` | | off | Optional outside matching service for uploads (e.g. a PDQ/TMK service such as Meta's Hasher-Matcher-Actioner behind a small adapter, or a vendor). Receives `POST { videoId, sha256, md5, durationSeconds, frames: [base64 JPEG] }`, answers `{ match: boolean, label? }` |
 | `SAFETY_SCAN_TOKEN` | | | Sent as `Authorization: Bearer …` to the scanner |
 | `SAFETY_SCAN_TIMEOUT_MS` | | `60000` | How long to wait for the scanner |
 | `SAFETY_SCAN_FAIL_CLOSED` | | `false` | `true`: hold uploads when the scanner cannot be reached, instead of letting them through |
 | `NEW_ACCOUNT_DAILY_UPLOADS` | | `5` | Uploads a day for accounts in their first week |
+| `REPORT_HOLD_THRESHOLD` | | `5` | Reports from this many different accounts (each at least a day old) hide a video from everyone but its owner until a moderator decides; child-safety reports need only 2. `0` turns it off |
 
 ## Web (apps/web)
 
@@ -85,7 +95,22 @@ To make someone an administrator (everything, including every Premium feature su
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `PREMIUM_PRICE_USD_CENTS` | | `1000` ($10) | Premium, per month |
+| `CREATOR_PASS_PRICE_USD_CENTS` | | `200` ($2) | Creator pass per **year**: needed to upload after the free uploads. Premium includes it. Administrators can change it in the app |
+| `CREATOR_FREE_VIDEOS` | | `3` | Uploads every Space gets before it needs the Creator pass; `0` = the pass from the first upload. Administrators can change it in the app |
+| `PREMIUM_PRICE_BY_COUNTRY` | | `RW=414` | Premium (Pro) per month in some countries, in US cents: RW=414 is about RWF 6,000. People whose profile country is listed pay that price; everyone else pays `PREMIUM_PRICE_USD_CENTS`. Set it empty for one price everywhere. Administrators can change it in the app |
+| `PLUS_PRICE_USD_CENTS`, `PLUS_PRICE_BY_COUNTRY` | | `300`, `RW=172` | Plus (no ads, every quality) per month: $3, about RWF 2,500 in Rwanda |
+| `FAMILY_PRICE_USD_CENTS`, `FAMILY_PRICE_BY_COUNTRY` | | `1200`, `RW=621` | Family & TV per month: $12, about RWF 9,000 in Rwanda |
+| `FAMILY_SEATS` | | `4` | People in a Family & TV plan, the holder included |
+| `SUBSCRIPTION_CREATOR_SHARE_PERCENT` | | `50` | Share of Plus and Family money paid to monetised creators, by members' watch time |
+| `CREATOR_PASS_VIDEOS_PER_YEAR` | | `50` | Uploads the Creator pass allows in any 365 days (Pro: no limit) |
+| `AIRTEL_CLIENT_ID`, `AIRTEL_CLIENT_SECRET` | | none | Airtel Money Collections (Airtel Africa developer portal). Both or neither |
+| `AIRTEL_BASE_URL` | | `https://openapiuat.airtel.africa` (sandbox) | `https://openapi.airtel.africa` when live |
+| `AIRTEL_COUNTRY`, `AIRTEL_CURRENCY` | | `RW`, `RWF` | Where the Airtel Money account is |
+| `AIRTEL_RATE_PER_USD` | | `MOMO_RATE_PER_USD` | RWF for one US dollar for Airtel charges |
 | `AD_PRICE_PER_DAY_USD_CENTS` | | `300` ($3) | One day of an ad campaign |
+| `AD_MIN_BUDGET_USD_CENTS` | | `700` ($7) | Smallest funds an ad can start with |
+| `VERIFICATION_PRICE_USD_CENTS` | | `1000` ($10) | Verified business badge, per year, paid after an administrator approved the business |
+| `AD_CPM_USD_CENTS` | | `100` ($1) | Price of 1,000 ad views. A paid day buys `AD_PRICE_PER_DAY_USD_CENTS × 1000 / AD_CPM_USD_CENTS` views at most (3,000 by default); views not delivered in the days bought keep running for as many days again. Administrators can change it in the app |
 | `PAYOUT_MINIMUM_USD_CENTS` | | `1000` ($10) | Smallest withdrawal a creator can ask for |
 | `MOMO_SUBSCRIPTION_KEY`, `MOMO_API_USER`, `MOMO_API_KEY` | for MTN MoMo | off | MTN MoMo **Collections** product: the primary subscription key and the API user and key from momodeveloper.mtn.com (sandbox) or the MTN partner portal (live). Set all three or none |
 | `MOMO_BASE_URL` | | `https://sandbox.momodeveloper.mtn.com` | Live: the address MTN gives you (e.g. `https://proxy.momoapi.mtn.com`) |

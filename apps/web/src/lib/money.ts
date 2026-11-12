@@ -8,6 +8,13 @@ export function money(minor: number | string, currency: string, locale = 'en') {
 
 export const usd = (cents: number, locale = 'en') => money(cents, 'USD', locale);
 
-/** The charge in a payment method's currency for a dollar price (MoMo rounds up to a whole unit, like the API). */
-export const charge = (usdCents: number, m: { currency: string; perUsd: number }) =>
-  m.currency === 'USD' ? usdCents : Math.ceil((usdCents / 100) * m.perUsd) * 10 ** digits(m.currency);
+/**
+ * The charge in a payment method's currency for a dollar price, rounded like the API: whole units, and amounts of
+ * 1,000 or more in a currency without cents to the nearest 100 (RWF 2,494 → 2,500).
+ */
+export const charge = (usdCents: number, m: { currency: string; perUsd: number }) => {
+  if (m.currency === 'USD') return usdCents;
+  const d = digits(m.currency);
+  const exact = (usdCents / 100) * m.perUsd;
+  return (d === 0 && exact >= 1000 ? Math.round(exact / 100) * 100 : Math.ceil(exact)) * 10 ** d;
+};

@@ -18,11 +18,12 @@ let ctx: Awaited<ReturnType<typeof makeApp>>;
 beforeAll(async () => {
   writeFileSync(model, 'not a real model');
   writeFileSync(fakeWhisper, `#!/bin/bash
-echo "$@" > ${argsLog}
-of=""; lang="auto"
-while [ $# -gt 0 ]; do case "$1" in -of) of="$2"; shift;; -l) lang="$2"; shift;; esac; shift; done
+echo "$@" >> ${argsLog}
+of=""; lang="auto"; tr=""
+while [ $# -gt 0 ]; do case "$1" in -of) of="$2"; shift;; -l) lang="$2"; shift;; -tr) tr=1;; esac; shift; done
 [ "$lang" = "auto" ] && lang="sw"
 echo "whisper_full_with_state: auto-detected language: $lang (p = 0.93)" >&2
+if [ -n "$tr" ]; then printf 'WEBVTT\\n\\n00:00:00.000 --> 00:00:02.000\\nGood morning\\n\\n00:00:02.000 --> 00:00:04.000\\nWelcome\\n' > "$of.vtt"; exit 0; fi
 printf 'WEBVTT\\n\\n00:00:00.000 --> 00:00:02.000\\nHabari za asubuhi\\n\\n00:00:02.000 --> 00:00:04.000\\n<font color="red">Karibu</font>\\n' > "$of.vtt"
 `);
   chmodSync(fakeWhisper, 0o755);
@@ -98,14 +99,17 @@ test('automatic captions after processing: language detected, stored as automati
   const id = start.videoId as string;
 
   let caps: any[] = [];
-  for (let i = 0; i < 200 && !caps.length; i++) { await new Promise((r) => setTimeout(r, 300)); caps = (await c.agent.get(`/api/hub/videos/${id}`)).body.video.captions; }
-  expect(caps).toEqual([expect.objectContaining({ language: 'sw', source: 'AUTO', cues: 2 })]);
+  for (let i = 0; i < 200 && caps.length < 2; i++) { await new Promise((r) => setTimeout(r, 300)); caps = (await c.agent.get(`/api/hub/videos/${id}`)).body.video.captions; }
+  // In the language spoken, and translated into English.
+  expect(caps).toEqual(expect.arrayContaining([expect.objectContaining({ language: 'sw', source: 'AUTO', cues: 2 }), expect.objectContaining({ language: 'en', source: 'AUTO', cues: 2 })]));
   expect(readFileSync(argsLog, 'utf8')).toContain('-l auto');
+  expect(readFileSync(argsLog, 'utf8')).toContain('-l sw -tr');
+  expect((await c.agent.get(`/api/videos/${id}/captions/en.vtt`).expect(200)).text).toContain('Good morning');
   const vtt = (await c.agent.get(`/api/videos/${id}/captions/sw.vtt`).expect(200)).text;
   expect(vtt).toBe('WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nHabari za asubuhi\n\n00:00:02.000 --> 00:00:04.000\nKaribu\n');
   expect(existsSync(join(storageDir, 'prv', id, 'captions', 'sw.auto.vtt'))).toBe(true);
   expect(existsSync(join(ctx.config.media.scratchDir, `${id}.speech.wav`))).toBe(false); // cleaned up
-  expect((await c.agent.get(`/api/videos/${id}`)).body.video.captions).toEqual([{ language: 'sw', auto: true, url: `/api/videos/${id}/captions/sw.vtt` }]);
+  expect((await c.agent.get(`/api/videos/${id}`)).body.video.captions).toEqual([{ language: 'en', auto: true, url: `/api/videos/${id}/captions/en.vtt` }, { language: 'sw', auto: true, url: `/api/videos/${id}/captions/sw.vtt` }]);
 
   // The creator's own file replaces the automatic one (and its file).
   await c.agent.put(`/api/hub/videos/${id}/captions/sw`).set('Origin', WEB).set('Content-Type', 'text/vtt').send('WEBVTT\n\n00:00.000 --> 00:04.000\nHabari, rafiki\n').expect(200);
@@ -120,5 +124,5 @@ test('automatic captions after processing: language detected, stored as automati
   await ctx.prisma.video.update({ where: { id }, data: { language: 'fr' } });
   await new MediaJobs(ctx.prisma, ctx.app.get(STORAGE), ctx.config, null).transcode(id, true);
   expect(readFileSync(argsLog, 'utf8')).toContain('-l fr');
-  expect((await c.agent.get(`/api/hub/videos/${id}`)).body.video.captions.map((x: any) => `${x.language}:${x.source}`)).toEqual(['fr:AUTO', 'sw:UPLOADED']);
+  expect((await c.agent.get(`/api/hub/videos/${id}`)).body.video.captions.map((x: any) => `${x.language}:${x.source}`)).toEqual(['en:AUTO', 'fr:AUTO', 'sw:UPLOADED']);
 }, 180_000);

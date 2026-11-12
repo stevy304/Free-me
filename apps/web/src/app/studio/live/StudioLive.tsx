@@ -7,13 +7,14 @@ import { inputClass } from '@/components/Pickers';
 import styles from '@/components/live/ControlRoom.module.css';
 import { ControlRoom } from '@/components/live/ControlRoom';
 import { LiveChat } from '@/components/live/LiveChat';
+import { LiveSettings, type LiveStreamSettings } from '@/components/live/LiveSettings';
 import { api } from '@/lib/client-api';
 import { getSocket, useRealtime } from '@/lib/realtime';
 import { useShell } from '@/components/shell/ShellContext';
 
 interface Studio {
   premium: boolean;
-  stream: { id: string; title: string; status: 'IDLE' | 'LIVE' | 'ENDED'; startedAt: string | null; viewers: number; peakViewers: number };
+  stream: LiveStreamSettings & { status: 'IDLE' | 'LIVE' | 'ENDED'; startedAt: string | null; viewers: number; peakViewers: number };
   encoder: { server: string; streamKey: string } | null;
   past: Array<{ id: string; title: string; startedAt: string | null; endedAt: string | null; peakViewers: number; replayVideoId: string | null }>;
 }
@@ -258,6 +259,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
                 <button type="button" disabled={state === 'starting' || state === 'ending'} onClick={() => void pick('screen')} aria-pressed={source === 'screen' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'screen' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.ScreenShare size={18} />Screen</button>
 
           </div>
+          <LiveSettings key={st.stream.id} stream={st.stream} live={live || state === 'live'} onSaved={() => void load()} />
           <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
             <h2 className="flex items-center gap-2 font-display text-[18px] font-bold"><Icon.Monitor size={20} />OBS, TV encoder or camera</h2>
             {st.encoder ? (
@@ -286,7 +288,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-[12px] text-muted">Each recording is saved as a private video. Publish it from Creator Hub to keep it as a replay.</p>
+              <p className="mt-2 text-[12px] text-muted">Recordings are saved as videos (with English captions) as set in Stream settings. Manage them in Creator Hub.</p>
             </section>
           )}
 
@@ -332,6 +334,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
             </div>
           </section>
 
+          <LiveSettings key={st.stream.id} stream={st.stream} live={live || state === 'live'} onSaved={() => void load()} />
           <ControlRoom streamId={st.stream.id} basic host={media} capture={capture} active={state === 'live'} />
 
         </div>

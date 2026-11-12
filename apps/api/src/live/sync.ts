@@ -74,10 +74,19 @@ export async function finishLive(prisma: PrismaClient, storage: Storage, sync: L
   const s = await prisma.liveStream.findUnique({ where: { id } });
   if (!s || s.replayVideoId) return;
   const recording = join(sync.dir, 'replay.mp4');
+  if (!s.saveReplay) {
+    // The host chose not to keep a recording: remove the live copy and stop.
+    await storage.deletePrefix(livePrefix(id)).catch(() => undefined);
+    await rm(sync.dir, { recursive: true, force: true }).catch(() => undefined);
+    log.log(`live ${id}: ended; no recording kept (replay turned off)`);
+    return;
+  }
   try {
     await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-allowed_extensions', 'ALL', '-i', join(sync.dir, sync.replayPlaylist), '-c', 'copy', '-movflags', '+faststart', recording]);
     const size = (await stat(recording)).size;
-    const v = await prisma.video.create({ data: { channelId: s.channelId, title: `${s.title} (live)`.slice(0, 100), status: 'PROCESSING', visibility: 'PRIVATE', processingStage: 'Waiting to process', sourceSizeBytes: BigInt(size) } });
+    // The replay starts with the visibility and description the host chose (private by default).
+    const v = await prisma.video.create({ data: { channelId: s.channelId, title: `${s.title} (live)`.slice(0, 100), description: s.description, status: 'PROCESSING', visibility: s.replayVisibility,
+      ...(s.replayVisibility === 'PUBLIC' ? { publishedAt: new Date() } : {}), processingStage: 'Waiting to process', sourceSizeBytes: BigInt(size) } });
     const key = sourceKey(v.id, '.mp4');
     await storage.putFile(key, recording, { contentType: 'video/mp4' });
     await prisma.video.update({ where: { id: v.id }, data: { sourceFileS3Key: key } });

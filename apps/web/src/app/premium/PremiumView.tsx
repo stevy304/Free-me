@@ -14,13 +14,14 @@ import { useShell } from '@/components/shell/ShellContext';
 interface Me { premium: { active: boolean; until: string | null; admin?: boolean }; payments: Payment[] }
 
 const PERKS = [
-  { icon: 'badge', title: 'Verified badge', text: 'Show the Free Me seal on your Space, videos and conversations.' },
-  { icon: Icon.Wallet, title: 'Earn from your videos', text: 'Eligible creators share 60% of daily ad revenue based on the ads shown on their videos.' },
+  { icon: 'badge', title: 'Premium badge', text: 'A gold Premium seal on your Space, videos and conversations. (The teal Verified seal is only for Spaces whose identity Free Me checked.)' },
+  { icon: Icon.Wallet, title: 'Earn from your videos', text: 'Earn from the ads that play on your videos and from the time members spend watching them.' },
   { icon: Icon.Live, title: 'Live Studio', text: 'Stream with OBS or a hardware encoder, and manage your broadcast from Live Studio.' },
   { icon: Icon.Hub, title: 'Premium dashboard', text: 'Your membership, earnings, withdrawals and tools in one place.' },
+  { icon: Icon.Upload, title: 'Unlimited uploads and Plus', text: 'No yearly upload limit, every quality at once, and Plus (no ads) included.' },
 ] as const;
 
-const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Premium', AD_CAMPAIGN: 'Ad campaign', CREATOR_SUPPORT: 'Creator support' };
+const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Pro', AD_CAMPAIGN: 'Ad funds', CREATOR_PASS: 'Creator pass', PLUS: 'Plus', FAMILY: 'Family & TV', VERIFICATION: 'Verified business', CREATOR_SUPPORT: 'Creator support' };
 const STATUS: Record<Payment['status'], string> = { PENDING: 'Waiting', SUCCEEDED: 'Paid', FAILED: 'Not paid' };
 
 export function PremiumView({ viewer }: { viewer: Viewer }) {
@@ -40,7 +41,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
   useEffect(() => { void load(); }, [load]);
 
   const paid = useCallback((p: Payment) => {
-    if (p.status === 'SUCCEEDED') { setNotice('Welcome to Premium. Your verified badge is on.'); setExtend(false); void load(); router.refresh(); }
+    if (p.status === 'SUCCEEDED') { setNotice('Welcome to Premium. Your Premium badge is on.'); setExtend(false); void load(); router.refresh(); }
     else setError(p.failureReason ?? 'The payment did not go through.');
   }, [load, router]);
   // Back from the card checkout: follow that payment.
@@ -92,18 +93,18 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
         <div aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-[radial-gradient(circle,#2bc4b8_0%,transparent_65%)] opacity-40" />
         <div aria-hidden className="pointer-events-none absolute -bottom-28 left-10 h-72 w-72 rounded-full bg-[radial-gradient(circle,#f2a93b_0%,transparent_65%)] opacity-25" />
         <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center">
-          <VerifiedBadge size={72} label="Free Me verified seal" />
+          <VerifiedBadge size={72} kind="premium" />
           <div className="flex-1">
             <p className="text-[13px] font-bold uppercase tracking-[0.18em] text-[#ffd88a]">Free Me Premium</p>
             {active ? (
               <>
-                <h1 className="mt-1 flex items-center gap-2 font-display text-[30px] font-extrabold leading-tight sm:text-[38px]">{name}<VerifiedBadge size={28} /></h1>
+                <h1 className="mt-1 flex items-center gap-2 font-display text-[30px] font-extrabold leading-tight sm:text-[38px]">{name}<VerifiedBadge size={28} kind="premium" /></h1>
                 <p className="mt-1 text-[15px] text-[#c9d6d4]">{until && until.getTime() > Date.now() ? <>Member until <b className="text-white">{until.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })}</b> · {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left</> : 'Every Premium feature is included with your administrator account.'}</p>
               </>
             ) : (
               <>
                 <h1 className="mt-1 font-display text-[30px] font-extrabold leading-tight sm:text-[40px]">Premium for creators</h1>
-                <p className="mt-2 text-[16px] text-[#c9d6d4]"><b className="text-[22px] text-white">{usd(plans.premium.usdCents, locale)}</b> per month.</p>
+                <p className="mt-2 text-[16px] text-[#c9d6d4]"><b className="text-[22px] text-white">{usd(plans.premium.usdCents, locale)}</b> per month{plans.premium.country ? <> · your price in {(() => { try { return new Intl.DisplayNames([locale], { type: 'region' }).of(plans.premium.country!) ?? plans.premium.country; } catch { return plans.premium.country; } })()}</> : null}.</p>
               </>
             )}
           </div>
@@ -136,7 +137,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
           <ul className="grid content-start gap-3 sm:grid-cols-2">
             {PERKS.map((p) => (
               <li key={p.title} className="rounded-3xl border border-line bg-elevated p-5">
-                <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-soft text-brand">{p.icon === 'badge' ? <VerifiedBadge size={26} /> : <p.icon size={22} />}</span>
+                <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-soft text-brand">{p.icon === 'badge' ? <VerifiedBadge size={26} kind="premium" /> : <p.icon size={22} />}</span>
                 <p className="mt-3 font-display text-[17px] font-bold">{p.title}</p>
                 <p className="mt-1 text-[14px] leading-relaxed text-muted">{p.text}</p>
               </li>
@@ -157,7 +158,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
                   <tr key={p.id}>
                     <td className="px-4 py-3 text-muted">{new Date(p.createdAt).toLocaleDateString(locale)}</td>
                     <td className="px-4 py-3">{PURPOSE[p.purpose]}{p.months ? `, ${p.months} ${p.months === 1 ? 'month' : 'months'}` : ''}</td>
-                    <td className="px-4 py-3">{p.method === 'mtn_momo' ? 'MTN MoMo' : 'Card'}</td>
+                    <td className="px-4 py-3">{p.method === 'mtn_momo' ? 'MTN MoMo' : p.method === 'airtel_money' ? 'Airtel Money' : p.method === 'manual' ? 'Sent by hand' : 'Card'}</td>
                     <td className="px-4 py-3 tabular-nums">{money(p.amount, p.currency, locale)}</td>
                     <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${p.status === 'SUCCEEDED' ? 'bg-brand-soft text-brand' : p.status === 'FAILED' ? 'bg-danger/10 text-danger' : 'bg-surface'}`} title={p.failureReason ?? undefined}>{STATUS[p.status]}</span></td>
                   </tr>

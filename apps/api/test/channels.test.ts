@@ -84,7 +84,7 @@ describe('catalog', () => {
 
     const p1 = (await request(ctx.http).get('/api/videos?limit=2').expect(200)).body;
     expect(p1.videos.map((v: any) => v.title)).toEqual(['Public 0', 'Public 1']);
-    expect(p1.videos[0].channel).toEqual({ handle: 'maker', name: 'Maker', avatarUrl: null, isVerified: false });
+    expect(p1.videos[0].channel).toEqual({ handle: 'maker', name: 'Maker', avatarUrl: null, isVerified: false, badge: null });
     const p2 = (await request(ctx.http).get(`/api/videos?limit=2&cursor=${encodeURIComponent(p1.nextCursor)}`)).body;
     const p3 = (await request(ctx.http).get(`/api/videos?limit=2&cursor=${encodeURIComponent(p2.nextCursor)}`)).body;
     expect([...p2.videos, ...p3.videos].map((v: any) => v.title)).toEqual(['Public 2', 'Public 3', 'Public 4']);

@@ -21,6 +21,8 @@ import { mediaOrigin, warmUp } from '@/lib/warmup';
 
 export interface WatchVideo extends VideoCardData {
   description: string | null; status: string; visibility: string; likeCount: number; commentCount: number; commentsOpen: boolean; playbackUrl: string | null; processingStage: string | null;
+  /** Set when this viewer gets qualities up to this height only (higher ones come with Premium). */
+  qualityLimit?: number | null;
   takenDownAt: string | null; storyboardUrl?: string | null; captions?: CaptionTrack[]; category: { name: string; slug: string } | null; channel: VideoCardData['channel'] & { followerCount: number };
 }
 export interface WatchViewer { signedIn: boolean; isOwner: boolean; following: boolean; saved: boolean; reaction: 'like' | 'dislike' | 'none'; resumeAt: number }
@@ -187,6 +189,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
           {/* Tablets and computers: title, numbers and actions under the video, on the stage. */}
           <div className="hidden pt-5 text-white sm:block">
             <h1 className="text-[24px] font-extrabold leading-[1.15] lg:text-[30px]">{v.title}</h1>
+            {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#9fb0ad]">Up to {v.qualityLimit}p · <Link href="/plans" className="font-semibold text-[#2bb5ab] hover:underline">every quality and no ads with Plus</Link></p> : null}
             <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
               <p className="text-[14px] text-[#9fb0ad]" suppressHydrationWarning>
                 {viewsLabel(v.viewCount, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : 'Not published'}
@@ -256,6 +259,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
               {viewsLabel(v.viewCount, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : 'Not published'}{v.category ? <> · <span className="text-[#2bb5ab]">#{v.category.name.replace(/\s+/g, '')}</span></> : null} <span className="font-semibold text-white">…more</span>
             </p>
           </button>
+          {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#9fb0ad]">Up to {v.qualityLimit}p · <Link href="/plans" className="font-semibold text-[#2bb5ab] hover:underline">every quality and no ads with Plus</Link></p> : null}
         </div>
         <div className="no-scrollbar mt-3.5 flex gap-2 overflow-x-auto px-4">
           <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Spark (${likes})`}
@@ -270,7 +274,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
         <div className="mx-4 mt-4 flex items-center gap-3">
           <Link href={`/@${v.channel.handle}`} className="flex min-w-0 flex-1 items-center gap-2.5">
             <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={36} />
-            <span className="min-w-0"><span className="flex items-center gap-1 truncate text-[14px] font-semibold">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={14} />}</span><span className="block text-[12px] text-[#9fb0ad]" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</span></span>
+            <span className="min-w-0"><span className="flex items-center gap-1 truncate text-[14px] font-semibold">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={14} kind={v.channel.badge} />}</span><span className="block text-[12px] text-[#9fb0ad]" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</span></span>
           </Link>
           {initialViewer.isOwner
             ? <Link href="/hub" className="flex h-9 shrink-0 items-center rounded-full border border-white/25 px-4 text-[13px] font-semibold">Creator Hub</Link>
@@ -335,7 +339,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
         <aside className="hidden h-fit rounded-[20px] border border-line bg-elevated p-4 sm:block lg:sticky lg:top-20">
           <Link href={`/@${v.channel.handle}`} className="flex items-center gap-3">
             <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={52} />
-            <div className="min-w-0"><p className="flex items-center gap-1 truncate font-display text-[17px] font-bold">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={16} />}</p><p className="text-[13px] text-muted" suppressHydrationWarning>@{v.channel.handle} · {followersLabel(v.channel.followerCount, locale)}</p></div>
+            <div className="min-w-0"><p className="flex items-center gap-1 truncate font-display text-[17px] font-bold">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={16} kind={v.channel.badge} />}</p><p className="text-[13px] text-muted" suppressHydrationWarning>@{v.channel.handle} · {followersLabel(v.channel.followerCount, locale)}</p></div>
           </Link>
           <div className="mt-4 [&>div]:w-full [&_button]:w-full [&_button]:justify-center">
             {initialViewer.isOwner

@@ -12,6 +12,11 @@ import type { LiveInfo } from './live/types';
 
 export const metadata: Metadata = { title: 'Current' };
 
+/** A country's name in the reader's language ("RW" → "Rwanda"). */
+function regionName(code: string, locale: string) {
+  try { return new Intl.DisplayNames([locale], { type: 'region' }).of(code) ?? code; } catch { return code; }
+}
+
 /** Current: a spotlight, the interests panel, one shelf per topic, a Moments ribbon and the newest uploads. */
 export default async function Current() {
   const [feed, viewer, locale, live] = await Promise.all([apiGet<HomeFeed>('/feed/home'), getViewer(), getLocale(), apiGet<{ streams: LiveInfo[] }>('/live').catch(() => null)]);
@@ -81,6 +86,17 @@ export default async function Current() {
           <p className="mt-1 text-sm text-muted">The Spaces you follow, newest first.</p>
           <div className="mt-3 grid gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {feed.fromCreators.slice(0, 4).map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}
+          </div>
+        </section>
+      )}
+
+      {(feed.trending?.videos.length ?? 0) >= 4 && (
+        <section aria-labelledby="trending-heading" className="mt-9">
+          <h2 id="trending-heading" className="flex items-baseline gap-2.5 text-[22px] font-bold">{feed.trending!.country ? `Trending in ${regionName(feed.trending!.country, locale)}` : 'Trending now'}
+            <span className="font-sans text-[13px] font-medium text-muted">most watched in the last two days</span>
+            <Link href="/explore" className="ml-auto font-sans text-[13px] font-semibold text-brand">Explore</Link></h2>
+          <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {feed.trending!.videos.slice(0, 4).map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}
           </div>
         </section>
       )}

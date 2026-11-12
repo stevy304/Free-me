@@ -1,8 +1,12 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, Inject, Logger, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, HttpException, Inject, Logger, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
-import { hasPremiumAccess } from '../billing/billing';
+import { hasPremiumAccess, uploadAccess, uploadsLastYear } from '../billing/billing';
+import { effective, loadStored } from '../billing/settings';
+
+/** 200 → "$2", 250 → "$2.50". */
+const usdText = (cents: number) => `$${cents % 100 ? (cents / 100).toFixed(2) : cents / 100}`;
 import { extname } from 'node:path';
 import { APP_CONFIG, type AppConfig } from '../config/config';
 import { PrismaService } from '../database/prisma.service';
@@ -56,12 +60,6 @@ export class UploadsController {
   @Post()
   @ApiOperation({ summary: 'Start an upload: creates a private draft video and a multipart upload' })
   async start(@CurrentAuth() auth: AuthContext, @Body() body: StartUploadDto, @Req() req: AppRequest) {
-    await this.limits.consume(`upload:start:${auth.user.id}`, 100, 24 * 3600, 'You reached the daily upload limit. Try again tomorrow.');
-    // New accounts start small: fewer uploads a day during their first week (abuse usually comes from fresh accounts).
-    if (auth.user.createdAt.getTime() > Date.now() - 7 * 24 * 3600_000) {
-      const n = this.config.safety.newAccountDailyUploads;
-      await this.limits.consume(`upload:new:${auth.user.id}`, n, 24 * 3600, `New accounts can upload up to ${n} videos a day during their first week.`);
-    }
     const channel = await this.prisma.channel.findUnique({ where: { userId: auth.user.id } });
     if (!channel) throw new BadRequestException('Create your channel before uploading.');
     const ext = extname(body.fileName).toLowerCase();
@@ -74,7 +72,26 @@ export class UploadsController {
     const partSize = this.config.media.driver === 's3' && body.sizeBytes >= 4 * 1024 ** 3
       ? Math.max(this.config.media.partBytes, 64 * 1024 ** 2)
       : this.config.media.partBytes;
-    if (body.ad && !hasPremiumAccess(auth.user)) throw new ForbiddenException('Ad Studio is part of Premium.');
+    // Every channel can try Free Me with a few free uploads; after that, uploading needs the Creator pass (or Premium).
+    if (!body.ad) {
+      // The prices in force: the environment, overridden by what administrators saved (as BillingService reads them).
+      const prices = effective(this.config, await loadStored(this.prisma, this.config));
+      const access = uploadAccess(auth.user, channel.uploadCount, await uploadsLastYear(this.prisma, channel.id), prices);
+      if (access.reason === 'PASS_REQUIRED') {
+        throw new HttpException({ statusCode: 402, code: 'CREATOR_PASS_REQUIRED', message: `Your ${prices.creatorFreeVideos} free ${prices.creatorFreeVideos === 1 ? 'video is' : 'videos are'} used. Get the Creator pass (${usdText(prices.creatorPassUsdCents)} a year) to keep uploading. Your videos stay online either way.` }, 402);
+      }
+      if (access.reason === 'PASS_LIMIT') {
+        throw new HttpException({ statusCode: 402, code: 'CREATOR_PASS_LIMIT', message: `The Creator pass includes ${prices.creatorPassVideosPerYear} uploads a year, and you have used them. Premium has no limit; or delete old videos you no longer need. Your videos stay online either way.` }, 402);
+      }
+    }
+    // Daily limits count only uploads that can actually start (not refused ones).
+    await this.limits.consume(`upload:start:${auth.user.id}`, 100, 24 * 3600, 'You reached the daily upload limit. Try again tomorrow.');
+    // New accounts start small: fewer uploads a day during their first week (abuse usually comes from fresh accounts).
+    if (auth.user.createdAt.getTime() > Date.now() - 7 * 24 * 3600_000) {
+      const n = this.config.safety.newAccountDailyUploads;
+      await this.limits.consume(`upload:new:${auth.user.id}`, n, 24 * 3600, `New accounts can upload up to ${n} videos a day during their first week.`);
+    }
+    if (!body.ad) await this.prisma.channel.update({ where: { id: channel.id }, data: { uploadCount: { increment: 1 } } });
     const video = await this.prisma.video.create({ data: { channelId: channel.id, title, status: 'UPLOADING', visibility: body.ad ? 'UNLISTED' : 'PRIVATE', isAd: !!body.ad, sourceSizeBytes: BigInt(body.sizeBytes), uploadPartBytes: BigInt(partSize), processingStage: 'Uploading' } });
     const key = sourceKey(video.id, ext);
     let uploadId: string | undefined;

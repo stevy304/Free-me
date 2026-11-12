@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import request from 'supertest';
 import { makeApp, resetDb, signIn, WEB } from './helpers';
 import { Billing } from '../src/billing/billing';
+import { BillingService } from '../src/billing/billing.controller';
 
 // Stand-ins for MTN MoMo (Collections) and Flutterwave, speaking their HTTP APIs.
 let provider: Server;
@@ -55,7 +56,7 @@ async function creator(email: string, handle: string) {
 
 test('Premium by MTN MoMo: $10 a month charged in RWF, verified badge while it lasts, paid once even if checked twice', async () => {
   const plans = (await request(ctx.http).get('/api/billing/plans').expect(200)).body;
-  expect(plans).toMatchObject({ premium: { usdCents: 1000, months: [1, 3, 6, 12] }, ads: { usdCentsPerDay: 300, maxAdsPerVideo: 2 } });
+  expect(plans).toMatchObject({ premium: { usdCents: 1000, months: [1, 3, 6, 12] }, ads: { usdCentsPer1000Views: 100, minBudgetUsdCents: 700, maxAdsPerVideo: 2 } });
   expect(plans.methods).toEqual([{ name: 'mtn_momo', currency: 'RWF', perUsd: 1450 }, { name: 'flutterwave', currency: 'USD', perUsd: 1 }]);
 
   const a = await creator('maker@example.com', 'maker');
@@ -136,15 +137,18 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   const shopCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'shop' } });
   const adVideo = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Our shop', durationSeconds: 20, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
   const tooLong = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Long', durationSeconds: 300, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
-  const form = { businessName: 'Kigali Shop', country: 'RW', headline: 'Fresh coffee in Kigali', destinationUrl: 'https://shop.example.com', days: 7 };
+  // $21 of funds spread over 7 days: $1 per 1,000 views, so 21,000 views, 3,000 a day.
+  const form = { businessName: 'Kigali Shop', country: 'RW', headline: 'Fresh coffee in Kigali', destinationUrl: 'https://shop.example.com', budgetUsdCents: 2100, days: 7 };
   expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: tooLong.id }).expect(400)).body.message).toBe('An ad must be between 5 and 90 seconds long.');
   await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: short.id }).expect(400); // not theirs
   const camp = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: adVideo.id, targetVideoIds: [short.id] }).expect(201)).body.campaign;
-  expect(camp).toMatchObject({ status: 'DRAFT', days: 7, dailyRateCents: 300, totalCents: 2100 });
+  // $3 a day at $1 per 1,000 views: up to 3,000 views a day, 21,000 in all.
+  expect(camp).toMatchObject({ status: 'DRAFT', days: 7, dailyRateCents: 300, totalCents: 2100, cpmCents: 100, viewsBought: 21000, viewsPerDay: 3000, spentCents: 0 });
+  expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.ads).toMatchObject({ usdCentsPer1000Views: 100, minBudgetUsdCents: 700 });
 
-  // Paid by MoMo (21 USD → 30,450 RWF), then waits for review.
+  // Paid by MoMo (21 USD → RWF 30,450, rounded to the nearest 100: 30,500), then waits for review.
   const pay = (await biz.post(`/api/ads/campaigns/${camp.id}/pay`).set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000111' }).expect(201)).body.payment;
-  expect(pay).toMatchObject({ amount: '30450', usdCents: 2100 });
+  expect(pay).toMatchObject({ amount: '30500', usdCents: 2100 });
   [...momo.values()][0].status = 'SUCCESSFUL';
   await biz.get(`/api/billing/payments/${pay.id}`).expect(200);
   expect((await biz.get('/api/ads/campaigns').expect(200)).body.campaigns[0].status).toBe('PENDING_REVIEW');
@@ -175,10 +179,11 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   const live = (await maker.get('/api/hub/monetisation/earn').expect(200)).body;
   expect(live).toMatchObject({ impressions: 1, activity: [{ campaignId: camp.id, videoId: short.id, impressions: 1 }] });
 
-  // Settlement: yesterday, the campaign ran all day ($3); the creator pool (60%) goes to the channel that showed it.
+  // Settlement of a campaign priced per day (as before per-view pricing): yesterday it ran all day ($3); the
+  // creator pool (60%) goes to the channel that showed it. Per-view settlement has its own test below.
   const DAY = 86_400_000;
   const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
-  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { startDate: new Date(today.getTime() - DAY), endDate: new Date(today.getTime() + 6 * DAY) } });
+  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { cpmRateCents: 0, deliverUntil: null, startDate: new Date(today.getTime() - DAY), endDate: new Date(today.getTime() + 6 * DAY) } });
   await ctx.prisma.adImpression.update({ where: { id: imp }, data: { createdAt: new Date(today.getTime() - DAY / 2) } });
   const billing = new Billing(ctx.prisma as never, ctx.config);
   expect(await billing.settleAds()).toBe(1);
@@ -202,6 +207,73 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   expect((await admin.post(`/api/admin/billing/payouts/${again.id}`).set('Origin', WEB).send({ action: 'paid', reference: 'MOMO-778899' }).expect(200)).body.payout).toMatchObject({ status: 'PAID', reference: 'MOMO-778899' });
   expect((await maker.get('/api/hub/monetisation')).body.balance).toMatchObject({ availableCents: 0, reservedCents: 0, paidCents: 180 });
 
+});
+
+test('ads priced per 1,000 views: a daily view cap, a budget that is never exceeded, and revenue that follows the views delivered', async () => {
+  const DAY = 86_400_000;
+  const maker = await creator('pace@example.com', 'pace');
+  const makerUser = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'pace@example.com' } });
+  await new Billing(ctx.prisma as never, ctx.config).grantPremium(makerUser.id, 1);
+  await maker.post('/api/hub/monetisation/join').set('Origin', WEB).expect(200);
+  const makerCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'pace' } });
+  const videos = await Promise.all(Array.from({ length: 8 }, (_, i) => ctx.prisma.video.create({ data: { channelId: makerCh.id, title: `p${i}`, durationSeconds: 120, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date() } })));
+
+  const biz = await creator('pacer@example.com', 'pacer');
+  await new Billing(ctx.prisma as never, ctx.config).grantPremium((await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'pacer@example.com' } })).id, 1);
+  const shopCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'pacer' } });
+  const adVideo = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Ad', durationSeconds: 15, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
+  const camp = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ businessName: 'Pacer', country: 'RW', headline: 'Paced ad', destinationUrl: 'https://pacer.example.com', budgetUsdCents: 700, days: 2, videoId: adVideo.id }).expect(201)).body.campaign;
+  // A high price per view keeps the numbers small: $6 buys 6 views, 3 a day.
+  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { cpmRateCents: 100_000, budgetAmountCents: 600n } });
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { status: 'PENDING_REVIEW' } }); // as if paid
+  await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(200);
+  const approved = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: camp.id } });
+  // Funds left after the 2 days keep being spent, here until 30 days after the start.
+  expect(approved.deliverUntil!.getTime() - approved.startDate.getTime()).toBe(30 * DAY);
+
+  const viewer = request.agent(ctx.http);
+  const show = async (v: { id: string }) => (await viewer.post('/api/ads/impressions').set('Origin', WEB).send({ campaignId: camp.id, videoId: v.id }).expect(201)).body.impressionId as string | null;
+  const shown: string[] = [];
+  for (const v of videos.slice(0, 3)) shown.push((await show(v))!);
+  expect(shown.every(Boolean)).toBe(true);
+  // Today's 3 views are delivered: no more slots and no more counted views today.
+  expect((await request(ctx.http).get(`/api/videos/${videos[3].id}/ads`).expect(200)).body.slots).toEqual([]);
+  expect(await show(videos[3])).toBeNull();
+
+  // The next day (the daily counter is gone): 3 more, then the budget is spent and nothing more is counted.
+  await ctx.clearLimits();
+  for (const v of videos.slice(3, 6)) shown.push((await show(v))!);
+  expect(shown.filter(Boolean)).toHaveLength(6);
+  await ctx.clearLimits();
+  expect(await show(videos[6])).toBeNull();
+  expect((await biz.get('/api/ads/campaigns').expect(200)).body.campaigns[0]).toMatchObject({ impressions: 6, viewsBought: 6, viewsPerDay: 3, spentCents: 600 });
+  const billing = new Billing(ctx.prisma as never, ctx.config);
+  await billing.expirePremium();
+  expect((await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: camp.id } })).status).toBe('COMPLETED');
+
+  // Settlement: 2 views two days ago ($2) and 4 views yesterday ($4); creators get 60% of each day.
+  const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { startDate: new Date(today.getTime() - 2 * DAY), endDate: today, deliverUntil: new Date(today.getTime() + 2 * DAY) } });
+  for (const [i, id] of shown.entries()) await ctx.prisma.adImpression.update({ where: { id }, data: { createdAt: new Date(today.getTime() - (i < 2 ? 1.5 : 0.5) * DAY) } });
+  expect(await billing.settleAds()).toBe(2);
+  const days = await ctx.prisma.adDaySettlement.findMany({ orderBy: { day: 'asc' } });
+  expect(days.map((d) => [Number(d.grossCents), Number(d.creatorPoolCents), d.impressions])).toEqual([[200, 120, 2], [400, 240, 4]]);
+  expect((await maker.get('/api/hub/monetisation').expect(200)).body.balance).toMatchObject({ availableCents: 360, lifetimeCents: 360 });
+});
+
+test('ads priced per 1,000 views: budget not delivered by the end of the make-good period is counted on its last day', async () => {
+  const DAY = 86_400_000;
+  const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+  const user = await ctx.prisma.user.create({ data: { email: 'left@example.com' } });
+  const adv = await ctx.prisma.advertiser.create({ data: { userId: user.id, businessName: 'Leftover', country: 'RW', businessType: 'business', currency: 'USD' } });
+  // $3 for 3,000 views; none delivered; its make-good period ended yesterday.
+  await ctx.prisma.campaign.create({ data: { advertiserId: adv.id, name: 'x', headline: 'x', destinationUrl: 'https://x.example.com', currency: 'USD', days: 1, dailyRateCents: 300, cpmRateCents: 100, budgetAmountCents: 300n,
+    status: 'COMPLETED', reviewedAt: new Date(today.getTime() - 3 * DAY), startDate: new Date(today.getTime() - 3 * DAY), endDate: new Date(today.getTime() - 2 * DAY), deliverUntil: new Date(today.getTime() - DAY / 2) } });
+  const billing = new Billing(ctx.prisma as never, ctx.config);
+  expect(await billing.settleAds()).toBe(3);
+  const days = await ctx.prisma.adDaySettlement.findMany({ orderBy: { day: 'asc' } });
+  expect(days.map((d) => Number(d.grossCents))).toEqual([0, 0, 300]);
 });
 
 test('payment settings in the app: manual payments confirmed by an administrator; secrets stored encrypted; administrators have every Premium feature', async () => {
@@ -321,4 +393,113 @@ test('a lost collection response retains its provider reference and never starts
   [...momo.values()][0].status = 'SUCCESSFUL';
   expect((await viewer.get(`/api/billing/payments/${pay.id}`).expect(200)).body.payment.status).toBe('SUCCEEDED');
   expect((await ctx.prisma.creatorBalance.findUniqueOrThrow({ where: { channelId: ch.id } })).pendingBalanceCents).toBe(100n);
+});
+
+test('Premium priced per country: the viewer\'s profile country sets the price shown and charged; administrators can change it', async () => {
+  const rw = await creator('price-rw@example.com', 'pricerw');
+  await ctx.prisma.profile.update({ where: { userId: (await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'price-rw@example.com' } })).id }, data: { country: 'RW' } });
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  ctx.app.get(BillingService).invalidate(); // prices saved by an earlier test are cached for 15 s
+  // By default Rwanda pays about RWF 6,000 (414 US cents); elsewhere the standard $10.
+  expect((await rw.get('/api/billing/plans').expect(200)).body.premium).toMatchObject({ usdCents: 414, standardUsdCents: 1000, country: 'RW' });
+  await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ prices: { premiumByCountry: 'RW=bad' } }).expect(400);
+  await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ prices: { premiumByCountry: 'rw=300, KE=500' } }).expect(200);
+  expect((await admin.get('/api/admin/billing/settings').expect(200)).body.prices.premiumByCountry).toEqual({ RW: 300, KE: 500 });
+  ctx.app.get(BillingService).invalidate();
+  expect((await rw.get('/api/billing/plans').expect(200)).body.premium).toMatchObject({ usdCents: 300, standardUsdCents: 1000, country: 'RW' });
+  expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.premium.usdCents).toBe(1000); // visitors
+  const pay = (await rw.post('/api/billing/premium').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000222', months: 3 }).expect(201)).body.payment;
+  expect(pay).toMatchObject({ usdCents: 900, amount: '13100' }); // RWF 13,050 rounded to the nearest 100
+});
+
+test('Creator pass: free uploads, then the pass (paid, given or with Premium); videos stay; badges tell Premium from verified', async () => {
+  const maker = await creator('passmaker@example.com', 'passmaker');
+  // An account older than a week (new accounts also have a daily upload limit, tested elsewhere).
+  const makerUser = await ctx.prisma.user.update({ where: { email: 'passmaker@example.com' }, data: { createdAt: new Date(Date.now() - 30 * 86_400_000) } });
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  ctx.app.get(BillingService).invalidate();
+  await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ prices: { creatorFreeVideos: 'x' } }).expect(400);
+  await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ prices: { creatorFreeVideos: 2, creatorPassUsdCents: 200 } }).expect(200);
+  const start = () => maker.post('/api/uploads').set('Origin', WEB).send({ fileName: 'clip.mp4', sizeBytes: 1000 });
+
+  expect((await maker.get('/api/billing/creator-pass').expect(200)).body).toMatchObject({ canUpload: true, freeVideos: 2, freeLeft: 2, usdCents: 200, pass: { active: false } });
+  const first = (await start().expect(201)).body.videoId;
+  await start().expect(201);
+  // Deleting a draft does not give a free upload back.
+  await maker.delete(`/api/uploads/${first}`).set('Origin', WEB).send({}).expect(200);
+  const refused = (await start().expect(402)).body;
+  expect(refused).toMatchObject({ code: 'CREATOR_PASS_REQUIRED', message: expect.stringContaining('Creator pass ($2 a year)') });
+  expect((await maker.get('/api/billing/creator-pass').expect(200)).body).toMatchObject({ canUpload: false, freeLeft: 0, uploads: 2 });
+
+  // Paid by MoMo, a year at a time: $2 (RWF 2,900).
+  await maker.post('/api/billing/creator-pass').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000333', months: 3 }).expect(400);
+  const pay = (await maker.post('/api/billing/creator-pass').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000333', months: 12 }).expect(201)).body.payment;
+  expect(pay).toMatchObject({ usdCents: 200, amount: String(2 * 1450), months: 12 });
+  [...momo.values()].at(-1)!.status = 'SUCCESSFUL';
+  await maker.get(`/api/billing/payments/${pay.id}`).expect(200);
+  const status = (await maker.get('/api/billing/creator-pass').expect(200)).body;
+  expect(status).toMatchObject({ canUpload: true, pass: { active: true, includedWithPremium: false } });
+  expect(new Date(status.pass.until).getTime()).toBeGreaterThan(Date.now() + 359 * 86_400_000);
+  await start().expect(201);
+
+  // When the pass ends, new uploads stop; an administrator can give it (creators invited at launch).
+  await ctx.prisma.user.update({ where: { id: makerUser.id }, data: { creatorPassUntil: new Date(Date.now() - 1000) } });
+  await start().expect(402);
+  await admin.post('/api/admin/billing/creator-pass').set('Origin', WEB).send({ email: 'passmaker@example.com', months: 1 }).expect(200);
+  await start().expect(201);
+
+  // Premium includes the pass, and its badge says Premium; a Space checked by Free Me says verified.
+  await ctx.prisma.user.update({ where: { id: makerUser.id }, data: { creatorPassUntil: null } });
+  await new Billing(ctx.prisma as never, ctx.config).grantPremium(makerUser.id, 1);
+  expect((await maker.get('/api/billing/creator-pass').expect(200)).body.pass).toMatchObject({ active: true, includedWithPremium: true });
+  await start().expect(201);
+  expect((await request(ctx.http).get('/api/channels/passmaker').expect(200)).body.channel).toMatchObject({ isVerified: true, badge: 'premium' });
+  await ctx.prisma.channel.update({ where: { handle: 'passmaker' }, data: { verificationSource: 'ADMIN' } });
+  expect((await request(ctx.http).get('/api/channels/passmaker').expect(200)).body.channel.badge).toBe('verified');
+});
+
+test('ad funds start at $7; a business is checked, then pays for the Verified badge, which protects its name for a year', async () => {
+  const biz = await creator('bank@example.com', 'bankrw');
+  const ch = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'bankrw' } });
+  const adVideo = await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Ad', durationSeconds: 15, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', isAd: true } });
+  const ad = { businessName: 'Bank RW', country: 'RW', headline: 'Open an account', destinationUrl: 'https://bank.example.com', videoId: adVideo.id };
+  ctx.app.get(BillingService).invalidate();
+  expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...ad, budgetUsdCents: 600 }).expect(400)).body.message).toBe('Add at least $7 of funds.');
+  expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...ad, budgetUsdCents: 700 }).expect(201)).body.campaign).toMatchObject({ totalCents: 700, viewsBought: 7000, days: 7, viewsPerDay: 1000 });
+
+  // Creator earnings do not show how revenue is divided.
+  expect((await biz.get('/api/hub/monetisation').expect(200)).body.programme).not.toHaveProperty('creatorShareBps');
+
+  // Verification: request (free), review, then pay.
+  expect((await biz.get('/api/ads/verification').expect(200)).body).toMatchObject({ priceUsdCents: 1000, request: null });
+  await biz.post('/api/ads/verification/pay').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000444' }).expect(400); // not checked yet
+  const details = { businessName: 'Bank of Rwanda Ltd', registrationNumber: '100123456', phone: '0788000444', website: 'https://bank.example.com' };
+  expect((await biz.post('/api/ads/verification').set('Origin', WEB).send(details).expect(201)).body.request).toMatchObject({ status: 'PENDING', businessName: 'Bank of Rwanda Ltd' });
+  await biz.post('/api/ads/verification').set('Origin', WEB).send(details).expect(400); // already waiting
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  const queue = (await admin.get('/api/admin/billing/verifications').expect(200)).body.requests;
+  expect(queue).toEqual([expect.objectContaining({ businessName: 'Bank of Rwanda Ltd', channel: expect.objectContaining({ handle: 'bankrw', email: 'bank@example.com' }) })]);
+  await admin.post(`/api/admin/billing/verifications/${queue[0].id}`).set('Origin', WEB).send({ approve: false }).expect(400); // a rejection needs a reason
+  await admin.post(`/api/admin/billing/verifications/${queue[0].id}`).set('Origin', WEB).send({ approve: true }).expect(200);
+
+  const pay = (await biz.post('/api/ads/verification/pay').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000444' }).expect(201)).body.payment;
+  expect(pay).toMatchObject({ purpose: 'VERIFICATION', usdCents: 1000, amount: '14500' });
+  [...momo.values()].at(-1)!.status = 'SUCCESSFUL';
+  await biz.get(`/api/billing/payments/${pay.id}`).expect(200);
+  const v = (await biz.get('/api/ads/verification').expect(200)).body.request;
+  expect(v.status).toBe('ACTIVE');
+  expect(new Date(v.verifiedUntil).getTime()).toBeGreaterThan(Date.now() + 359 * 86_400_000);
+  expect((await request(ctx.http).get('/api/channels/bankrw').expect(200)).body.channel).toMatchObject({ isVerified: true, badge: 'verified' });
+
+  // Its name is protected: nobody else can take it, and it can only be changed through Free Me.
+  await ctx.prisma.channel.update({ where: { handle: 'bankrw' }, data: { name: 'Bank of Rwanda Ltd' } });
+  expect((await biz.patch('/api/channels/mine').set('Origin', WEB).send({ name: 'Another Name' }).expect(400)).body.message).toContain('verified under this name');
+  const copycat = (await signIn(ctx.http, ctx.mail, 'copycat@example.com')).agent;
+  expect((await copycat.post('/api/channels').set('Origin', WEB).send({ handle: 'fakebank', name: 'bank of rwanda ltd' }).expect(409)).body.message).toContain('belongs to a verified Space');
+
+  // A year later the badge goes (the check stays valid, so renewing needs no new review).
+  await ctx.prisma.businessVerification.updateMany({ data: { verifiedUntil: new Date(Date.now() - 1000) } });
+  await new Billing(ctx.prisma as never, ctx.config).expirePremium();
+  expect((await ctx.prisma.businessVerification.findFirstOrThrow()).status).toBe('APPROVED');
+  expect((await request(ctx.http).get('/api/channels/bankrw').expect(200)).body.channel).toMatchObject({ isVerified: false, badge: null });
 });

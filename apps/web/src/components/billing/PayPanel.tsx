@@ -50,10 +50,12 @@ export function PayPanel({ usdCents, plans, start, onPaid, label, pending }: { u
   }
   const m = plans.methods.find((x) => x.name === method) ?? plans.methods[0];
   const amount = money(charge(usdCents, m), m.currency, locale);
+  // MTN MoMo and Airtel Money: the payer approves a prompt on the phone with this number.
+  const mobile = m.name === 'mtn_momo' || m.name === 'airtel_money';
   const pay = async () => {
     setBusy(true); setError(null);
     try {
-      const p = await start(m.name, m.name === 'mtn_momo' ? phone : undefined);
+      const p = await start(m.name, mobile ? phone : undefined);
       if (p.checkoutUrl) { window.location.href = p.checkoutUrl; return; }
       watch(p);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
@@ -76,7 +78,9 @@ export function PayPanel({ usdCents, plans, start, onPaid, label, pending }: { u
         {watching.failureReason && <p className="mb-3 text-sm text-muted">{watching.failureReason}</p>}
         <Icon.Spinner size={28} className="mx-auto animate-spin text-brand" />
         <p className="mt-3 font-display text-[18px] font-bold">Approve {money(watching.amount, watching.currency, locale)} on your phone</p>
-        <p className="mt-1 text-[14px] text-muted">A MoMo prompt was sent to your number. Enter your PIN to confirm. If it does not appear, dial <b>*182*7*1#</b> to see pending approvals.</p>
+        <p className="mt-1 text-[14px] text-muted">{watching.method === 'airtel_money'
+          ? 'An Airtel Money prompt was sent to your number. Enter your PIN to confirm.'
+          : <>A MoMo prompt was sent to your number. Enter your PIN to confirm. If it does not appear, dial <b>*182*7*1#</b> to see pending approvals.</>}</p>
         <button type="button" onClick={() => watch(null)} className="mt-4 text-[13px] font-semibold text-muted hover:text-ink">Use another number</button>
       </div>
     );
@@ -87,22 +91,22 @@ export function PayPanel({ usdCents, plans, start, onPaid, label, pending }: { u
         {plans.methods.map((x) => (
           <button key={x.name} type="button" role="radio" aria-checked={m.name === x.name} onClick={() => setMethod(x.name)}
             className={`flex items-center gap-3 rounded-2xl border-2 px-4 py-3 text-left ${m.name === x.name ? 'border-brand bg-brand-soft' : 'border-line hover:border-faint'}`}>
-            <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[13px] font-extrabold ${x.name === 'mtn_momo' ? 'bg-[#ffcb05] text-[#1a1a1a]' : x.name === 'manual' ? 'bg-brand-soft text-brand' : 'bg-strong text-on-strong'}`}>{x.name === 'mtn_momo' ? 'MoMo' : x.name === 'manual' ? <Icon.Send size={20} /> : <Icon.Wallet size={20} />}</span>
-            <span><span className="block text-[15px] font-semibold">{x.name === 'mtn_momo' ? 'MTN Mobile Money' : x.name === 'manual' ? 'Send money' : 'Card'}</span><span className="block text-[12px] text-muted">{x.name === 'mtn_momo' ? `Pay ${money(charge(usdCents, x), x.currency, locale)} from your phone` : x.name === 'manual' ? `${(x.accounts ?? []).map((a) => a.label).join(', ')}: send ${money(charge(usdCents, x), x.currency, locale)}, we confirm it` : 'Visa, Mastercard and more, worldwide'}</span></span>
+            <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[13px] font-extrabold ${x.name === 'mtn_momo' ? 'bg-[#ffcb05] text-[#1a1a1a]' : x.name === 'airtel_money' ? 'bg-[#e40000] text-white' : x.name === 'manual' ? 'bg-brand-soft text-brand' : 'bg-strong text-on-strong'}`}>{x.name === 'mtn_momo' ? 'MoMo' : x.name === 'airtel_money' ? 'Airtel' : x.name === 'manual' ? <Icon.Send size={20} /> : <Icon.Wallet size={20} />}</span>
+            <span><span className="block text-[15px] font-semibold">{x.name === 'mtn_momo' ? 'MTN Mobile Money' : x.name === 'airtel_money' ? 'Airtel Money' : x.name === 'manual' ? 'Send money' : 'Card'}</span><span className="block text-[12px] text-muted">{x.name === 'mtn_momo' || x.name === 'airtel_money' ? `Pay ${money(charge(usdCents, x), x.currency, locale)} from your phone` : x.name === 'manual' ? `${(x.accounts ?? []).map((a) => a.label).join(', ')}: send ${money(charge(usdCents, x), x.currency, locale)}, we confirm it` : 'Visa, Mastercard and more, worldwide'}</span></span>
           </button>
         ))}
       </div>
-      {m.name === 'mtn_momo' && (
-        <label className="block"><span className="text-[13px] font-semibold">MoMo number</span>
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder="0788 123 456" className="mt-1 h-11 w-full rounded-xl border border-line bg-bg px-3 text-[15px] outline-none focus:border-brand" />
+      {mobile && (
+        <label className="block"><span className="text-[13px] font-semibold">{m.name === 'airtel_money' ? 'Airtel Money number' : 'MoMo number'}</span>
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder={m.name === 'airtel_money' ? '0731 234 567' : '0788 123 456'} className="mt-1 h-11 w-full rounded-xl border border-line bg-bg px-3 text-[15px] outline-none focus:border-brand" />
         </label>
       )}
       {error && <p role="alert" className="rounded-xl bg-danger/10 px-3 py-2 text-[14px] text-danger">{error}</p>}
-      <button type="button" disabled={busy || (m.name === 'mtn_momo' && phone.replace(/\D/g, '').length < 9)} onClick={() => void pay()}
+      <button type="button" disabled={busy || (mobile && phone.replace(/\D/g, '').length < 9)} onClick={() => void pay()}
         className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-brand text-[15px] font-bold text-on-brand hover:bg-brand-strong disabled:opacity-50">
         {busy ? <Icon.Spinner size={20} className="animate-spin" /> : null}{label} · {amount}{m.currency !== 'USD' && <span className="font-medium opacity-80">({usd(usdCents, locale)})</span>}
       </button>
-      <p className="text-center text-[12px] text-faint">{m.name === 'mtn_momo' ? `Charged in ${m.currency} by MTN MoMo.` : m.name === 'manual' ? 'Next you will see where to send the money and a reference code.' : 'You will finish on a secure Flutterwave page, then come back here.'}</p>
+      <p className="text-center text-[12px] text-faint">{m.name === 'mtn_momo' ? `Charged in ${m.currency} by MTN MoMo.` : m.name === 'airtel_money' ? `Charged in ${m.currency} by Airtel Money.` : m.name === 'manual' ? 'Next you will see where to send the money and a reference code.' : 'You will finish on a secure Flutterwave page, then come back here.'}</p>
     </div>
   );
 }

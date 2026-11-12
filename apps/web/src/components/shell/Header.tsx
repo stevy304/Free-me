@@ -68,7 +68,7 @@ export function Header() {
                 <Link href="/channel/create" className="flex h-10 items-center gap-2 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand hover:bg-brand-strong"><Icon.Plus size={20} />Create</Link>
               )}</span>
               {viewer.premium?.active ? (
-                <Link href="/premium" aria-label="Premium" title="Premium" className="hidden h-10 items-center gap-1.5 rounded-xl px-2.5 text-[14px] font-semibold text-muted hover:bg-surface hover:text-ink sm:flex"><VerifiedBadge size={20} /><span className="hidden lg:inline">Premium</span></Link>
+                <Link href="/plans" aria-label="Plans" title="Plans" className="hidden h-10 items-center gap-1.5 rounded-xl px-2.5 text-[14px] font-semibold text-muted hover:bg-surface hover:text-ink sm:flex"><VerifiedBadge size={20} kind="premium" /><span className="hidden lg:inline">Plans</span></Link>
               ) : (
                 <Link href="/premium" className="flex h-10 items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-3 text-[14px] font-bold text-[#2a1a02] shadow-[0_2px_10px_rgb(227_154_42/0.35)] hover:brightness-105 sm:px-4"><Icon.PremiumStar size={18} filled /><span className="hidden min-[400px]:inline">Upgrade</span></Link>
               )}

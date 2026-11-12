@@ -4,6 +4,7 @@ import { PrismaService } from '../database/prisma.service';
 import { RateLimitService } from '../common/rate-limit.service';
 import { LiveGuests } from './live-guests';
 import { LiveError, LiveService } from './live.service';
+import { publish, room } from '../realtime/publish';
 
 const ID = /^[0-9a-f-]{36}$/;
 
@@ -141,13 +142,43 @@ export class LiveGateway implements OnGatewayDisconnect, OnGatewayInit {
     const clean = text.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 200);
     if (!clean) return { ok: false };
     try { await this.limits.consume(`live:chat:${u.id}`, 10, 20, 'You are sending messages very fast.'); } catch { return { ok: false, error: 'You are sending messages very fast.' }; }
-    const s = await this.prisma.liveStream.findUnique({ where: { id: streamId }, select: { status: true, channelId: true } });
+    const s = await this.prisma.liveStream.findUnique({ where: { id: streamId }, select: { status: true, channelId: true, chatMode: true, slowModeSeconds: true } });
     if (s?.status !== 'LIVE') return { ok: false, error: 'This stream is not live.' };
     const who = await this.prisma.user.findUniqueOrThrow({ where: { id: u.id }, include: { profile: true, channel: true } });
+    const host = who.channel?.id === s.channelId;
+    // The host's chat rules (the host can always write).
+    if (!host) {
+      if (s.chatMode === 'off') return { ok: false, error: 'Chat is turned off for this stream.' };
+      if (s.chatMode === 'followers' && !(await this.prisma.subscription.findUnique({ where: { userId_channelId: { userId: u.id, channelId: s.channelId } }, select: { id: true } }))) {
+        return { ok: false, error: 'Only followers can chat. Tune in to join the conversation.' };
+      }
+      if (s.slowModeSeconds > 0) {
+        try { await this.limits.consume(`live:slow:${streamId}:${u.id}`, 1, s.slowModeSeconds, 'Slow mode'); }
+        catch { return { ok: false, error: `Slow mode: one message every ${s.slowModeSeconds} seconds.` }; }
+      }
+    }
     await this.live.say(streamId, {
       id: `${Date.now()}-${socket.id.slice(0, 6)}`, text: clean, at: new Date().toISOString(),
       author: { name: who.channel?.name ?? who.profile?.displayName ?? 'Viewer', handle: who.channel?.handle ?? null, avatarUrl: who.channel?.avatarUrl ?? who.profile?.avatarUrl ?? null, verified: !!who.channel?.isVerified, host: who.channel?.id === s.channelId },
     });
+    return { ok: true };
+  }
+
+  /**
+   * Live captions: the host's browser turns their speech into text (Web Speech API) and sends it here; viewers get it
+   * as a caption line. Only the host of a live stream that allows captions can send; lines are short and rate limited.
+   */
+  @SubscribeMessage('live:caption')
+  async caption(@ConnectedSocket() socket: Socket, @MessageBody() body: unknown) {
+    const { streamId, text, final } = (body ?? {}) as { streamId?: unknown; text?: unknown; final?: unknown };
+    const userId = socket.data.userId as string | undefined;
+    if (!userId || typeof streamId !== 'string' || !ID.test(streamId) || typeof text !== 'string') return { ok: false };
+    const clean = text.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(-240);
+    if (!clean) return { ok: false };
+    try { await this.limits.consume(`live:caption:${userId}`, 40, 10); } catch { return { ok: false }; }
+    const s = await this.prisma.liveStream.findFirst({ where: { id: streamId, status: 'LIVE', captionsEnabled: true, channel: { userId } }, select: { id: true } });
+    if (!s) return { ok: false };
+    publish(room.live(streamId), 'caption', { text: clean, final: final === true, at: Date.now() });
     return { ok: true };
   }
 

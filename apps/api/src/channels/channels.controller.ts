@@ -38,6 +38,7 @@ export class ChannelsController {
     if (await this.prisma.channel.findUnique({ where: { userId: auth.user.id }, select: { id: true } })) throw new ConflictException('You already have a channel.');
     const handle = normalizeHandle(body.handle);
     if (await this.prisma.channel.findUnique({ where: { handle }, select: { id: true } })) throw new ConflictException('This handle is taken.');
+    await this.protectedName(body.name, null);
     const channel = await this.prisma.$transaction(async (tx) => {
       const c = await tx.channel.create({ data: { userId: auth.user.id, handle, name: body.name.trim(), description: body.description?.trim() || null, country: body.country?.toUpperCase() ?? null, defaultLanguage: body.defaultLanguage?.toLowerCase() ?? null, avatarUrl: (await tx.profile.findUnique({ where: { userId: auth.user.id } }))?.avatarUrl ?? null,
         // Premium members' Spaces carry the verified badge from the start.
@@ -49,6 +50,15 @@ export class ChannelsController {
     return { channel: publicChannel(channel) };
   }
 
+  /** Names of verified Spaces (businesses and those Free Me verified) cannot be taken by another Space. */
+  private async protectedName(name: string, exceptChannelId: string | null) {
+    const taken = await this.prisma.channel.findFirst({ where: {
+      name: { equals: name.trim(), mode: 'insensitive' }, isVerified: true, verificationSource: { in: ['BUSINESS', 'ADMIN'] },
+      ...(exceptChannelId ? { id: { not: exceptChannelId } } : {}),
+    }, select: { id: true } });
+    if (taken) throw new ConflictException('This name belongs to a verified Space on Free Me. Choose another name.');
+  }
+
   @Patch('mine')
   @RequireAuth()
   @ApiOperation({ summary: 'Update my channel' })
@@ -56,7 +66,14 @@ export class ChannelsController {
     const mine = await this.prisma.channel.findUnique({ where: { userId: auth.user.id } });
     if (!mine) throw new NotFoundException('You do not have a channel yet.');
     const data: Record<string, string | null> = {};
-    if (body.name !== undefined) { const v = body.name.trim(); if (!v) throw new BadRequestException('A channel name cannot be empty.'); data.name = v; }
+    if (body.name !== undefined) {
+      const v = body.name.trim();
+      if (!v) throw new BadRequestException('A channel name cannot be empty.');
+      // A verified business keeps the name we checked; changing it goes through Free Me.
+      if (v !== mine.name && mine.verificationSource === 'BUSINESS') throw new BadRequestException('Your business is verified under this name. Contact Free Me to change it.');
+      if (v.toLowerCase() !== mine.name.toLowerCase()) await this.protectedName(v, mine.id);
+      data.name = v;
+    }
     if (body.description !== undefined) data.description = body.description.trim() || null;
     if (body.country !== undefined) { if (body.country && !isCountryCode(body.country)) throw new BadRequestException('Choose a country from the list.'); data.country = body.country?.toUpperCase() ?? null; }
     if (body.defaultLanguage !== undefined) { if (body.defaultLanguage && !isLanguageCode(body.defaultLanguage)) throw new BadRequestException('Choose a language from the list.'); data.defaultLanguage = body.defaultLanguage?.toLowerCase() ?? null; }

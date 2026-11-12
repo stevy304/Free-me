@@ -3,16 +3,17 @@ import Link from 'next/link';
 import * as Icon from '@/components/icons';
 import { Avatar } from '@/components/Avatar';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
-import { apiGet } from '@/lib/server-api';
+import { apiGet, getLocale } from '@/lib/server-api';
 import type { LiveInfo } from './types';
 
 export const metadata: Metadata = { title: 'Live now' };
 export const dynamic = 'force-dynamic';
 
-/** Spaces live right now. */
+/** Spaces live right now, and streams planned for the coming week. */
 export default async function LiveNow() {
-  const r = await apiGet<{ streams: LiveInfo[] }>('/live');
+  const [r, locale] = await Promise.all([apiGet<{ streams: LiveInfo[]; upcoming?: LiveInfo[] }>('/live'), getLocale()]);
   const streams = r?.streams ?? [];
+  const upcoming = r?.upcoming ?? [];
   return (
     <div className="mx-auto max-w-[1400px] px-4 pb-16 pt-6 sm:px-6">
       <h1 className="flex items-center gap-2 font-display text-[28px] font-extrabold"><Icon.Live size={28} className="text-[#e5484d]" />Live now</h1>
@@ -32,6 +33,25 @@ export default async function LiveNow() {
           ))}
         </ul>
       ) : <p className="mt-10 text-center text-[15px] text-muted">Nobody is live right now. Spaces you follow tell you when they go live.</p>}
+      {upcoming.length > 0 && (
+        <section aria-labelledby="upcoming" className="mt-10">
+          <h2 id="upcoming" className="font-display text-[22px] font-bold">Upcoming</h2>
+          <ul className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {upcoming.map((s) => (
+              <li key={s.id}>
+                <Link href={`/live/${s.id}`} className="flex items-center gap-3 rounded-2xl border border-line bg-elevated p-4 hover:border-brand">
+                  <Avatar name={s.channel.name} src={s.channel.avatarUrl} size={44} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-semibold">{s.title}</span>
+                    <span className="block truncate text-[13px] text-muted">{s.channel.name}</span>
+                    <span className="mt-0.5 flex items-center gap-1 text-[13px] font-semibold text-brand" suppressHydrationWarning><Icon.Clock size={14} />{s.scheduledFor ? new Date(s.scheduledFor).toLocaleString(locale, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

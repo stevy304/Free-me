@@ -9,7 +9,8 @@ import { jobOptions } from '../src/media/queue';
 // the higher qualities are a second, lower-priority job.
 const dir = mkdtempSync(join(tmpdir(), 'freeme-speed-'));
 let ctx: Awaited<ReturnType<typeof makeApp>>;
-beforeAll(async () => { ctx = await makeApp({ redis: false, storageDir: join(dir, 'storage') }); }, 60_000);
+beforeAll(async () => { // Every quality at once and for everyone: these tests are about copying the top rung (cost-controls.test.ts covers the limits).
+  ctx = await makeApp({ redis: false, storageDir: join(dir, 'storage'), env: { HD_MIN_VIEWS: '0', FREE_MAX_QUALITY: '0' } }); }, 60_000);
 beforeEach(async () => { await resetDb(ctx.prisma); ctx.mail.outbox.length = 0; await ctx.clearLimits(); });
 afterAll(async () => { await ctx.app.close(); rmSync(dir, { recursive: true, force: true }); });
 

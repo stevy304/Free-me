@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, IsUUID, IsUrl, Length, Max, Min } from 'class-validator';
-import type { Advertiser, Campaign, Video } from '@prisma/client';
+import type { Advertiser, BusinessVerification, Campaign, Video } from '@prisma/client';
 import { isCountryCode } from '@free-me/shared';
 import { PrismaService } from '../database/prisma.service';
 import { RedisService } from '../database/redis.service';
@@ -11,7 +11,7 @@ import { clientIp, type AppRequest, type AuthContext } from '../common/request';
 import { LINKED_VIDEO } from '../catalog/serialize';
 import { MediaUrls } from '../videos/media-urls';
 import { BillingService, PayDto, paymentView } from './billing.controller';
-import { EARNINGS_CURRENCY, hasPremiumAccess } from './billing';
+import { adDayKey, adViewLimits, EARNINGS_CURRENCY, hasPlus, hasPremiumAccess } from './billing';
 
 /** Ads show only on monetised channels: at most two per video (one before it, one halfway through long videos). */
 export const MAX_ADS_PER_VIDEO = 2;
@@ -27,20 +27,37 @@ class CampaignDto {
   @ApiProperty({ description: 'Short line shown with the ad' }) @IsString() @Length(3, 90) headline!: string;
   @ApiProperty({ description: 'Where "Visit" leads (https)' }) @IsUrl({ protocols: ['https'], require_protocol: true }) destinationUrl!: string;
   @ApiProperty({ description: 'One of your own videos, public or unlisted, 5–90 seconds' }) @IsUUID() videoId!: string;
-  @ApiProperty({ minimum: 1, maximum: 90 }) @IsInt() @Min(1) @Max(90) days!: number;
+  @ApiProperty({ description: 'Funds for this ad in US cents (at least AD_MIN_BUDGET_USD_CENTS), spent per 1,000 views' }) @IsInt() @Min(1) @Max(10_000_000) budgetUsdCents!: number;
+  @ApiPropertyOptional({ minimum: 1, maximum: 90, description: 'Spread the views over this many days (default 7)' }) @IsOptional() @IsInt() @Min(1) @Max(90) days?: number;
   @ApiPropertyOptional({ description: 'Countries to show it in; empty = everywhere' }) @IsOptional() @IsArray() @ArrayMaxSize(50) @IsString({ each: true }) targetCountries?: string[];
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsUUID(undefined, { each: true }) targetVideoIds?: string[];
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @Length(1, 50, { each: true }) targetChannelHandles?: string[];
 }
+class VerificationDto {
+  @ApiProperty({ description: 'The business name as registered' }) @IsString() @Length(2, 100) businessName!: string;
+  @ApiProperty({ description: 'Company registration number (RDB) or tax number (TIN)' }) @IsString() @Length(3, 60) registrationNumber!: string;
+  @ApiProperty({ description: 'A phone number we can call to check' }) @IsString() @Length(6, 24) phone!: string;
+  @ApiPropertyOptional() @IsOptional() @IsUrl({ protocols: ['https', 'http'], require_protocol: true }) website?: string;
+}
 class ImpressionDto { @ApiProperty() @IsUUID() campaignId!: string; @ApiProperty() @IsUUID() videoId!: string }
 class AdEventDto { @ApiProperty({ enum: ['COMPLETE', 'SKIP', 'CLICK'] }) @IsIn(['COMPLETE', 'SKIP', 'CLICK']) type!: string; @ApiProperty() @IsInt() @Min(0) @Max(3_600_000) ms!: number }
 
-const campaignView = (c: Campaign & { advertiser: Advertiser; video?: Pick<Video, 'id' | 'title' | 'durationSeconds'> | null }) => ({
+/** A campaign can show: running, inside its period (or its make-good period), with views left in its budget. */
+const running = (c: Campaign, now: Date) => c.status === 'ACTIVE' && c.startDate <= now && (c.endDate > now || (!!c.deliverUntil && c.deliverUntil > now))
+  && (!c.cpmRateCents || (c.impressionsCount + 1n) * BigInt(c.cpmRateCents) <= c.budgetAmountCents * 1000n);
+
+const campaignView = (c: Campaign & { advertiser: Advertiser; video?: Pick<Video, 'id' | 'title' | 'durationSeconds'> | null }) => {
+  const limits = adViewLimits(c);
+  return {
   id: c.id, status: c.status, businessName: c.advertiser.businessName, headline: c.headline, destinationUrl: c.destinationUrl, days: c.days,
-  dailyRateCents: c.dailyRateCents, totalCents: c.days * c.dailyRateCents, currency: c.currency, targetCountries: c.targetCountries, targetVideoIds: c.targetVideoIds, targetChannelIds: c.targetChannelIds,
+  dailyRateCents: c.dailyRateCents, totalCents: Number(c.budgetAmountCents), currency: c.currency,
+  // Priced per 1,000 views (null for older campaigns priced per day): views bought, per day, and spent so far.
+  cpmCents: c.cpmRateCents || null, viewsBought: limits?.total ?? null, viewsPerDay: limits?.perDay ?? null, spentCents: Number(c.spentAmountCents),
+  deliverUntil: c.reviewedAt ? c.deliverUntil : null, targetCountries: c.targetCountries, targetVideoIds: c.targetVideoIds, targetChannelIds: c.targetChannelIds,
   startDate: c.reviewedAt ? c.startDate : null, endDate: c.reviewedAt ? c.endDate : null, reviewNote: c.reviewNote,
   impressions: Number(c.impressionsCount), clicks: Number(c.clicksCount), video: c.video ? { id: c.video.id, title: c.video.title, durationSeconds: c.video.durationSeconds } : null, createdAt: c.createdAt,
-});
+  };
+};
 
 @ApiTags('ads')
 @Controller()
@@ -67,7 +84,6 @@ export class AdsController {
   @ApiOperation({ summary: 'Create an ad campaign (a draft until it is paid)' })
   async create(@CurrentAuth() auth: AuthContext, @Body() body: CampaignDto) {
     await this.limits.consume(`ads:create:${auth.user.id}`, 30, 3600);
-    if (!hasPremiumAccess(auth.user)) throw new ForbiddenException('Ad Studio is part of Premium.');
     if (!isCountryCode(body.country)) throw new BadRequestException('Choose your business country from the list.');
     const targets = [...new Set((body.targetCountries ?? []).map((c) => c.toUpperCase()))];
     if (targets.some((c) => !isCountryCode(c))) throw new BadRequestException('Choose target countries from the list.');
@@ -85,7 +101,11 @@ export class AdsController {
     if (videoCount !== targetVideoIds.length || channels.length !== handles.length) {
       throw new BadRequestException('Choose existing public videos and valid channel handles for ad placements.');
     }
-    const rate = (await this.billing.settings()).adDayUsdCents;
+    const { adCpmUsdCents: cpm, adMinBudgetUsdCents: minimum } = await this.billing.settings();
+    if (body.budgetUsdCents < minimum) throw new BadRequestException(`Add at least $${(minimum / 100).toFixed(2).replace(/\.00$/, '')} of funds.`);
+    const days = body.days ?? 7;
+    // Funds are spread evenly over the days chosen (the daily view limit); dailyRateCents is that share, for display.
+    const rate = Math.ceil(body.budgetUsdCents / days);
     const c = await this.prisma.$transaction(async (tx) => {
       const adv = await tx.advertiser.upsert({
         where: { userId: auth.user.id }, update: { businessName: body.businessName.trim(), country: body.country.toUpperCase() },
@@ -94,11 +114,53 @@ export class AdsController {
       if (!auth.user.roles.includes('ADVERTISER')) await tx.user.update({ where: { id: auth.user.id }, data: { roles: { set: [...auth.user.roles, 'ADVERTISER'] } } });
       const now = new Date();
       return tx.campaign.create({ data: {
-        advertiserId: adv.id, name: body.headline.trim(), headline: body.headline.trim(), destinationUrl: body.destinationUrl, videoId: v.id, days: body.days, dailyRateCents: rate,
-        currency: EARNINGS_CURRENCY, budgetAmountCents: BigInt(rate * body.days), targetCountries: targets, targetVideoIds, targetChannelIds: channels.map((ch) => ch.id), startDate: now, endDate: now,
+        advertiserId: adv.id, name: body.headline.trim(), headline: body.headline.trim(), destinationUrl: body.destinationUrl, videoId: v.id, days, dailyRateCents: rate, cpmRateCents: cpm,
+        currency: EARNINGS_CURRENCY, budgetAmountCents: BigInt(body.budgetUsdCents), targetCountries: targets, targetVideoIds, targetChannelIds: channels.map((ch) => ch.id), startDate: now, endDate: now,
       }, include: { advertiser: true } });
     });
     return { campaign: campaignView({ ...c, video: v }) };
+  }
+
+  private verificationView(v: BusinessVerification | null, priceUsdCents: number) {
+    return {
+      priceUsdCents,
+      request: v ? { status: v.status, businessName: v.businessName, registrationNumber: v.registrationNumber, phone: v.phone, website: v.website, reviewNote: v.reviewNote, verifiedUntil: v.verifiedUntil, createdAt: v.createdAt } : null,
+    };
+  }
+
+  @Get('ads/verification')
+  @RequireAuth()
+  @ApiOperation({ summary: 'My Verified business request: its status, and the price per year' })
+  async verification(@CurrentAuth() auth: AuthContext) {
+    const channel = await this.prisma.channel.findUnique({ where: { userId: auth.user.id }, include: { businessVerification: true } });
+    return this.verificationView(channel?.businessVerification ?? null, (await this.billing.settings()).verificationUsdCents);
+  }
+
+  @Post('ads/verification')
+  @RequireAuth()
+  @ApiOperation({ summary: 'Ask for the Verified business badge: our team checks the details, then you pay for a year' })
+  async requestVerification(@CurrentAuth() auth: AuthContext, @Body() body: VerificationDto) {
+    await this.limits.consume(`verify:${auth.user.id}`, 5, 86_400, 'You sent several requests today. Try again tomorrow.');
+    const channel = await this.prisma.channel.findUnique({ where: { userId: auth.user.id }, include: { businessVerification: true } });
+    if (!channel) throw new BadRequestException('Create your Space first: the badge shows next to its name.');
+    const current = channel.businessVerification;
+    if (current && current.status !== 'REJECTED') throw new BadRequestException(current.status === 'PENDING' ? 'Your request is being checked.' : 'Your business is already checked.');
+    const data = { businessName: body.businessName.trim(), registrationNumber: body.registrationNumber.trim(), phone: body.phone.trim(), website: body.website?.trim() || null, status: 'PENDING', reviewNote: null, reviewedAt: null };
+    const v = await this.prisma.businessVerification.upsert({ where: { channelId: channel.id }, create: { channelId: channel.id, ...data }, update: data });
+    return this.verificationView(v, (await this.billing.settings()).verificationUsdCents);
+  }
+
+  @Post('ads/verification/pay')
+  @RequireAuth()
+  @ApiOperation({ summary: 'Pay for a year of the Verified business badge (after our team approved the request)' })
+  async payVerification(@CurrentAuth() auth: AuthContext, @Body() body: PayDto) {
+    await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
+    const channel = await this.prisma.channel.findUnique({ where: { userId: auth.user.id }, include: { businessVerification: true } });
+    const v = channel?.businessVerification;
+    if (!v || (v.status !== 'APPROVED' && v.status !== 'ACTIVE')) throw new BadRequestException('Our team has to check your business first.');
+    const usdCents = (await this.billing.settings()).verificationUsdCents;
+    const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'VERIFICATION', method: body.method, phone: body.phone, months: 12, usdCents, description: 'Free Me Verified business badge, 1 year', returnPath: '/studio/ads' }));
+    return { payment: paymentView(p) };
   }
 
   private async own(auth: AuthContext, id: string) {
@@ -114,7 +176,7 @@ export class AdsController {
     await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
     const c = await this.own(auth, id);
     if (c.status !== 'DRAFT') throw new BadRequestException('This campaign is already paid.');
-    const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'AD_CAMPAIGN', method: body.method, phone: body.phone, campaignId: c.id, usdCents: c.days * c.dailyRateCents, description: `Free Me ad, ${c.days} ${c.days === 1 ? 'day' : 'days'}`, returnPath: '/studio/ads' }));
+    const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'AD_CAMPAIGN', method: body.method, phone: body.phone, campaignId: c.id, usdCents: Number(c.budgetAmountCents), description: 'Free Me ad funds', returnPath: '/studio/ads' }));
     return { payment: paymentView(p) };
   }
 
@@ -150,12 +212,15 @@ export class AdsController {
   @Get('videos/:id/ads')
   @ApiOperation({ summary: 'Ads to play with this video: none, one before it, or also one halfway (at most two)' })
   async forVideo(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
+    // Plus, Family & TV and Premium: no ads (their subscription pays creators instead, by watch time).
+    if (auth && await hasPlus(this.prisma, auth.user)) return { slots: [] };
     const v = await this.prisma.video.findFirst({ where: { id, ...LINKED_VIDEO }, include: { channel: { include: { eligibility: true, user: { select: { premiumUntil: true, roles: true } } } } } });
     const now = new Date();
     if (!v || v.isShort || v.isAd || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now)) return { slots: [] };
     const country = await this.viewerCountry(auth, req);
     const candidates = await this.prisma.campaign.findMany({
-      where: { status: 'ACTIVE', startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, AND: [
+      where: { status: 'ACTIVE', startDate: { lte: now }, videoId: { not: id }, AND: [
+        { OR: [{ endDate: { gt: now } }, { deliverUntil: { gt: now } }] },
         country ? { OR: [{ targetCountries: { isEmpty: true } }, { targetCountries: { has: country } }] } : { targetCountries: { isEmpty: true } },
         { OR: [{ targetVideoIds: { isEmpty: true }, targetChannelIds: { isEmpty: true } },
           ...(v.visibility === 'PUBLIC' ? [{ targetVideoIds: { has: id } }, { targetChannelIds: { has: v.channelId } }] : [])] },
@@ -164,7 +229,10 @@ export class AdsController {
     });
     const ads = await this.prisma.video.findMany({ where: { id: { in: candidates.map((c) => c.videoId!).filter(Boolean) }, ...LINKED_VIDEO, mediaLocation: 'PUBLIC' } });
     const byId = new Map(ads.map((a) => [a.id, a]));
-    const usable = candidates.filter((c) => c.videoId && byId.has(c.videoId)).sort(() => Math.random() - 0.5);
+    // Campaigns that reached today's views or their budget leave the slots to others.
+    const today = await this.redis.peek(candidates.map((c) => adDayKey(c.id, now)));
+    const open = candidates.filter((c, i) => { const l = adViewLimits(c); return running(c, now) && (!l || today[i] < l.perDay); });
+    const usable = open.filter((c) => c.videoId && byId.has(c.videoId)).sort(() => Math.random() - 0.5);
     const at = [0, ...(v.durationSeconds >= MID_ROLL_MIN_SECONDS ? [Math.floor(v.durationSeconds / 2)] : [])].slice(0, MAX_ADS_PER_VIDEO);
     return {
       slots: at.slice(0, usable.length).map((t, i) => {
@@ -179,21 +247,29 @@ export class AdsController {
   async impression(@Body() body: ImpressionDto, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
     const who = auth?.user.id ?? clientIp(req) ?? 'unknown';
     await this.limits.consume(`ads:imp:${who}`, 120, 86_400, 'Too many ads today.');
+    if (auth && await hasPlus(this.prisma, auth.user)) return { impressionId: null };
     const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId } });
     const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, isShort: false, isAd: false }, include: { channel: { include: { eligibility: true, user: true } } } });
     const now = new Date();
-    if (!c || !v || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now) || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
+    if (!c || !v || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now) || c.videoId === v.id || !running(c, now)) return { impressionId: null };
     if ((c.targetVideoIds.length || c.targetChannelIds.length) &&
         (v.visibility !== 'PUBLIC' || (!c.targetVideoIds.includes(v.id) && !c.targetChannelIds.includes(v.channelId)))) return { impressionId: null };
     const country = await this.viewerCountry(auth, req);
     if (c.targetCountries.length && (!country || !c.targetCountries.includes(country))) return { impressionId: null };
     const { count } = await this.redis.hit(`ads:seen:${who}:${c.id}:${v.id}`, 1800);
     if (count > 1) return { impressionId: null };
+    // Pacing: a campaign priced per 1,000 views gets at most its share of views each day.
+    const limits = adViewLimits(c);
+    if (limits && (await this.redis.hit(adDayKey(c.id, now), 2 * 86_400)).count > limits.perDay) return { impressionId: null };
     const imp = await this.prisma.$transaction(async (tx) => {
-      await tx.campaign.update({ where: { id: c.id }, data: { impressionsCount: { increment: 1 } } });
+      // Counted and charged in one step that never goes over the budget (another server may count at the same time).
+      const charged = await tx.$executeRaw`
+        UPDATE "Campaign" SET "impressionsCount" = "impressionsCount" + 1, "spentAmountCents" = (("impressionsCount" + 1) * "cpmRateCents") / 1000, "updatedAt" = now()
+        WHERE "id" = ${c.id} AND ("cpmRateCents" = 0 OR ("impressionsCount" + 1) * "cpmRateCents" <= "budgetAmountCents" * 1000)`;
+      if (!charged) return null;
       return tx.adImpression.create({ data: { campaignId: c.id, videoId: v.id, viewerCountry: country, watchedDurationMs: 0, currency: c.currency, costChargedCents: 0, creatorShareCents: 0, platformShareCents: 0, reinvestShareCents: 0 } });
     });
-    return { impressionId: imp.id };
+    return { impressionId: imp?.id ?? null };
   }
 
   @Post('ads/impressions/:id/events')

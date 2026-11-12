@@ -46,7 +46,7 @@ export default async function Channel({ params, searchParams }: { params: Promis
         <div className="hidden sm:block"><Avatar name={c.name} src={c.avatarUrl} size={160} /></div>
         <div className="sm:hidden"><Avatar name={c.name} src={c.avatarUrl} size={72} /></div>
         <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-[28px] font-extrabold leading-tight sm:text-[38px]">{c.name}{c.isVerified && <VerifiedBadge size={23} />}</h1>
+          <h1 className="flex items-center gap-2 text-[28px] font-extrabold leading-tight sm:text-[38px]">{c.name}{c.isVerified && <VerifiedBadge size={23} kind={c.badge} />}</h1>
           <p className="mt-1.5 text-[14px] text-muted"><span className="font-medium text-ink">@{c.handle}</span> · {followersLabel(c.followerCount, locale)} · {compactNumber(videoCount, locale)} {videoCount === 1 ? 'video' : 'videos'}</p>
           {c.description && <Link href={`/@${c.handle}?tab=about`} className="mt-1.5 line-clamp-1 max-w-xl text-[14px] text-muted hover:text-ink">{c.description}</Link>}
           <div className="mt-4">

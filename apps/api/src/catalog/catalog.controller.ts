@@ -7,6 +7,7 @@ import type { AuthContext } from '../common/request';
 import { publicChannel } from '../users/serialize';
 import { PUBLIC_VIDEO, videoCard } from './serialize';
 import { MediaUrls } from '../videos/media-urls';
+import { hasPlus } from '../billing/billing';
 
 /** Keyset pagination cursor: "<publishedAt ISO>_<id>", stable while new videos arrive. */
 function parseCursor(cursor?: string) {
@@ -63,7 +64,9 @@ export class CatalogController {
       throw new GoneException(v.takedownReason === 'COPYRIGHT' ? 'This video is no longer available because of a copyright notice.' : 'This video was removed for breaking the Community Guidelines.');
     }
     if (!v || (!owner && (v.status !== 'READY' || v.visibility === 'PRIVATE'))) throw new NotFoundException('This video is not available.');
+    if (v.reviewHoldAt && !owner) throw new NotFoundException('This video is being reviewed by our moderators.');
     const card = videoCard(v, this.urls);
+    const fullQuality = owner || (!!auth && await hasPlus(this.prisma, auth.user));
     const [reaction, history, following, saved] = auth ? await Promise.all([
       this.prisma.like.findUnique({ where: { userId_videoId: { userId: auth.user.id, videoId: id } }, select: { isLike: true } }),
       this.prisma.watchHistory.findUnique({ where: { userId_videoId: { userId: auth.user.id, videoId: id } }, select: { progressSeconds: true, completed: true } }),
@@ -73,7 +76,9 @@ export class CatalogController {
     return {
       video: { ...card, thumbnailUrl: await this.urls.thumb(v), description: v.description, status: v.status, visibility: v.visibility, likeCount: v.likeCount, commentCount: v.commentCount,
         commentsOpen: v.commentsEnabled && !v.madeForKids, takenDownAt: v.takenDownAt,
-        category: v.category ? { name: v.category.name, slug: v.category.slug } : null, playbackUrl: this.urls.playback(v),
+        category: v.category ? { name: v.category.name, slug: v.category.slug } : null, playbackUrl: this.urls.playback(v, fullQuality),
+        // Set when this viewer gets a limited playlist: the player can say that higher qualities come with Premium.
+        qualityLimit: fullQuality ? null : this.urls.qualityLimit(v),
         processingStage: v.processingStage, width: v.width, height: v.height, madeForKids: v.madeForKids,
         storyboardUrl: v.storyboard && v.status === 'READY' ? `/api/videos/${v.id}/storyboard.vtt` : null,
         captions: v.captions.map((c) => ({ language: c.language, auto: c.source === 'AUTO', url: `/api/videos/${v.id}/captions/${c.language}.vtt` })),
@@ -103,7 +108,7 @@ export class CatalogController {
       this.prisma.$queryRaw<{ id: string }[]>`
         WITH q AS (SELECT plainto_tsquery('simple', ${term}) AS tsq)
         SELECT v.id FROM "Video" v JOIN "Channel" c ON c.id = v."channelId", q
-        WHERE v.status = 'READY' AND v.visibility = 'PUBLIC' AND v."mediaLocation" = 'PUBLIC' AND v."publishedAt" IS NOT NULL AND v."takenDownAt" IS NULL
+        WHERE v.status = 'READY' AND v.visibility = 'PUBLIC' AND v."mediaLocation" = 'PUBLIC' AND v."publishedAt" IS NOT NULL AND v."takenDownAt" IS NULL AND v."reviewHoldAt" IS NULL
           AND (
             to_tsvector('simple', v.title || ' ' || coalesce(v.description, '')) @@ q.tsq
             OR ${term} <% v.title
