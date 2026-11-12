@@ -80,6 +80,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     setAudio(null);
     resumeAt.current = null;
     reported.current = false;
+    unsent.current = 0;
     watched.current = 0;
     lastT.current = 0;
   }, [src]);
@@ -97,6 +98,17 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const [error, setError] = useState<string | null>(null);
   const watched = useRef(0);
   const reported = useRef(false);
+  // Watch time after the view was counted, not yet reported (sent with each progress save: every 30 s while playing,
+  // on pause, leave and end). The server checks it against real time.
+  const unsent = useRef(0);
+  const videoIdRef = useRef(videoId);
+  videoIdRef.current = videoId;
+  const beat = useCallback(() => {
+    const s = Math.floor(unsent.current);
+    if (!reported.current || s < 1 || !videoIdRef.current) return;
+    unsent.current -= s;
+    fetch(`/api/videos/${videoIdRef.current}/watch`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ watchedSeconds: s }), credentials: 'same-origin', keepalive: true }).catch(() => undefined);
+  }, []);
   const lastT = useRef(0);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef(0);
@@ -127,11 +139,12 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const progressRef = useRef(onProgress);
   progressRef.current = onProgress;
   const save = useCallback((ended = false) => {
+    lastSaved.current = Date.now();
+    beat();
     const el = video.current;
     if (!el || !progressRef.current || el.currentTime < 1) return;
-    lastSaved.current = Date.now();
     progressRef.current(Math.floor(el.currentTime), ended);
-  }, []);
+  }, [beat]);
 
   // Resume once the video knows its length.
   useEffect(() => {
@@ -382,7 +395,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     if (mid && !ad && !el.paused) { adsPlayed.current.add(mid.at); el.pause(); setAd(mid); return; }
     if (el.buffered.length) setBuffered(el.buffered.end(el.buffered.length - 1));
     const delta = el.currentTime - lastT.current;
-    if (!el.paused && delta > 0 && delta < 2) watched.current += delta;
+    if (!el.paused && delta > 0 && delta < 2) { watched.current += delta; if (reported.current) unsent.current += delta; }
     lastT.current = el.currentTime;
     if (!el.paused && Date.now() - lastSaved.current > 30_000) save(); // every 30 s while playing (and on pause, leave and end)
     const need = Math.min(30, (el.duration || duration) * 0.5);

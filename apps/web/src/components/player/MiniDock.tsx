@@ -36,8 +36,16 @@ function Dock({ v }: { v: DockVideo }) {
   const el = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  // Watch time played here, reported like the main player's (the server only counts it after a counted view).
+  const unsent = useRef(0);
+  const lastT = useRef(v.time);
 
   const save = (ended = false) => {
+    const played = Math.floor(unsent.current);
+    if (played >= 1) {
+      unsent.current -= played;
+      fetch(`/api/videos/${v.id}/watch`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ watchedSeconds: played }), credentials: 'same-origin', keepalive: true }).catch(() => undefined);
+    }
     const t = Math.floor(el.current?.currentTime ?? v.time);
     if (!v.signedIn || t < 1) return;
     fetch(`/api/videos/${v.id}/progress`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seconds: t, ended }), credentials: 'same-origin', keepalive: true }).catch(() => undefined);
@@ -64,7 +72,12 @@ function Dock({ v }: { v: DockVideo }) {
         hls.attachMedia(video);
       }).catch(() => undefined);
     }
-    const tick = () => setProgress(video.duration ? video.currentTime / video.duration : 0);
+    const tick = () => {
+      setProgress(video.duration ? video.currentTime / video.duration : 0);
+      const delta = video.currentTime - lastT.current;
+      if (!video.paused && delta > 0 && delta < 2) unsent.current += delta;
+      lastT.current = video.currentTime;
+    };
     const timer = setInterval(() => save(), 15_000);
     video.addEventListener('timeupdate', tick);
     return () => { off = true; clearInterval(timer); video.removeEventListener('timeupdate', tick); hls?.destroy(); };

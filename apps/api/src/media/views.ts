@@ -6,6 +6,9 @@ const PENDING_WATCH = 'fm:watch:pending';
 const PENDING_PLUS = 'fm:pluswatch:pending';
 /** The same viewer counts once per video in this window. */
 const DEDUPE_SECONDS = 6 * 3600;
+/** Seconds one heartbeat may report (the player sends one about every minute). */
+const MAX_BEAT_SECONDS = 150;
+const beatKey = (videoId: string, viewerKey: string) => `fm:beat:${videoId}:${viewerKey}`;
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** Adds views and watch time to one video's row for one day (UTC). */
@@ -36,6 +39,8 @@ export class ViewCounter {
     }
     const fresh = await this.redis.set(`fm:view:${videoId}:${viewerKey}`, '1', 'EX', DEDUPE_SECONDS, 'NX');
     const m = this.redis.multi();
+    // Start this viewer's watch-time account for the video: later heartbeats (addWatch) are checked against it.
+    if (fresh) m.hset(beatKey(videoId, viewerKey), 'at', Date.now(), 'total', seconds).expire(beatKey(videoId, viewerKey), DEDUPE_SECONDS);
     // Fields are "<video>|<day>", so a batch also knows which day each view belongs to.
     const field = `${videoId}|${today()}`;
     if (fresh) m.hincrby(PENDING_VIEWS, field, 1);
@@ -43,6 +48,37 @@ export class ViewCounter {
     if (seconds && plus) m.hincrby(PENDING_PLUS, field, seconds);
     await m.exec();
     return fresh === 'OK';
+  }
+
+  /**
+   * Watch time after the view was counted: the player reports the seconds it played (about once a minute, and on
+   * pause or leave). Each report is checked against the real time since the last one (at most 2x speed), and a viewer
+   * adds at most the video's length (plus a minute) per video every 6 hours, so time cannot be inflated by sending
+   * reports faster or replaying. Returns the seconds counted.
+   */
+  async addWatch(videoId: string, viewerKey: string, watchedSeconds: number, durationSeconds: number, plus = false): Promise<number> {
+    const claimed = Math.max(0, Math.min(MAX_BEAT_SECONDS, Math.round(watchedSeconds)));
+    if (!claimed) return 0;
+    if (!this.redis) {
+      await this.prisma.video.update({ where: { id: videoId }, data: { watchTimeSeconds: { increment: claimed } } });
+      await addDaily(this.prisma, videoId, today(), 0, claimed, plus ? claimed : 0);
+      return claimed;
+    }
+    const key = beatKey(videoId, viewerKey);
+    const [at, total] = await this.redis.hmget(key, 'at', 'total');
+    if (!at) return 0; // no counted view in the last 6 hours: nothing to add to
+    const now = Date.now();
+    const elapsed = Math.max(0, (now - Number(at)) / 1000);
+    const room = Math.max(0, durationSeconds + 60 - Number(total ?? 0));
+    const seconds = Math.floor(Math.min(claimed, elapsed * 2 + 2, room));
+    const m = this.redis.multi().hset(key, 'at', now);
+    if (seconds > 0) {
+      const field = `${videoId}|${today()}`;
+      m.hincrby(key, 'total', seconds).hincrby(PENDING_WATCH, field, seconds);
+      if (plus) m.hincrby(PENDING_PLUS, field, seconds);
+    }
+    await m.exec();
+    return Math.max(0, seconds);
   }
 
   /** Writes counted views and watch time to the database. Safe to run on several workers at once. */

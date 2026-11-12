@@ -9,10 +9,12 @@ import { VerifiedBadge } from '@/components/VerifiedBadge';
 import { api } from '@/lib/client-api';
 import { usd } from '@/lib/money';
 import { useShell } from '@/components/shell/ShellContext';
+import { EarningsHero, WatchHours, type Audience } from '@/components/hub/MoneyLive';
 
 interface Money {
   premium: { active: boolean; until: string | null }; joined: boolean; joinedAt: string | null; earning: boolean;
   balance: { currency: string; availableCents: number; lifetimeCents: number; withdrawnCents: number; reservedCents: number; paidCents: number; pendingCents: number }; adsShownLast28Days: number;
+  audience?: Audience;
   earnings: Array<{ id: string; kind: string; amountCents: number; day: string | null; description: string; at: string }>;
   payouts: Withdrawal[];
   programme: { maxAdsPerVideo: number; payoutMinimumUsdCents: number; premiumUsdCents: number };
@@ -55,6 +57,19 @@ export function HubMoney() {
   }, [m?.joined]);
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); setError(null); try { await fn(); await load(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
 
+  const daily = (() => {
+    if (!m) return [];
+    const today = new Date().toISOString().slice(0, 10);
+    const days = Array.from({ length: 13 }, (_, i) => new Date(Date.now() - (13 - i) * 86_400_000).toISOString().slice(0, 10));
+    const by = new Map<string, number>();
+    for (const e of m.earnings) {
+      if (e.amountCents <= 0) continue;
+      const d = (e.day && /^\d{4}-\d{2}-\d{2}/.test(e.day) ? e.day : e.at).slice(0, 10);
+      if (d !== today) by.set(d, (by.get(d) ?? 0) + e.amountCents);
+    }
+    return m.earnings.length ? days.map((d) => ({ day: d, cents: by.get(d) ?? 0 })) : [];
+  })();
+
   if (!m) return error ? <p role="alert" className="mt-6 rounded-xl bg-danger/10 px-4 py-3 text-danger">{error}</p> : <Icon.Spinner className="mx-auto mt-10 animate-spin text-muted" />;
   const p = m.programme;
 
@@ -82,30 +97,24 @@ export function HubMoney() {
       ) : (
         <>
           {!m.earning && <p className="rounded-2xl bg-accent-soft px-4 py-3 text-[14px] text-on-accent-soft">Your Premium membership has ended, so ads are not playing on your videos. <Link href="/premium" className="font-bold underline">Renew Premium</Link> to earn again; your balance stays yours.</p>}
-          <section className="rounded-3xl border border-line bg-elevated p-5 sm:p-6" aria-labelledby="earn-heading">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 id="earn-heading" className="font-display text-xl font-bold">Earn</h3>
-              {earn && <span className="rounded-full bg-brand/10 px-3 py-1 text-sm font-semibold text-brand">Live estimate</span>}
-            </div>
-            {earn ? (
-              <>
-                <p className="mt-3 font-display text-3xl font-extrabold tabular-nums">{usd(earn.estimatedCents, locale)}</p>
-                <p className="text-sm text-muted">Estimated ad earnings · {earn.impressions.toLocaleString(locale)} ads shown · {earn.day} UTC</p>
-                <p className="mt-1 text-sm text-muted">This is an estimate and can change before the day is settled.</p>
-                <h4 className="mt-5 font-semibold">Campaign activity</h4>
-                {earn.activity.length ? <div className="overflow-x-auto"><table className="mt-2 w-full text-left text-sm">
-                  <thead className="text-muted"><tr><th scope="col" className="py-2 pr-3">Campaign</th><th scope="col" className="py-2 pr-3">Video placement</th><th scope="col" className="py-2 text-right">Ads shown</th></tr></thead>
-                  <tbody className="divide-y divide-line">{earn.activity.map((row) => <tr key={`${row.campaignId}:${row.videoId}`}><td className="py-2 pr-3">{row.campaign}</td><td className="py-2 pr-3">{row.video}</td><td className="py-2 text-right tabular-nums">{row.impressions.toLocaleString(locale)}</td></tr>)}</tbody>
-                </table></div> : <p className="mt-1 text-sm text-muted">No ad activity today.</p>}
-              </>
-            ) : <p className="mt-2 text-sm text-muted">Live earnings are currently unavailable.</p>}
-          </section>
+          <EarningsHero todayCents={earn ? earn.estimatedCents : null} impressions={earn?.impressions ?? 0} availableCents={m.balance.availableCents} lifetimeCents={m.balance.lifetimeCents} earning={m.earning} locale={locale} daily={daily} />
+          {earn && earn.activity.length > 0 && (
+            <section className="rounded-3xl border border-line bg-elevated p-5 sm:p-6" aria-labelledby="activity-heading">
+              <h3 id="activity-heading" className="font-display text-[18px] font-bold">Ads on your videos today</h3>
+              <div className="overflow-x-auto"><table className="mt-2 w-full text-left text-sm">
+                <thead className="text-muted"><tr><th scope="col" className="py-2 pr-3">Ad</th><th scope="col" className="py-2 pr-3">On your video</th><th scope="col" className="py-2 text-right">Shown</th></tr></thead>
+                <tbody className="divide-y divide-line">{earn.activity.map((row) => <tr key={`${row.campaignId}:${row.videoId}`}><td className="py-2 pr-3">{row.campaign}</td><td className="py-2 pr-3">{row.video}</td><td className="py-2 text-right tabular-nums">{row.impressions.toLocaleString(locale)}</td></tr>)}</tbody>
+              </table></div>
+            </section>
+          )}
 
         </>
       )}
 
+      {m.audience && <WatchHours a={m.audience} locale={locale} joined={m.joined} />}
+
       {viewer?.channel && <CreatorSupport handle={viewer.channel.handle} owner />}
-          <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[['Available', m.balance.availableCents], ['Pending settlement', m.balance.pendingCents ?? 0], ['In withdrawal', m.balance.reservedCents ?? 0], ['Paid', m.balance.paidCents ?? 0]].map(([l, v]) => (
               <div key={l as string} className="rounded-3xl border border-line bg-elevated p-5"><p className="text-[13px] text-muted">{l}</p><p className="font-display text-[26px] font-extrabold tabular-nums">{usd(v as number, locale)}</p></div>
             ))}
