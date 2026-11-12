@@ -5,7 +5,7 @@ import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { extname, join, relative, sep } from 'node:path';
 import type { AppConfig } from '../config/config';
 import { AUDIO, HD_RUNGS, codecsFor, isHighRung, masterPlaylist, planLadder, type MasterEntry, type PlannedRung } from './ladder';
-import { BT709_TAGS, ffmpegFilters, loudnessFilter, measureLoudness, toneMap, type Hdr, type Loudness } from './filters';
+import { BT709_H264, ffmpegFilters, loudnessFilter, measureLoudness, toneMap, type Hdr, type Loudness } from './filters';
 import { AudioOnly, MediaError, keyframeGap, probe, run, type ProbeResult } from './probe';
 import { mediaPrefix, wantedLocation } from './keys';
 import { LATE_FOLDERS } from './captions';
@@ -335,7 +335,7 @@ export class VideoProcessor {
     await mkdir(dir, { recursive: true });
     const tasks: ChunkTask[] = Array.from({ length: count }, (_, index) => {
       const args = ['-hide_banner', '-y', '-nostats', '-ss', String(index * length), ...(index < count - 1 ? ['-t', String(length)] : []), '-i', '{IN}', '-filter_complex', filter];
-      encoded.forEach((r, i) => args.push('-map', `[o${i}]`, ...(hdr ? BT709_TAGS : []), ...this.videoArgs(enc, r),
+      encoded.forEach((r, i) => args.push('-map', `[o${i}]`, ...(hdr ? BT709_H264 : []), ...this.videoArgs(enc, r),
         '-force_key_frames', index === 0 ? FIRST_KEYFRAMES : NEXT_KEYFRAMES, '-sc_threshold', '0', '-an', `{OUT:${r.name}}`));
       return { videoId: ctx.videoId, run: runId, index, args, rungs: encoded.map((r) => r.name), source: { host: nodeName(), path: source, key: ctx.sourceKey }, out: { host: nodeName(), dir }, niceness: ctx.background ? 10 : 0 };
     });
@@ -379,7 +379,7 @@ export class VideoProcessor {
       const dir = join(work, 'out', 'hls', r.name);
       await mkdir(dir, { recursive: true });
       if (r.copy) { args.push('-map', '0:v:0', '-c:v', 'copy', ...hlsArgs(dir)); continue; }
-      args.push('-map', `[o${encoded.indexOf(r)}]`, ...(hdr ? BT709_TAGS : []));
+      args.push('-map', `[o${encoded.indexOf(r)}]`, ...(hdr ? BT709_H264 : []));
       args.push(
         ...this.videoArgs(enc, r),
         '-force_key_frames', FIRST_KEYFRAMES, '-sc_threshold', '0', '-movflags', '+faststart',

@@ -79,13 +79,14 @@ jobs:
         run: npm run build
       - name: End-to-end tests in a browser
         run: |
+          export LIVE_RTMP_URL=rtmps://live.freeme.test:443/live LIVE_RTMP_SECRET=ci-live-rtmp-secret-0123456789
           export APP_URL=http://localhost:3000 MAIL_TRANSPORT=console SESSION_SECRET=ci-session-secret-0123456789abcdefghij STORAGE_DRIVER=local LOCAL_STORAGE_DIR=/tmp/fm-storage SCRATCH_DIR=/tmp/fm-scratch ADMIN_EMAILS=admin@example.com,live-admin@example.com
           (cd apps/api && node dist/main.js > /tmp/api.log 2>&1 &)
           (cd apps/api && node dist/worker.js > /tmp/worker.log 2>&1 &)
           (cd apps/web && API_INTERNAL_URL=http://127.0.0.1:4000 PORT=3000 HOSTNAME=127.0.0.1 node .next/standalone/apps/web/server.js > /tmp/web.log 2>&1 &)
           npx --prefix apps/web playwright install --with-deps chromium
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:4000/api/health > /dev/null && curl -sf http://127.0.0.1:3000/ > /dev/null && break; sleep 1; done
-          cd apps/web && E2E_API_LOG=/tmp/api.log npx playwright test
+          cd apps/web && E2E_API_LOG=/tmp/api.log E2E_RTMP_SECRET="$LIVE_RTMP_SECRET" npx playwright test
       - name: Server logs on failure
         if: failure()
         run: tail -n 100 /tmp/api.log /tmp/worker.log /tmp/web.log || true

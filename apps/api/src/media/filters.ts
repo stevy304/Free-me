@@ -24,6 +24,9 @@ export function toneMap(hdr: Exclude<Hdr, null>, width: number, height: number):
 /** Output colour tags after tone mapping, so players do not guess. */
 export const BT709_TAGS = ['-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv'];
 
+/** Write the H.264 VUI too: some encoder builds omit transfer/primaries despite the output colour flags. */
+export const BT709_H264 = [...BT709_TAGS, '-bsf:v', 'h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0'];
+
 let filters: Promise<Set<string>> | null = null;
 /** Filters this ffmpeg has (Ubuntu's ffmpeg has zscale and tonemap; minimal builds may not). */
 export function ffmpegFilters(ffmpeg: string): Promise<Set<string>> {

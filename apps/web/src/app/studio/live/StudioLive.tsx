@@ -7,6 +7,8 @@ import { inputClass } from '@/components/Pickers';
 import styles from '@/components/live/ControlRoom.module.css';
 import { ControlRoom } from '@/components/live/ControlRoom';
 import { LiveChat } from '@/components/live/LiveChat';
+import { LivePlayer } from '@/components/live/LivePlayer';
+import { EncoderConnection } from '@/components/live/EncoderConnection';
 import { LiveSettings, type LiveStreamSettings } from '@/components/live/LiveSettings';
 import { api } from '@/lib/client-api';
 import { getSocket, useRealtime } from '@/lib/realtime';
@@ -14,7 +16,7 @@ import { useShell } from '@/components/shell/ShellContext';
 
 interface Studio {
   premium: boolean;
-  stream: LiveStreamSettings & { status: 'IDLE' | 'LIVE' | 'ENDED'; startedAt: string | null; viewers: number; peakViewers: number };
+  stream: LiveStreamSettings & { status: 'IDLE' | 'LIVE' | 'ENDED'; startedAt: string | null; viewers: number; peakViewers: number; source: string | null; playbackUrl: string | null };
   encoder: { server: string; streamKey: string } | null;
   past: Array<{ id: string; title: string; startedAt: string | null; endedAt: string | null; peakViewers: number; replayVideoId: string | null }>;
 }
@@ -33,35 +35,45 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   const [reconnectUntil, setReconnectUntil] = useState<number | null>(null);
   const [encoderRtt, setEncoderRtt] = useState<number | null>(null);
   const [viewers, setViewers] = useState(0);
-  const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  const pickRequest = useRef(0);
   const [now, setNow] = useState(Date.now());
   const capture = useRef<(() => Promise<{ stream: MediaStream; stop: () => void }>) | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
-  useEffect(() => () => { if (recorder.current?.state === 'recording') recorder.current.stop(); }, []);
+  useEffect(() => () => { pickRequest.current += 1; if (recorder.current?.state === 'recording') recorder.current.stop(); }, []);
 
   const load = useCallback(async () => {
     try { const r = await api<Studio>('/hub/live'); setSt(r); setTitle((t) => t || r.stream.title); setViewers(r.stream.viewers); } catch (e) { setError((e as Error).message); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  // Polling also catches encoder starts/ends when a socket event is missed.
+  useEffect(() => { if (basic) return; const timer = setInterval(() => void load(), 5000); return () => clearInterval(timer); }, [basic, load]);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   useRealtime<{ count: number }>('viewers', (d) => setViewers(d.count), st ? `live:${st.stream.id}` : null, !!st);
   useRealtime('started', () => void load(), st ? `live:${st.stream.id}` : null, !!st);
-  useRealtime('ended', () => { setState('idle'); void load(); }, st ? `live:${st.stream.id}` : null, !!st);
+  useRealtime('ended', () => { if (recorder.current?.state === 'recording') recorder.current.stop(); setState('idle'); void load(); }, st ? `live:${st.stream.id}` : null, !!st);
   useEffect(() => () => { media?.getTracks().forEach((t) => t.stop()); }, [media]);
 
   const pick = async (kind: 'camera' | 'screen') => {
-    setError(null); setSource(kind);
-    media?.getTracks().forEach((t) => t.stop());
+    const request = ++pickRequest.current;
+    setError(null); setPicking(true);
+    let next: MediaStream | undefined;
     try {
-      if (kind === 'camera') setMedia(await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: { echoCancellation: true, noiseSuppression: true } }));
+      if (!navigator.mediaDevices) throw new Error('Open Free Me over HTTPS or localhost to use your camera and microphone.');
+      if (kind === 'camera') next = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: { echoCancellation: true, noiseSuppression: true } });
       else {
-        const screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
+        next = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
         const mic = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
-        setMedia(new MediaStream([...screen.getTracks(), ...(mic?.getAudioTracks() ?? [])]));
+        mic?.getAudioTracks().forEach((track) => next!.addTrack(track));
       }
-    } catch { setError(kind === 'camera' ? 'Allow the camera and microphone to go live from this browser.' : 'Screen sharing was not allowed.'); }
+      if (request !== pickRequest.current) { next.getTracks().forEach((track) => track.stop()); return; }
+      setSource(kind); setMedia(next);
+    } catch (e) {
+      next?.getTracks().forEach((track) => track.stop());
+      setError(e instanceof Error && e.message.includes('HTTPS') ? e.message : kind === 'camera' ? 'Allow the camera and microphone to go live from this browser.' : 'Screen sharing was not allowed.');
+    } finally { if (request === pickRequest.current) setPicking(false); }
   };
 
   const goLive = async () => {
@@ -85,6 +97,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       let needsResume = false;
       let deadline: number | null = null;
       let finishing = false;
+      let finishDeadline = 0;
       let finished = false;
       let failed = false;
       let retry: ReturnType<typeof setTimeout> | undefined;
@@ -170,7 +183,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
           delay = 500;
         } finally {
           pumping = false;
-          if (finishing) finish();
+          if (finishing && (failed || !pending.length || Date.now() >= finishDeadline)) finish();
           else if (!failed && !finished && (pending.length || deadline !== null)) retry = setTimeout(pump, delay);
         }
       }
@@ -187,6 +200,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       };
       rec.onstop = () => {
         finishing = true;
+        finishDeadline = Date.now() + 15_000;
         if (failed || !sock.connected || deadline !== null) finish();
         else void pump();
       };
@@ -203,8 +217,8 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
       void load();
     } catch (e) { output?.stop(); setError((e as Error).message); setState('idle'); }
   };
-  const end = () => { setState('ending'); if (recorder.current?.state === 'recording') { const r = recorder.current; recorder.current = null; r.stop(); } else void api('/hub/live/end', { body: {} }).finally(() => { setState('idle'); void load(); }); };
-  const copy = async (what: string, text: string) => { try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(null), 1500); } catch { /* clipboard blocked */ } };
+  const end = () => { setState('ending'); setError(null); if (recorder.current?.state === 'recording') recorder.current.stop(); else void api('/hub/live/end', { body: {} }).catch((e) => setError((e as Error).message)).finally(() => { setState('idle'); void load(); }); };
+  const copy = async (what: string, text: string) => { try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(null), 1500); } catch { setError('Clipboard access is unavailable. Select and copy the link manually.'); } };
 
   if (!st) return error ? <p role="alert" className="mx-auto mt-10 max-w-xl rounded-xl bg-danger/10 px-4 py-3 text-danger">{error}</p> : <Icon.Spinner className="mx-auto mt-16 animate-spin text-muted" />;
   if (!basic && !st.premium) {
@@ -229,6 +243,15 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   );
   const watchUrl = typeof window !== 'undefined' ? `${window.location.origin}/live/${st.stream.id}` : `/live/${st.stream.id}`;
 
+  const external = live && st.stream.source === 'rtmp';
+  const encoderPanel = <EncoderConnection encoder={st.encoder} live={live || state !== 'idle'} external={live && st.stream.source === 'rtmp'} busy={picking}
+            onKey={(streamKey) => setSt((current) => current?.encoder ? { ...current, encoder: { ...current.encoder, streamKey } } : current)}
+            onPrepare={async () => {
+              if (!title.trim()) throw new Error('Enter a broadcast title first.');
+              await api('/hub/live', { method: 'PATCH', body: { title: title.trim() } });
+              await load();
+            }} />;
+
   if (!basic) return (
     <main className={`dark ${styles.studio}`}>
       <header className={styles.top}>
@@ -245,36 +268,34 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
           {state === 'live' && encoderRtt !== null && <span title="Latest encoder response" className={styles.latency}>Encoder {encoderRtt} ms</span>}
           {live || state === 'live' || state === 'ending' ?
             <button type="button" onClick={end} disabled={state === 'ending'}>{state === 'ending' ? 'Ending…' : 'End broadcast'}</button> :
-            <button type="button" onClick={() => void goLive()} disabled={!media || state !== 'idle'}>{state === 'starting' ? 'Starting…' : 'Go live'}</button>}
+            <button type="button" onClick={() => void goLive()} disabled={!media || picking || state !== 'idle' || live}>{state === 'starting' ? 'Starting…' : 'Go live'}</button>}
         </div>
       </header>
       {error && <p role="alert" className="rounded-md bg-red-950 px-3 py-2 text-sm text-red-200">{error}</p>}
       {signal}
-      <ControlRoom streamId={st.stream.id} basic={false} host={media} capture={capture} active={state === 'live'}
+      {external && st.stream.playbackUrl ? (
+        <section className={styles.desk} aria-label="External broadcast control room">
+          <div className="min-w-0 space-y-4">
+            <section className="overflow-hidden rounded-2xl border border-[#34555c] bg-[#010809]">
+              <div className="flex items-center justify-between gap-3 bg-[#10383d] px-4 py-3"><h2 className="font-bold">Encoder program</h2><span className="text-xs text-[#9fe8df]">Viewer playback · muted preview</span></div>
+              <LivePlayer src={st.stream.playbackUrl} latency={st.stream.latencyMode ?? 'normal'} muted className="aspect-video w-full" />
+              <p className="px-4 py-3 text-xs leading-relaxed text-[#afc4c9]">Video and graphics come from your encoder. Playback appears after the first segments arrive and has a short delay.</p>
+            </section>
+            <LiveSettings key={st.stream.id} stream={st.stream} live onSaved={() => void load()} />
+          </div>
+          <aside className="min-w-0 space-y-4" aria-label="Encoder broadcast controls">{encoderPanel}<LiveChat streamId={st.stream.id} initial={[]} live className="h-96" /></aside>
+        </section>
+      ) : <ControlRoom streamId={st.stream.id} basic={false} host={media} capture={capture} active={state === 'live'}
         chat={<LiveChat streamId={st.stream.id} initial={[]} live={live} className="h-96" />}
         sources={<div className="space-y-3">
           <h3 className="font-bold">Choose your input</h3>
           <div className="flex flex-wrap gap-2">
-                <button type="button" disabled={state === 'starting' || state === 'ending'} onClick={() => void pick('camera')} aria-pressed={source === 'camera' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'camera' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.Camera size={18} />Camera</button>
-                <button type="button" disabled={state === 'starting' || state === 'ending'} onClick={() => void pick('screen')} aria-pressed={source === 'screen' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'screen' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.ScreenShare size={18} />Screen</button>
+                <button type="button" disabled={picking || state === 'starting' || state === 'ending' || (live && state !== 'live')} onClick={() => void pick('camera')} aria-pressed={source === 'camera' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'camera' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.Camera size={18} />Camera</button>
+                <button type="button" disabled={picking || state === 'starting' || state === 'ending' || (live && state !== 'live')} onClick={() => void pick('screen')} aria-pressed={source === 'screen' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'screen' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.ScreenShare size={18} />Screen</button>
 
           </div>
           <LiveSettings key={st.stream.id} stream={st.stream} live={live || state === 'live'} onSaved={() => void load()} />
-          <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
-            <h2 className="flex items-center gap-2 font-display text-[18px] font-bold"><Icon.Monitor size={20} />OBS, TV encoder or camera</h2>
-            {st.encoder ? (
-              <>
-                <p className="mt-1 text-[14px] text-muted">In OBS: Settings → Stream → Service “Custom”, then paste these. Use H.264 video, AAC audio and a keyframe every 2 seconds. You go live as soon as the encoder starts streaming.</p>
-                <dl className="mt-3 space-y-2 text-[14px]">
-                  <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface px-3 py-2"><dt className="w-24 font-semibold">Server</dt><dd className="min-w-0 flex-1 break-all font-mono text-[13px]">{st.encoder.server}</dd><button type="button" onClick={() => void copy('server', st.encoder!.server)} className="flex items-center gap-1 rounded-lg px-2 py-1 font-semibold hover:bg-surface-hover"><Icon.Copy size={16} />{copied === 'server' ? 'Copied' : 'Copy'}</button></div>
-                  <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface px-3 py-2"><dt className="w-24 font-semibold">Stream key</dt><dd className="min-w-0 flex-1 break-all font-mono text-[13px]">{showKey ? st.encoder.streamKey : '•'.repeat(24)}</dd>
-                    <button type="button" onClick={() => setShowKey((s) => !s)} className="rounded-lg px-2 py-1 font-semibold hover:bg-surface-hover">{showKey ? 'Hide' : 'Show'}</button>
-                    <button type="button" onClick={() => void copy('key', st.encoder!.streamKey)} className="flex items-center gap-1 rounded-lg px-2 py-1 font-semibold hover:bg-surface-hover"><Icon.Copy size={16} />{copied === 'key' ? 'Copied' : 'Copy'}</button></div>
-                </dl>
-                <p className="mt-2 text-[12px] text-muted">Keep the key secret: anyone with it can broadcast on your Space. <button type="button" className="font-semibold text-danger hover:underline" onClick={() => void api<{ streamKey: string }>('/hub/live/key', { body: {} }).then((r) => setSt({ ...st, encoder: { ...st.encoder!, streamKey: r.streamKey } })).catch((e) => setError((e as Error).message))}>Make a new key</button></p>
-              </>
-            ) : <p className="mt-1 text-[14px] text-muted">Streaming from an encoder is not switched on for this server yet (the operator sets LIVE_RTMP_URL; see DEPLOYMENT.md → Live). You can go live from this browser.</p>}
-          </section>
+          {encoderPanel}
 
           {st.past.length > 0 && (
             <section className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
@@ -292,11 +313,11 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
             </section>
           )}
 
-        </div>} />
+        </div>} />}
       <footer className={styles.footer}>
         <span><Icon.Live size={16} /> Primary feed <strong>{reconnectUntil !== null ? 'Reconnecting' : state === 'live' ? 'Broadcasting' : live ? 'External broadcast' : media ? 'Source ready' : 'No source'}</strong></span>
         <span><Icon.Eye size={16} /> {viewers.toLocaleString(locale)} watching</span>
-        <span>Recording <strong>{state === 'live' ? clock(st.stream.startedAt, now) : 'Standby'}</strong></span>
+        <span>Replay <strong>{st.stream.saveReplay ? live ? 'Will be saved' : 'Enabled' : 'Off'}</strong></span>
         <a href={watchUrl} target="_blank" rel="noreferrer">Open watch page ↗</a>
       </footer>
     </main>
@@ -318,15 +339,15 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
         <div className="space-y-5">
           <section className="overflow-hidden rounded-3xl border border-line bg-elevated">
             <div className="space-y-3 p-4 sm:p-5">
-              <label className="block"><span className="text-[13px] font-semibold">Title</span><input className={`mt-1 ${inputClass}`} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={100} disabled={state === 'live'} /></label>
+              <label className="block"><span className="text-[13px] font-semibold">Title</span><input className={`mt-1 ${inputClass}`} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={100} disabled={state !== 'idle' || live} /></label>
               <div className="flex flex-wrap gap-2">
-                <button type="button" disabled={state === 'starting' || state === 'ending'} onClick={() => void pick('camera')} aria-pressed={source === 'camera' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'camera' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.Camera size={18} />Camera</button>
-                <button type="button" disabled={state === 'starting' || state === 'ending'} onClick={() => void pick('screen')} aria-pressed={source === 'screen' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'screen' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.ScreenShare size={18} />Screen</button>
+                <button type="button" disabled={picking || state === 'starting' || state === 'ending' || (live && state !== 'live')} onClick={() => void pick('camera')} aria-pressed={source === 'camera' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'camera' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.Camera size={18} />Camera</button>
+                <button type="button" disabled={picking || state === 'starting' || state === 'ending' || (live && state !== 'live')} onClick={() => void pick('screen')} aria-pressed={source === 'screen' && !!media} className={`flex h-10 items-center gap-2 rounded-xl px-4 text-[14px] font-semibold ${source === 'screen' && media ? 'bg-brand-soft text-brand' : 'bg-surface hover:bg-surface-hover'} disabled:opacity-50`}><Icon.ScreenShare size={18} />Screen</button>
                 <span className="ml-auto flex gap-2">
                   {state === 'live' || (live && st.stream.startedAt) ? (
                     <button type="button" onClick={end} disabled={state === 'ending'} className="h-10 rounded-xl bg-[#e5484d] px-5 text-[14px] font-bold text-white disabled:opacity-60">{state === 'ending' ? 'Ending…' : 'End stream'}</button>
                   ) : (
-                    <button type="button" onClick={() => void goLive()} disabled={!media || state !== 'idle'} className="flex h-10 items-center gap-2 rounded-xl bg-[#e5484d] px-5 text-[14px] font-bold text-white disabled:opacity-50">{state === 'starting' && <Icon.Spinner size={16} className="animate-spin" />}Go live</button>
+                    <button type="button" onClick={() => void goLive()} disabled={!media || picking || state !== 'idle' || live} className="flex h-10 items-center gap-2 rounded-xl bg-[#e5484d] px-5 text-[14px] font-bold text-white disabled:opacity-50">{state === 'starting' && <Icon.Spinner size={16} className="animate-spin" />}Go live</button>
                   )}
                 </span>
               </div>

@@ -224,7 +224,7 @@ test('repair: files left in the other storage place are reported, then brought b
 
 test('HDR (HLG, BT.2020, 10-bit) is converted to normal colour: renditions and thumbnails are tagged BT.709', async () => {
   const hlg = join(dir, 'phone_hdr.mp4');
-  ff('-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30:duration=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p10le', '-color_primaries', 'bt2020', '-color_trc', 'arib-std-b67', '-colorspace', 'bt2020nc', hlg);
+  ff('-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30:duration=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p10le', '-color_primaries', 'bt2020', '-color_trc', 'arib-std-b67', '-colorspace', 'bt2020nc', '-x264-params', 'colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc', hlg);
   const agent = await creator();
   const { videoId: id } = await upload(agent, hlg);
   await until(agent, id, (x) => x.status === 'READY' && x.processingStage === 'Ready');

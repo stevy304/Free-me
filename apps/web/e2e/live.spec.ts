@@ -142,9 +142,13 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
     await expect.poll(height, { timeout: 30_000 }).toBe(720);
     await pick('Auto');
     await expect(quality).toHaveText(/^Auto/);
-    // At the newest pieces the player says Live; after rewinding it offers to go back.
+    // The live-edge control: "Live" at the newest pieces; "Go to live" when behind (after the outage and quality
+    // switches above the player may be), which brings the viewer back to the edge.
     await viewer.getByLabel('Live video').hover();
-    await expect(viewer.getByRole('button', { name: 'Live', exact: true })).toBeVisible();
+    const edge = viewer.getByRole('button', { name: /^(Live$|Go to live)/ });
+    await expect(edge).toBeVisible();
+    if ((await edge.getAttribute('aria-label')) !== 'Live') await edge.click();
+    await expect(viewer.getByRole('button', { name: 'Live', exact: true })).toBeVisible({ timeout: 15_000 });
   }
   expect(viewer.url()).toBe(watchPage);
 

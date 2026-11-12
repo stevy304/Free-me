@@ -82,21 +82,31 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
   async mine(userId: string): Promise<LiveStream> {
     const ch = await this.prisma.channel.findUnique({ where: { userId } });
     if (!ch) throw new LiveError('Create your Space first.');
-    const cur = await this.prisma.liveStream.findFirst({ where: { channelId: ch.id, status: { in: ['IDLE', 'LIVE'] } }, orderBy: { createdAt: 'desc' } });
-    return cur ?? this.prisma.liveStream.create({ data: { channelId: ch.id, title: `${ch.name} live` } });
+    return this.prisma.$transaction(async (tx) => {
+      // Serialize creation across API processes; opening two studio tabs must not create competing streams.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${ch.id}, 0))`;
+      const active = await tx.liveStream.findFirst({ where: { channelId: ch.id, status: 'LIVE' }, orderBy: { createdAt: 'desc' } });
+      const cur = active ?? await tx.liveStream.findFirst({ where: { channelId: ch.id, status: 'IDLE' }, orderBy: { createdAt: 'desc' } });
+      return cur ?? tx.liveStream.create({ data: { channelId: ch.id, title: `${ch.name} live` } });
+    });
   }
 
   /** The Space's encoder key (made the first time it is asked for; it stays the same between streams). */
   async streamKey(userId: string, reset = false) {
     const ch = await this.prisma.channel.findUniqueOrThrow({ where: { userId } });
     if (ch.liveStreamKey && !reset) return ch.liveStreamKey;
+    if (reset && await this.prisma.liveStream.findFirst({ where: { channelId: ch.id, status: 'LIVE', source: 'rtmp' }, select: { id: true } })) {
+      throw new LiveError('Stop your encoder before replacing its stream key.');
+    }
     const key = newStreamKey();
-    await this.prisma.channel.update({ where: { id: ch.id }, data: { liveStreamKey: key } });
-    return key;
+    // Concurrent studio requests must receive the same initial key.
+    await this.prisma.channel.updateMany({ where: { id: ch.id, ...(reset ? {} : { liveStreamKey: null }) }, data: { liveStreamKey: key } });
+    return (await this.prisma.channel.findUniqueOrThrow({ where: { id: ch.id } })).liveStreamKey!;
   }
 
   /** Followers hear that the Space is live (once per stream). */
   private async announce(s: LiveStream) {
+    if (s.visibility !== 'PUBLIC') return;
     const ch = await this.prisma.channel.findUniqueOrThrow({ where: { id: s.channelId } });
     const followers = await this.prisma.subscription.findMany({ where: { channelId: ch.id }, select: { userId: true } });
     const to = followers.filter((f) => f.userId !== ch.userId);
@@ -272,7 +282,7 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
     }
     // Results go out at most four times a second, however fast votes arrive.
     if (counted && !this.pollPushes.has(streamId)) {
-      this.pollPushes.set(streamId, setTimeout(() => { this.pollPushes.delete(streamId); void this.poll(streamId).then((p) => publish(room.live(streamId), 'poll', { poll: p })); }, 250));
+      this.pollPushes.set(streamId, setTimeout(() => { this.pollPushes.delete(streamId); this.poll(streamId).then((p) => publish(room.live(streamId), 'poll', { poll: p })).catch(() => undefined); }, 250));
     }
     return { poll: (await this.poll(streamId))!, counted };
   }
@@ -290,6 +300,9 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
+    // Results waiting to be sent go nowhere once the server stops (Redis is closing).
+    for (const t of this.pollPushes.values()) clearTimeout(t);
+    this.pollPushes.clear();
     if (this.viewersTimer) clearInterval(this.viewersTimer);
     await Promise.allSettled([...this.browser.keys()].map((id) => this.stopBrowser(id)));
   }

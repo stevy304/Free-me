@@ -1,0 +1,13 @@
+; Install as an stunnel service config, substituting the actual certificate paths.
+; Requires an unused IP:443 on the media host. Never expose loopback RTMP publicly.
+; Restart/reload the service after renewing the certificate.
+foreground = no
+syslog = yes
+sslVersionMin = TLSv1.2
+
+[freeme-rtmps]
+client = no
+accept = 0.0.0.0:443
+connect = 127.0.0.1:1935
+cert = /etc/letsencrypt/live/YOUR_INGEST_HOST/fullchain.pem
+key = /etc/letsencrypt/live/YOUR_INGEST_HOST/privkey.pem

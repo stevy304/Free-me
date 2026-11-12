@@ -24,13 +24,14 @@ const clock = (s: number) => {
  * - Latency: the host's choice; low latency stays two pieces (2 s) from the edge and speeds up a little to catch up.
  * Keyboard: space/K play and pause, arrows 10 s, L live, M mute, F fullscreen.
  */
-export function LivePlayer({ src, latency = 'normal', className = '', overlay }: { src: string; latency?: 'normal' | 'low'; className?: string; overlay?: React.ReactNode }) {
+/** `muted`: start without sound and never ask for it (the host's own preview in Live Studio, which would echo). */
+export function LivePlayer({ src, latency = 'normal', className = '', overlay, muted: startMuted = false }: { src: string; latency?: 'normal' | 'low'; className?: string; overlay?: React.ReactNode; muted?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const el = useRef<HTMLVideoElement>(null);
   const hls = useRef<Hls | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(startMuted);
   const [range, setRange] = useState({ start: 0, end: 0, now: 0 });
   const [qualities, setQualities] = useState<number[]>([]);
   const [level, setLevel] = useState(-1);
@@ -42,6 +43,7 @@ export function LivePlayer({ src, latency = 'normal', className = '', overlay }:
   useEffect(() => {
     const v = el.current!;
     let off = false;
+    if (startMuted) v.muted = true;
     setErr(null); setQualities([]); setLevel(-1); setCurrent(null);
     const play = () => { v.play().catch(() => { if (!off) { v.muted = true; setMuted(true); v.play().catch(() => undefined); } }); };
     if (v.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) {
@@ -73,7 +75,7 @@ export function LivePlayer({ src, latency = 'normal', className = '', overlay }:
     const timer = setInterval(tick, 500);
     v.addEventListener('timeupdate', tick);
     return () => { off = true; clearInterval(timer); v.removeEventListener('timeupdate', tick); hls.current?.destroy(); hls.current = null; v.removeAttribute('src'); v.load(); };
-  }, [src, latency, cfg.syncCount]);
+  }, [src, latency, cfg.syncCount, startMuted]);
 
   const behind = Math.max(0, range.end - range.now);
   const atEdge = range.end === 0 || behind <= cfg.edgeSeconds;
@@ -123,7 +125,7 @@ export function LivePlayer({ src, latency = 'normal', className = '', overlay }:
       <video ref={el} playsInline className="h-full w-full" onClick={toggle} onDoubleClick={fullscreen}
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onVolumeChange={(e) => setMuted(e.currentTarget.muted)} />
       {overlay}
-      {muted && playing && (
+      {muted && playing && !startMuted && (
         <button type="button" onClick={mute} className="absolute left-3 top-3 flex items-center gap-1.5 rounded-lg bg-black/70 px-2.5 py-1.5 text-[12px] font-bold text-white hover:bg-black/85"><Icon.VolumeOff size={16} />Tap for sound</button>
       )}
       <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-3 pb-2 pt-10 transition-opacity duration-200 ${show ? 'opacity-100' : 'pointer-events-none opacity-0'}`}>
