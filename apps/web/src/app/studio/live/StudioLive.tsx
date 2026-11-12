@@ -270,7 +270,7 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
         <h1>Go Live</h1>
         <label className={desk.title}><span className="sr-only">Title</span><input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={100} placeholder="Name your broadcast" disabled={state !== 'idle' || live} /><Icon.Pencil size={16} /></label>
         <span className={`${desk.badge} ${live ? desk.onAir : ''}`}>{reconnectUntil ? 'Reconnecting' : live ? `● ON AIR ${clock(st.stream.startedAt, now)}` : '● Private preview'}</span>
-        <button type="button" className={desk.settings} onClick={() => openSettings()}><Icon.Settings size={19} /><span>Settings</span></button>
+        <button type="button" className={desk.settings} aria-label="Settings" onClick={() => openSettings()}><Icon.Settings size={19} /><span>Settings</span></button>
         {live || state === 'live' || state === 'ending' ? <button type="button" className={`${desk.go} ${desk.stop}`} disabled={state === 'ending'} onClick={end}>{state === 'ending' ? 'Ending…' : 'End broadcast'}</button> : <button type="button" className={desk.go} disabled={state !== 'idle' || (preview ? !st.ingest.ready : !media || devices.busy)} onClick={() => void (preview ? publishEncoder() : goLive())}><Icon.Live size={18} />{state === 'starting' ? 'Starting…' : 'Go live'}</button>}
         {preview && <button type="button" onClick={end} className="text-xs font-semibold">End preview</button>}
       </header>

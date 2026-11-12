@@ -64,7 +64,7 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   await host.getByRole('button', { name: 'Take to air' }).click();
   await expect.poll(() => swatch(1)).toEqual([8, 100, 95, 255]);
   await host.getByRole('button', { name: 'Go live' }).click();
-  await expect(host.getByText(/ON AIR/)).toBeVisible({ timeout: 20_000 });
+  await expect(host.getByText(/^● ON AIR /)).toBeVisible({ timeout: 20_000 });
 
   // A viewer finds it in "Live now" and opens it.
   const viewer = await (await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true })).newPage();
@@ -115,7 +115,7 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   await new Promise((resolve) => setTimeout(resolve, Math.max(0, 10_000 - (Date.now() - droppedAt))));
   const segmentsDuringOutage = (await segments()).items.length;
   dropSignal = false;
-  await expect(host.getByText(/ON AIR/)).toBeVisible({ timeout: 20_000 });
+  await expect(host.getByText(/^● ON AIR /)).toBeVisible({ timeout: 20_000 });
   await expect(viewer.getByText('Host reconnecting')).toBeHidden();
   await expect.poll(async () => (await segments()).items.length, { timeout: 20_000 }).toBeGreaterThan(segmentsDuringOutage);
   const { url, items } = await segments();
@@ -160,7 +160,7 @@ test('free host adds a signed-in WebRTC guest to the program', async ({ browser 
   await host.getByRole('button', { name: 'Add to program' }).click();
   await expect(host.getByText(/Guest 1 · In program/)).toBeVisible();
   await host.getByRole('button', { name: 'Go live', exact: true }).click();
-  await expect(host.getByText(/^Live · /)).toBeVisible({ timeout: 20_000 });
-  await host.getByRole('button', { name: 'End stream' }).click();
+  await expect(host.getByText(/^● ON AIR /)).toBeVisible({ timeout: 20_000 });
+  await host.getByRole('button', { name: 'End broadcast' }).click();
   await expect(guest.getByText('The green room closed or disconnected.')).toBeVisible({ timeout: 30_000 });
 });

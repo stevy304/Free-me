@@ -28,6 +28,7 @@ test('the desk fits laptop and desktop viewports, connects devices, preserves mu
   await expect(page.getByRole('button', { name: 'Camera', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(go).toBeEnabled();
   await expect(page.getByRole('region', { name: 'Input status' }).getByText(/\d+ × \d+/)).toBeVisible();
+  await expect.poll(() => page.getByRole('button', { name: 'Select Starting soon scene', exact: true }).locator('canvas').evaluate((canvas: HTMLCanvasElement) => canvas.getContext('2d')!.getImageData(0, 0, 1, 1).data[3])).toBe(255);
   for (const size of [{ width: 1366, height: 768 }, { width: 1920, height: 1080 }]) {
     await page.setViewportSize(size);
     expect(await desk.evaluate((el) => el.scrollHeight <= el.clientHeight + 1 && el.scrollWidth <= el.clientWidth + 1)).toBe(true);
@@ -67,6 +68,6 @@ test('denied device permission shows actionable feedback and does not enable bro
   await page.addInitScript(() => { if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Permission denied', 'NotAllowedError'); }; });
   await setup(page, 'denied');
   await page.getByRole('button', { name: 'Camera', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('permission was denied');
+  await expect(page.getByTestId('live-studio').getByRole('alert')).toContainText('permission was denied');
   await expect(page.getByRole('button', { name: 'Go live', exact: true })).toBeDisabled();
 });
