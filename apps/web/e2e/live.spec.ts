@@ -175,7 +175,9 @@ test('free host adds a signed-in WebRTC guest to the program', async ({ browser 
   await host.getByRole('button', { name: 'Add to program' }).click();
   await expect(host.getByText(/Guest 1 · In program/)).toBeVisible();
   await host.getByRole('button', { name: 'Go live', exact: true }).click();
-  await expect(host.getByText(/^Live · /)).toBeVisible({ timeout: 20_000 });
+  await expect(host.getByText(/^On air · /)).toBeVisible({ timeout: 20_000 });
+  // Ending asks first, so a stream is never ended by a stray tap.
   await host.getByRole('button', { name: 'End stream' }).click();
+  await host.getByRole('alertdialog', { name: 'End the stream?' }).getByRole('button', { name: 'End stream' }).click();
   await expect(guest.getByText('The green room closed or disconnected.')).toBeVisible({ timeout: 30_000 });
 });

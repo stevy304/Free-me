@@ -13,6 +13,13 @@ import { useRealtime } from '@/lib/realtime';
 import { useShell } from '@/components/shell/ShellContext';
 import type { LiveInfo } from '../types';
 
+/** "1:02:03" since the stream started. */
+const uptime = (startedAt: string, now: number) => {
+  const t = Math.max(0, Math.floor((now - Date.parse(startedAt)) / 1000));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
+};
+
 /** Watching a live stream: the picture, who is live, viewers and chat; when it ends, the replay once it is ready. */
 export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[] }) {
   const { locale, viewer } = useShell();
@@ -34,6 +41,15 @@ export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[
   const toggleCc = () => setCc((v) => { try { localStorage.setItem('fm:live-cc', v ? 'off' : 'on'); } catch { /* blocked */ } return !v; });
   useRealtime<{ reconnectUntil: number | null }>('live:signal', (d) => setReconnecting(d.reconnectUntil !== null), room);
   const live = s.status === 'LIVE' && !!s.playbackUrl;
+  // How long it has been on (ticks while live), and sharing: the phone's share sheet, or the link copied.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { if (!live) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [live]);
+  const [shared, setShared] = useState(false);
+  const share = async () => {
+    const url = window.location.href;
+    if (typeof navigator.share === 'function') { await navigator.share({ title: s.title, url }).catch(() => undefined); return; }
+    try { await navigator.clipboard.writeText(url); setShared(true); setTimeout(() => setShared(false), 2000); } catch { /* not allowed */ }
+  };
 
   return (
     <div className="mx-auto grid max-w-[1600px] gap-5 px-0 pb-16 sm:px-6 sm:pt-4 lg:grid-cols-[1fr_380px]">
@@ -69,11 +85,13 @@ export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[
           <div className="flex flex-wrap items-center gap-2">
             {live && <span className="flex items-center gap-1.5 rounded-md bg-[#e5484d] px-2 py-0.5 text-[12px] font-extrabold uppercase text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />Live</span>}
             {live && <span className="flex items-center gap-1 text-[13px] font-semibold text-muted"><Icon.Eye size={16} />{s.viewers.toLocaleString(locale)} watching</span>}
+            {live && s.startedAt && <span className="text-[13px] text-muted" suppressHydrationWarning>· Live for {uptime(s.startedAt, now)}</span>}
           </div>
           <h1 className="mt-2 font-display text-[22px] font-extrabold leading-tight sm:text-[26px]">{s.title}</h1>
           <div className="mt-3 flex items-center gap-3">
             <Link href={`/@${s.channel.handle}`} className="flex min-w-0 items-center gap-3"><Avatar name={s.channel.name} src={s.channel.avatarUrl} size={44} /><span className="min-w-0"><span className="flex items-center gap-1 truncate font-semibold">{s.channel.name}{s.channel.isVerified && <VerifiedBadge size={15} />}</span><span className="block text-[13px] text-muted">@{s.channel.handle}</span></span></Link>
-            <Link href={`/@${s.channel.handle}`} className="ml-auto flex h-10 items-center rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover">Visit Space</Link>
+            <button type="button" onClick={() => void share()} className="ml-auto flex h-10 items-center gap-2 rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover"><Icon.Share size={18} />{shared ? 'Link copied' : 'Share'}</button>
+            <Link href={`/@${s.channel.handle}`} className="flex h-10 items-center rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover">Visit Space</Link>
           </div>
           {live && s.poll && <div className="mt-4"><PollCard key={s.poll.id} streamId={s.id} poll={s.poll} signedIn={!!viewer} /></div>}
           {s.description && <p className="mt-4 whitespace-pre-line rounded-2xl bg-surface p-4 text-[14px] leading-relaxed">{s.description}</p>}

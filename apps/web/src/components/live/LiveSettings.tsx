@@ -22,12 +22,15 @@ const toLocalInput = (iso: string | null) => { if (!iso) return ''; const d = ne
  * works (everyone, followers only or off; slow mode), live captions, and what happens to the recording. Title and
  * chat rules can change during the stream; viewers see the change at once.
  */
-export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSettings; live: boolean; onSaved: () => void }) {
+/** `narrow`: one column, for a side panel (two columns would cut the choices short). */
+export function LiveSettings({ stream, live, onSaved, narrow = false }: { stream: LiveStreamSettings; live: boolean; onSaved: () => void; narrow?: boolean }) {
   const [f, setF] = useState(() => ({
     description: stream.description ?? '', visibility: stream.visibility, scheduledFor: toLocalInput(stream.scheduledFor),
     chatMode: stream.chat.mode, slowModeSeconds: stream.chat.slowModeSeconds, captionsEnabled: stream.captionsEnabled,
     saveReplay: stream.saveReplay ?? true, replayVisibility: stream.replayVisibility ?? 'PRIVATE', latencyMode: stream.latencyMode ?? 'normal',
   }));
+  // Full-width fields span both columns; in the narrow (one-column) layout a span would add a second column.
+  const span = narrow ? '' : 'sm:col-span-2';
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +50,8 @@ export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSett
   return (
     <section aria-labelledby="live-settings" className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
       <h2 id="live-settings" className="flex items-center gap-2 font-display text-[18px] font-bold"><Icon.Settings size={20} />Stream settings</h2>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <label className="block sm:col-span-2"><span className={label}>Description</span>
+      <div className={`mt-3 grid gap-3 ${narrow ? '' : 'sm:grid-cols-2'}`}>
+        <label className={`block ${span}`}><span className={label}>Description</span>
           <textarea className={`mt-1 min-h-[84px] ${inputClass} py-2`} value={f.description} maxLength={2000} onChange={(e) => set('description', e.target.value)} placeholder="What this stream is about, links, who is on" />
         </label>
         <label className="block"><span className={label}>Who can find it</span>
@@ -60,7 +63,7 @@ export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSett
         <label className="block"><span className={label}>Planned start (optional)</span>
           <input type="datetime-local" className={`mt-1 ${inputClass}`} value={f.scheduledFor} onChange={(e) => set('scheduledFor', e.target.value)} disabled={live} />
         </label>
-        <label className="block sm:col-span-2"><span className={label}>Delay for viewers</span>
+        <label className={`block ${span}`}><span className={label}>Delay for viewers</span>
           <select className={select} value={f.latencyMode} onChange={(e) => set('latencyMode', e.target.value as typeof f.latencyMode)} disabled={live}>
             <option value="normal">Normal: about 10–15 seconds, steadiest on weak connections</option>
             <option value="low">Low latency: about 4–6 seconds, for talking with chat</option>
@@ -79,7 +82,7 @@ export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSett
             {SLOW.map((s) => <option key={s} value={s}>{s ? `One message every ${s < 60 ? `${s} seconds` : `${s / 60} minute${s > 60 ? 's' : ''}`}` : 'Off'}</option>)}
           </select>
         </label>
-        <label className="flex items-start gap-3 rounded-2xl bg-surface p-3 sm:col-span-2">
+        <label className={`flex items-start gap-3 rounded-2xl bg-surface p-3 ${span}`}>
           <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--brand)]" checked={f.captionsEnabled} onChange={(e) => set('captionsEnabled', e.target.checked)} />
           <span><span className={label}>Live captions</span><span className="block text-[13px] text-muted">Viewers can turn on captions of what you say. Start them below once you are live.</span></span>
         </label>
