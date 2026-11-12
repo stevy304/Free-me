@@ -65,6 +65,7 @@ Values for local development are in [.env.example](.env.example). In production 
 | `SAFETY_SCAN_TIMEOUT_MS` | | `60000` | How long to wait for the scanner |
 | `SAFETY_SCAN_FAIL_CLOSED` | | `false` | `true`: hold uploads when the scanner cannot be reached, instead of letting them through |
 | `NEW_ACCOUNT_DAILY_UPLOADS` | | `5` | Uploads a day for accounts in their first week |
+| `REPORT_HOLD_THRESHOLD` | | `5` | Reports from this many different accounts (each at least a day old) hide a video from everyone but its owner until a moderator decides; child-safety reports need only 2. `0` turns it off |
 
 ## Web (apps/web)
 

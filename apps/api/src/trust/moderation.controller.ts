@@ -55,12 +55,13 @@ export class ModerationController {
       ...(reason ? { reason } : {}),
     };
     const rows = await this.prisma.report.findMany({
-      where, orderBy: [{ createdAt: state === 'closed' ? 'desc' : 'asc' }, { id: 'asc' }], take: 51, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      // Open reports: videos held by many reports first (they are hidden until someone decides), then oldest first.
+      where, orderBy: [...(state === 'open' ? [{ video: { reviewHoldAt: { sort: 'asc', nulls: 'last' } } } as const] : []), { createdAt: state === 'closed' ? 'desc' : 'asc' }, { id: 'asc' }], take: 51, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       include: { video: { include: { channel: true } }, reporter: { select: { email: true } } },
     });
     const items = await Promise.all(rows.slice(0, 50).map(async (r) => ({
       ...this.view(r), reporterEmail: r.reporter?.email ?? null, automatic: !r.reporterId,
-      video: { id: r.video.id, title: r.video.title, status: r.video.status, visibility: r.video.visibility, takenDownAt: r.video.takenDownAt, takedownReason: r.video.takedownReason, thumbnailUrl: await this.urls.thumb(r.video), durationSeconds: r.video.durationSeconds },
+      video: { id: r.video.id, title: r.video.title, status: r.video.status, visibility: r.video.visibility, takenDownAt: r.video.takenDownAt, takedownReason: r.video.takedownReason, heldForReviewAt: r.video.reviewHoldAt, thumbnailUrl: await this.urls.thumb(r.video), durationSeconds: r.video.durationSeconds },
       channel: { handle: r.video.channel.handle, name: r.video.channel.name, strikes: await strikes(this.prisma, r.video.channelId) },
       openReportsOnVideo: await this.prisma.report.count({ where: { videoId: r.videoId, ...OPEN } }),
     })));
@@ -135,6 +136,8 @@ export class ModerationController {
       if (r.status === 'RESOLVED' || r.status === 'DISMISSED') throw new BadRequestException('This report is already closed.');
       const resolution = notes ? `No action taken: ${notes}` : 'No action taken: the video does not break the rules.';
       await this.prisma.$transaction([
+        // Reviewed and kept: a hold from many reports ends.
+        this.prisma.video.updateMany({ where: { id: v.id, reviewHoldAt: { not: null } }, data: { reviewHoldAt: null } }),
         this.prisma.report.update({ where: { id }, data: { status: 'DISMISSED', resolution, resolvedAt: now } }),
         this.prisma.moderationAction.create({ data: { reportId: r.id, videoId: v.id, moderatorId: auth.user.id, action: 'DISMISSED', notes } }),
       ]);
@@ -149,7 +152,7 @@ export class ModerationController {
     if (!v.takenDownAt) throw new BadRequestException('This video is not removed.');
     const resolution = notes ? `Video restored: ${notes}` : 'Video restored.';
     await this.prisma.$transaction([
-      this.prisma.video.update({ where: { id: v.id }, data: { takenDownAt: null, takedownReason: null, status: v.hlsMasterKey ? 'READY' : 'PROCESSING' } }),
+      this.prisma.video.update({ where: { id: v.id }, data: { takenDownAt: null, takedownReason: null, reviewHoldAt: null, status: v.hlsMasterKey ? 'READY' : 'PROCESSING' } }),
       this.prisma.report.update({ where: { id }, data: { status: 'RESOLVED', resolution, resolvedAt: now } }),
       this.prisma.moderationAction.create({ data: { reportId: r.id, videoId: v.id, moderatorId: auth.user.id, action: 'VIDEO_RESTORED', notes } }),
     ]);

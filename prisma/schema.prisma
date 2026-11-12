@@ -288,6 +288,8 @@ model Video {
   /// Every quality (Premium viewers and the owner); null when it is the same as hlsMasterKey (no limit applied)
   hlsFullMasterKey      String?
   /// 1080p and above wait until the video is watched enough (HD_MIN_VIEWS); the worker then adds them
+  /// Hidden until a moderator reviews it: reported by several established accounts (REPORT_HOLD_THRESHOLD)
+  reviewHoldAt          DateTime?
   hdPending             Boolean           @default(false)
   publishedAt           DateTime?
   createdAt             DateTime          @default(now())

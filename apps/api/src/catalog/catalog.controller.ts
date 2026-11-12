@@ -64,6 +64,7 @@ export class CatalogController {
       throw new GoneException(v.takedownReason === 'COPYRIGHT' ? 'This video is no longer available because of a copyright notice.' : 'This video was removed for breaking the Community Guidelines.');
     }
     if (!v || (!owner && (v.status !== 'READY' || v.visibility === 'PRIVATE'))) throw new NotFoundException('This video is not available.');
+    if (v.reviewHoldAt && !owner) throw new NotFoundException('This video is being reviewed by our moderators.');
     const card = videoCard(v, this.urls);
     const fullQuality = owner || (!!auth && hasPremiumAccess(auth.user));
     const [reaction, history, following, saved] = auth ? await Promise.all([
@@ -107,7 +108,7 @@ export class CatalogController {
       this.prisma.$queryRaw<{ id: string }[]>`
         WITH q AS (SELECT plainto_tsquery('simple', ${term}) AS tsq)
         SELECT v.id FROM "Video" v JOIN "Channel" c ON c.id = v."channelId", q
-        WHERE v.status = 'READY' AND v.visibility = 'PUBLIC' AND v."mediaLocation" = 'PUBLIC' AND v."publishedAt" IS NOT NULL AND v."takenDownAt" IS NULL
+        WHERE v.status = 'READY' AND v.visibility = 'PUBLIC' AND v."mediaLocation" = 'PUBLIC' AND v."publishedAt" IS NOT NULL AND v."takenDownAt" IS NULL AND v."reviewHoldAt" IS NULL
           AND (
             to_tsvector('simple', v.title || ' ' || coalesce(v.description, '')) @@ q.tsq
             OR ${term} <% v.title

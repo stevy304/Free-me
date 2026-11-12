@@ -5,6 +5,8 @@ import { normalizeEmail } from '@free-me/shared';
  * with a message that names it, instead of failing later on a user's request.
  */
 export interface SafetyConfig {
+  /** Reports from this many different accounts (at least a day old) hide a video until a moderator reviews it; 0 = never. Child-safety reports: 2. */
+  reportHoldThreshold: number;
   /** Optional outside matching service: POST { videoId, sha256, md5, durationSeconds, frames: [base64 JPEG] } → { match, label? }. */
   scanUrl: string | null;
   scanToken: string | null;
@@ -280,6 +282,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       scanUrl: env.SAFETY_SCAN_URL?.trim() || null, scanToken: env.SAFETY_SCAN_TOKEN?.trim() || null,
       timeoutMs: Math.max(1000, Number(env.SAFETY_SCAN_TIMEOUT_MS) || 60_000), failClosed: env.SAFETY_SCAN_FAIL_CLOSED === 'true',
       newAccountDailyUploads: Math.max(1, Number(env.NEW_ACCOUNT_DAILY_UPLOADS) || 5),
+      reportHoldThreshold: count('REPORT_HOLD_THRESHOLD', 5),
     },
   };
 }

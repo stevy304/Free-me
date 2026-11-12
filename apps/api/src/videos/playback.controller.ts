@@ -28,7 +28,7 @@ export class PlaybackController {
   private async viewable(id: string, auth: AuthContext | null) {
     const v = await this.prisma.video.findUnique({ where: { id }, include: { channel: { select: { userId: true } } } });
     if (!v || v.status !== 'READY' || !v.hlsMasterKey) throw new NotFoundException('This video is not available.');
-    if (v.visibility === 'PRIVATE' && v.channel.userId !== auth?.user.id) throw new NotFoundException('This video is not available.');
+    if ((v.visibility === 'PRIVATE' || v.reviewHoldAt) && v.channel.userId !== auth?.user.id) throw new NotFoundException('This video is not available.');
     return v;
   }
 

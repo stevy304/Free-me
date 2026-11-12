@@ -55,7 +55,27 @@ export class ReportsController {
       reporterId: auth.user.id, videoId: id, reason: body.reason, details: body.details?.trim() || null,
       timestampSeconds: body.timestampSeconds != null ? Math.min(body.timestampSeconds, v.durationSeconds) : null,
     } });
+    await this.holdIfReportedWidely(id, body.reason === 'CHILD_SAFETY');
     return { report: { id: r.id, status: r.status }, alreadyReported: false };
+  }
+
+  /**
+   * Hides a video from everyone but its owner until a moderator decides, once enough different people report it:
+   * REPORT_HOLD_THRESHOLD accounts (default 5), or 2 for child safety. Accounts younger than a day do not count, so
+   * a wave of new accounts cannot take a video down. The moderator's decision lifts the hold or removes the video.
+   */
+  private async holdIfReportedWidely(videoId: string, childSafety: boolean) {
+    const threshold = this.config.safety.reportHoldThreshold;
+    if (!threshold) return;
+    const established = { createdAt: { lt: new Date(Date.now() - 86_400_000) } };
+    const open = { videoId, status: { in: ['PENDING', 'INVESTIGATING'] as Array<'PENDING' | 'INVESTIGATING'> }, reporter: established };
+    const [all, child] = await Promise.all([
+      this.prisma.report.findMany({ where: open, distinct: ['reporterId'], select: { reporterId: true } }),
+      childSafety ? this.prisma.report.findMany({ where: { ...open, reason: 'CHILD_SAFETY' }, distinct: ['reporterId'], select: { reporterId: true } }) : [],
+    ]);
+    if (all.length < threshold && child.length < Math.min(2, threshold)) return;
+    const held = await this.prisma.video.updateMany({ where: { id: videoId, reviewHoldAt: null, takenDownAt: null }, data: { reviewHoldAt: new Date() } });
+    if (held.count) await this.audit.record({ userId: null, action: 'VIDEO_HELD_BY_REPORTS', entityType: 'Video', entityId: videoId, details: { reporters: all.length, childSafety: child.length } });
   }
 
   @Post('copyright/notices')
