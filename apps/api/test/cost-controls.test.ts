@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import request from 'supertest';
@@ -92,4 +92,24 @@ test('a Premium creator\'s upload gets every quality at once', async () => {
   const v = await uploadAndWait(c.agent, clip);
   expect(v.renditions).toContain('1080p');
   expect(await ctx.prisma.video.findUniqueOrThrow({ where: { id: v.id } })).toMatchObject({ hdPending: false, hlsFullMasterKey: 'hls/master-full.m3u8' });
+}, 180_000);
+
+test('SOURCE_RETENTION_DAYS: an old video\'s original is deleted; it keeps its qualities and gives up waiting for HD', async () => {
+  const c = await signIn(ctx.http, ctx.mail, 'old@example.com');
+  await c.agent.post('/api/channels').set('Origin', WEB).send({ handle: 'oldone', name: 'Old' }).expect(201);
+  const v = await uploadAndWait(c.agent, clip);
+  const before = await ctx.prisma.video.findUniqueOrThrow({ where: { id: v.id } });
+  expect(before).toMatchObject({ hdPending: true, sourceFileS3Key: expect.any(String) });
+  const config = { ...ctx.config, media: { ...ctx.config.media, sourceRetentionDays: 30 } };
+  const jobs = new MediaJobs(ctx.prisma as never, createStorage(config), config, null);
+  expect(await jobs.expireSources()).toBe(0); // too new
+  await ctx.prisma.video.update({ where: { id: v.id }, data: { createdAt: new Date(Date.now() - 31 * 86_400_000) } });
+  expect(await jobs.expireSources()).toBe(1);
+  const after = await ctx.prisma.video.findUniqueOrThrow({ where: { id: v.id }, include: { renditions: true } });
+  expect(after).toMatchObject({ sourceFileS3Key: null, hdPending: false, status: 'READY' });
+  expect(after.renditions.map((r) => r.resolution).sort()).toEqual(['144p', '240p', '360p', '480p', '720p']);
+  expect(existsSync(join(dir, 'storage', before.sourceFileS3Key!))).toBe(false);
+  expect(existsSync(join(dir, 'storage', 'prv', v.id, 'hls', '720p', 'index.m3u8'))).toBe(true);
+  // Without retention set, nothing is ever deleted.
+  expect(await new MediaJobs(ctx.prisma as never, createStorage(ctx.config), ctx.config, null).expireSources()).toBe(0);
 }, 180_000);

@@ -56,6 +56,7 @@ Values for local development are in [.env.example](.env.example). In production 
 | `NODE_NAME` | | the host name | Name of this media server. Pieces encoded on the server that planned the work skip object storage; set it only if two servers share a host name |
 | `HD_MIN_VIEWS` | | `100` | Popularity-based encoding: 1080p and above are made only once a video has this many views (checked every minute by the worker). Premium creators' uploads get them at once. `0` makes every quality straight away |
 | `FREE_MAX_QUALITY` | | `720` | Highest quality free viewers get (`144`, `240`, `360`, `480`, `720`, `1080`, `1440` or `2160`); Premium members and the video's owner get every quality. `0` = no limit. Applies to videos processed after it is set. It saves delivery cost, it is not protection: the higher-quality files of public videos are still on the CDN |
+| `SOURCE_RETENTION_DAYS` | | `0` (keep) | Delete a ready video's original upload after this many days, keeping its renditions. Originals are often the largest file, so this can cut storage a lot. A video that has not reached `HD_MIN_VIEWS` by then keeps up to 720p for good, and the original cannot be used again (for example for new formats later). Try `90` once you are sure |
 | `COPY_TOP_RUNG` | | `true` | Use the upload's own H.264 as the top quality when it is suitable (exact size, 8-bit, normal colour, keyframe at least every 4.5 s, bitrate viewers can stream): the most expensive encode is skipped. `false` always re-encodes |
 | `VIDEO_ENCODER` | | `libx264` | `nvenc` (NVIDIA GPU) or `qsv` (Intel Quick Sync) for a media server with a GPU: several times faster. Falls back to `libx264` by itself if the GPU encoder fails |
 | `FFMPEG_PATH`, `FFPROBE_PATH` | | `ffmpeg`, `ffprobe` | Binaries |
@@ -93,6 +94,8 @@ To make someone an administrator (everything, including every Premium feature su
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `PREMIUM_PRICE_USD_CENTS` | | `1000` ($10) | Premium, per month |
+| `CREATOR_PASS_PRICE_USD_CENTS` | | `200` ($2) | Creator pass per month: needed to upload after the free uploads. Premium includes it. Administrators can change it in the app |
+| `CREATOR_FREE_VIDEOS` | | `3` | Uploads every Space gets before it needs the Creator pass; `0` = the pass from the first upload. Administrators can change it in the app |
 | `PREMIUM_PRICE_BY_COUNTRY` | | none | Premium per month in some countries, in US cents: `RW=300,KE=500`. People whose profile country is listed pay that price; everyone else pays `PREMIUM_PRICE_USD_CENTS`. Administrators can change it in the app |
 | `AD_PRICE_PER_DAY_USD_CENTS` | | `300` ($3) | One day of an ad campaign |
 | `AD_CPM_USD_CENTS` | | `100` ($1) | Price of 1,000 ad views. A paid day buys `AD_PRICE_PER_DAY_USD_CENTS × 1000 / AD_CPM_USD_CENTS` views at most (3,000 by default); views not delivered in the days bought keep running for as many days again. Administrators can change it in the app |

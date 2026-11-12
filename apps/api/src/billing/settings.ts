@@ -12,7 +12,7 @@ export interface EffectiveBilling extends BillingConfig { manual: ManualConfig |
 
 /** What administrators save in the app (Administration → Money → Payment settings). Secrets are stored encrypted. */
 export interface StoredBilling {
-  premiumUsdCents?: number; premiumByCountry?: Record<string, number>; adDayUsdCents?: number; adCpmUsdCents?: number; payoutMinUsdCents?: number;
+  premiumUsdCents?: number; premiumByCountry?: Record<string, number>; creatorPassUsdCents?: number; creatorFreeVideos?: number; adDayUsdCents?: number; adCpmUsdCents?: number; payoutMinUsdCents?: number;
   momo?: { enabled: boolean; baseUrl: string; subscriptionKey: string; apiUser: string; apiKey: string; targetEnvironment: string; currency: string; perUsd: number } | null;
   flutterwave?: { enabled: boolean; secretKey: string; webhookHash: string | null } | null;
   manual?: ManualConfig & { enabled: boolean } | null;
@@ -67,6 +67,8 @@ export function effective(config: AppConfig, s: StoredBilling): EffectiveBilling
   return {
     premiumUsdCents: s.premiumUsdCents ?? e.premiumUsdCents,
     premiumByCountry: s.premiumByCountry ?? e.premiumByCountry,
+    creatorPassUsdCents: s.creatorPassUsdCents ?? e.creatorPassUsdCents,
+    creatorFreeVideos: s.creatorFreeVideos ?? e.creatorFreeVideos,
     adDayUsdCents: s.adDayUsdCents ?? e.adDayUsdCents,
     adCpmUsdCents: s.adCpmUsdCents ?? e.adCpmUsdCents,
     payoutMinUsdCents: s.payoutMinUsdCents ?? e.payoutMinUsdCents,

@@ -110,6 +110,8 @@ model User {
   lastLoginAt           DateTime?
   /// Premium membership runs until this moment (null or past: not a member).
   premiumUntil          DateTime?
+  /// Creator pass (uploading after the free videos) runs until this moment; Premium includes it.
+  creatorPassUntil      DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
@@ -215,6 +217,8 @@ model Channel {
   isVerified            Boolean           @default(false)
   /// Why the badge shows: "PREMIUM" (removed when membership ends) or "ADMIN" (kept).
   verificationSource    String?
+  /// Uploads ever started (deleting a video does not give a free upload back)
+  uploadCount           Int               @default(0)
   subscriberCount       Int               @default(0)
   totalViews            BigInt            @default(0)
   createdAt             DateTime          @default(now())
@@ -887,6 +891,7 @@ enum PaymentStatus {
 enum PaymentPurpose {
   PREMIUM
   AD_CAMPAIGN
+  CREATOR_PASS
 }
 
 model Payment {

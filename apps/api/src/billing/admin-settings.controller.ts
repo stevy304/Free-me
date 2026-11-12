@@ -48,7 +48,7 @@ export class AdminPaymentSettingsController {
     const source = (k: 'momo' | 'flutterwave') => (stored[k] !== undefined ? 'app' : env[k] ? 'environment' : 'none');
     const m = stored.momo ?? null;
     return {
-      prices: { premiumUsdCents: eff.premiumUsdCents, premiumByCountry: eff.premiumByCountry, adDayUsdCents: eff.adDayUsdCents, adCpmUsdCents: eff.adCpmUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
+      prices: { creatorPassUsdCents: eff.creatorPassUsdCents, creatorFreeVideos: eff.creatorFreeVideos, premiumUsdCents: eff.premiumUsdCents, premiumByCountry: eff.premiumByCountry, adDayUsdCents: eff.adDayUsdCents, adCpmUsdCents: eff.adCpmUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
       momo: {
         source: source('momo'), active: !!eff.momo,
         enabled: m ? m.enabled : !!env.momo, sandbox: (m?.baseUrl ?? env.momo?.baseUrl ?? SANDBOX).includes('sandbox'),
@@ -77,6 +77,12 @@ export class AdminPaymentSettingsController {
     const prices = obj(body.prices);
     if (prices) {
       next.premiumUsdCents = cents(prices.premiumUsdCents, 'Premium price') ?? next.premiumUsdCents;
+      next.creatorPassUsdCents = cents(prices.creatorPassUsdCents, 'Creator pass price') ?? next.creatorPassUsdCents;
+      if (prices.creatorFreeVideos !== undefined && prices.creatorFreeVideos !== '') {
+        const n = Number(prices.creatorFreeVideos);
+        if (!Number.isInteger(n) || n < 0 || n > 1000) throw new BadRequestException('Free videos per channel: a whole number from 0 to 1000.');
+        next.creatorFreeVideos = n;
+      }
       if (prices.premiumByCountry !== undefined) {
         const byCountry = typeof prices.premiumByCountry === 'string' ? parseCountryPrices(prices.premiumByCountry) : null;
         if (byCountry === null || Object.values(byCountry).some((v) => v > 10_000_000)) throw new BadRequestException('Premium by country: write it like RW=300, KE=500 (country code = US cents a month).');

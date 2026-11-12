@@ -337,3 +337,48 @@ test('Premium priced per country: the viewer\'s profile country sets the price s
   const pay = (await rw.post('/api/billing/premium').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000222', months: 3 }).expect(201)).body.payment;
   expect(pay).toMatchObject({ usdCents: 900, amount: String(9 * 1450) });
 });
+
+test('Creator pass: free uploads, then the pass (paid, given or with Premium); videos stay; badges tell Premium from verified', async () => {
+  const maker = await creator('passmaker@example.com', 'passmaker');
+  // An account older than a week (new accounts also have a daily upload limit, tested elsewhere).
+  const makerUser = await ctx.prisma.user.update({ where: { email: 'passmaker@example.com' }, data: { createdAt: new Date(Date.now() - 30 * 86_400_000) } });
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  ctx.app.get(BillingService).invalidate();
+  await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ prices: { creatorFreeVideos: 'x' } }).expect(400);
+  await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ prices: { creatorFreeVideos: 2, creatorPassUsdCents: 200 } }).expect(200);
+  const start = () => maker.post('/api/uploads').set('Origin', WEB).send({ fileName: 'clip.mp4', sizeBytes: 1000 });
+
+  expect((await maker.get('/api/billing/creator-pass').expect(200)).body).toMatchObject({ canUpload: true, freeVideos: 2, freeLeft: 2, usdCents: 200, pass: { active: false } });
+  const first = (await start().expect(201)).body.videoId;
+  await start().expect(201);
+  // Deleting a draft does not give a free upload back.
+  await maker.delete(`/api/uploads/${first}`).set('Origin', WEB).send({}).expect(200);
+  const refused = (await start().expect(402)).body;
+  expect(refused).toMatchObject({ code: 'CREATOR_PASS_REQUIRED', message: expect.stringContaining('Creator pass ($2 a month)') });
+  expect((await maker.get('/api/billing/creator-pass').expect(200)).body).toMatchObject({ canUpload: false, freeLeft: 0, uploads: 2 });
+
+  // Paid by MoMo: 3 months × $2.
+  const pay = (await maker.post('/api/billing/creator-pass').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000333', months: 3 }).expect(201)).body.payment;
+  expect(pay).toMatchObject({ usdCents: 600, amount: String(6 * 1450) });
+  [...momo.values()].at(-1)!.status = 'SUCCESSFUL';
+  await maker.get(`/api/billing/payments/${pay.id}`).expect(200);
+  const status = (await maker.get('/api/billing/creator-pass').expect(200)).body;
+  expect(status).toMatchObject({ canUpload: true, pass: { active: true, includedWithPremium: false } });
+  expect(new Date(status.pass.until).getTime()).toBeGreaterThan(Date.now() + 89 * 86_400_000);
+  await start().expect(201);
+
+  // When the pass ends, new uploads stop; an administrator can give it (creators invited at launch).
+  await ctx.prisma.user.update({ where: { id: makerUser.id }, data: { creatorPassUntil: new Date(Date.now() - 1000) } });
+  await start().expect(402);
+  await admin.post('/api/admin/billing/creator-pass').set('Origin', WEB).send({ email: 'passmaker@example.com', months: 1 }).expect(200);
+  await start().expect(201);
+
+  // Premium includes the pass, and its badge says Premium; a Space checked by Free Me says verified.
+  await ctx.prisma.user.update({ where: { id: makerUser.id }, data: { creatorPassUntil: null } });
+  await new Billing(ctx.prisma as never, ctx.config).grantPremium(makerUser.id, 1);
+  expect((await maker.get('/api/billing/creator-pass').expect(200)).body.pass).toMatchObject({ active: true, includedWithPremium: true });
+  await start().expect(201);
+  expect((await request(ctx.http).get('/api/channels/passmaker').expect(200)).body.channel).toMatchObject({ isVerified: true, badge: 'premium' });
+  await ctx.prisma.channel.update({ where: { handle: 'passmaker' }, data: { verificationSource: 'ADMIN' } });
+  expect((await request(ctx.http).get('/api/channels/passmaker').expect(200)).body.channel.badge).toBe('verified');
+});

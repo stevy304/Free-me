@@ -156,7 +156,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
       {!viewer.channel ? (
         <section className="mt-6 rounded-3xl border border-line bg-elevated p-6">
           <h2 className="font-display text-[20px] font-bold">First, create your Space</h2>
-          <p className="mt-2 text-[15px] text-muted">Ads are shown under your Space’s name and verified badge. <Link href="/channel/create" className="font-semibold text-brand underline">Create your Space</Link>, then come back to upload your first ad.</p>
+          <p className="mt-2 text-[15px] text-muted">Ads are shown under your Space’s name and badge. <Link href="/channel/create" className="font-semibold text-brand underline">Create your Space</Link>, then come back to upload your first ad.</p>
         </section>
       ) : (
         <>

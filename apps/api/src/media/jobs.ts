@@ -248,6 +248,35 @@ export class MediaJobs {
     return claimed;
   }
 
+  /**
+   * Storage saving (SOURCE_RETENTION_DAYS): deletes the original upload of ready videos older than that, once nothing
+   * still needs it: automatic captions were tried (when they are on), no job is running on the video (lock), and a
+   * video still waiting for its HD qualities gives that up (it keeps up to 720p). Returns how many were removed.
+   */
+  async expireSources(limit = 100, now = new Date()): Promise<number> {
+    const days = this.config.media.sourceRetentionDays;
+    if (!days) return 0;
+    const rows = await this.prisma.video.findMany({
+      where: { status: 'READY', processingStage: 'Ready', sourceFileS3Key: { not: null }, createdAt: { lt: new Date(now.getTime() - days * 86_400_000) },
+        ...(this.config.media.whisper ? { captionAttemptedAt: { not: null } } : {}) },
+      orderBy: { createdAt: 'asc' }, take: limit, select: { id: true },
+    });
+    let removed = 0;
+    for (const { id } of rows) {
+      try {
+        await this.withLock(id, async () => {
+          const v = await this.prisma.video.findUnique({ where: { id }, select: { sourceFileS3Key: true, status: true, processingStage: true } });
+          if (!v?.sourceFileS3Key || v.status !== 'READY' || v.processingStage !== 'Ready') return;
+          await this.storage.deletePrefix(`src/${id}/`);
+          await this.prisma.video.update({ where: { id }, data: { sourceFileS3Key: null, hdPending: false } });
+          removed++;
+        });
+      } catch (e) { if (!(e instanceof VideoBusy)) throw e; } // busy now: next run
+    }
+    if (removed) this.log.log({ event: 'sources_expired', count: removed, days });
+    return removed;
+  }
+
   async run(job: MediaJob, final: boolean, signal?: AbortSignal) {
     if (job.name === 'transcode') return this.transcode(job.videoId, final, signal);
     if (job.name === 'upgrade') return this.transcode(job.videoId, final, signal, 'rest');

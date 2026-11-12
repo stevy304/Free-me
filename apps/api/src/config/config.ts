@@ -20,6 +20,10 @@ export interface SafetyConfig {
 /** Prices and payment providers (see ENVIRONMENT.md → Payments). Money is in US cents unless named otherwise. */
 export interface BillingConfig {
   premiumUsdCents: number;
+  /** Creator pass per month: needed to upload after a channel's free videos (Premium includes it). */
+  creatorPassUsdCents: number;
+  /** Videos every channel can upload without the pass; 0 = the pass is needed from the first upload. */
+  creatorFreeVideos: number;
   /** Premium per month in some countries (ISO 3166-1 alpha-2 → US cents), e.g. lower where incomes are lower. */
   premiumByCountry: Record<string, number>;
   adDayUsdCents: number;
@@ -126,6 +130,11 @@ export interface MediaConfig {
   hdMinViews: number;
   /** Highest quality (short side, e.g. 720) in the master playlist free viewers get; 0 = no limit. Premium sees all. */
   freeMaxShort: number;
+  /**
+   * Delete a ready video's original upload after this many days (0 = keep forever). Its renditions stay; a video that
+   * did not reach HD_MIN_VIEWS by then keeps its qualities up to 720p for good. Originals are often the largest file.
+   */
+  sourceRetentionDays: number;
   workerConcurrency: number;
   upgradeConcurrency: number;
   /** Long videos are encoded in pieces any worker server can take (see media/chunks.ts). */
@@ -215,7 +224,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     scratchDir: env.SCRATCH_DIR?.trim() || '/tmp/freeme-scratch', ffmpegPath: env.FFMPEG_PATH?.trim() || 'ffmpeg', ffprobePath: env.FFPROBE_PATH?.trim() || 'ffprobe',
     preset: env.TRANSCODE_PRESET?.trim() || 'veryfast', presetHigh: env.TRANSCODE_PRESET_HIGH?.trim() || 'superfast',
     copyTopRung: env.COPY_TOP_RUNG !== 'false',
-    hdMinViews, freeMaxShort,
+    hdMinViews, freeMaxShort, sourceRetentionDays: count('SOURCE_RETENTION_DAYS', 0),
     chunked: env.CHUNKED_ENCODING !== 'false', chunkMinSeconds: Math.max(10, Number(env.CHUNK_MIN_SECONDS) || 120),
     chunkSeconds: Math.max(4, Math.round((Number(env.CHUNK_SECONDS) || 30) / 2) * 2), chunkConcurrency: Math.max(1, Number(env.CHUNK_CONCURRENCY) || 1),
     encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), upgradeConcurrency: Math.max(1, Math.floor(Number(env.WORKER_UPGRADE_CONCURRENCY) || 1)), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
@@ -248,6 +257,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (premiumByCountry === null) problems.push('PREMIUM_PRICE_BY_COUNTRY must look like RW=300,KE=500 (country code = US cents a month).');
   const billing: BillingConfig = {
     premiumByCountry: premiumByCountry ?? {},
+    creatorPassUsdCents: cents('CREATOR_PASS_PRICE_USD_CENTS', 200), creatorFreeVideos: count('CREATOR_FREE_VIDEOS', 3),
     premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), adCpmUsdCents: cents('AD_CPM_USD_CENTS', 100), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
     payouts: payoutRate > 0 ? { rwfPerUsd: payoutRate, feeRwf: payoutFee } : null,
     payoutSandbox: payoutTestKey ? { secretKey: payoutTestKey } : null,

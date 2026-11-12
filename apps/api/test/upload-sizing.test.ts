@@ -5,11 +5,12 @@ import { UploadsController } from '../src/videos/uploads.controller';
 test('large S3 uploads keep the negotiated part size when the server configuration changes', async () => {
   const MiB = 1024 ** 2;
   const sizeBytes = 100 * 1024 * MiB;
-  const config = { media: { driver: 's3', maxUploadBytes: sizeBytes, partBytes: 16 * MiB } } as AppConfig;
+  const config = { media: { driver: 's3', maxUploadBytes: sizeBytes, partBytes: 16 * MiB }, billing: { creatorFreeVideos: 3, creatorPassUsdCents: 200 } } as AppConfig;
   const video = { id: 'video', updatedAt: new Date(), uploadId: 'multipart', sourceFileS3Key: 'source' };
   const create = jest.fn(async ({ data }) => Object.assign(video, data));
   const prisma = {
-    channel: { findUnique: async () => ({ id: 'channel' }) },
+    channel: { findUnique: async () => ({ id: 'channel', uploadCount: 0 }), update: jest.fn() },
+    appSetting: { findUnique: async () => null },
     video: { count: async () => 0, create, update: jest.fn(), findFirst: async () => video },
   };
   const storage = {
@@ -19,7 +20,7 @@ test('large S3 uploads keep the negotiated part size when the server configurati
     partUrl: async () => 'https://storage.test/part',
   };
   const uploads = new UploadsController(prisma as never, { record: jest.fn() } as never, { consume: jest.fn() } as never, {} as never, storage as never, config);
-  const auth = { user: { id: 'creator', createdAt: new Date(0) } } as AuthContext;
+  const auth = { user: { id: 'creator', createdAt: new Date(0), roles: [] } } as unknown as AuthContext;
   const start = await uploads.start(auth, { fileName: 'video.mp4', sizeBytes }, {} as AppRequest);
   expect(start).toMatchObject({ partSize: 64 * MiB, partCount: 1600 });
 

@@ -4,6 +4,7 @@ import * as Icon from '@/components/icons';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
+import type { PassStatus } from './pass/PassView';
 import { HubNotices } from './HubNotices';
 import { HubStats } from './HubStats';
 import { HubMoney } from './HubMoney';
@@ -28,6 +29,8 @@ export function HubContent({ handle }: { handle: string }) {
   const [cursor, setCursor] = useState<string | null>(null);
   const [editing, setEditing] = useState<HubVideo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pass, setPass] = useState<PassStatus | null>(null);
+  useEffect(() => { api<PassStatus>('/billing/creator-pass').then(setPass).catch(() => undefined); }, []);
 
   const load = useCallback(async () => {
     try { const r = await api<{ videos: HubVideo[]; nextCursor: string | null }>('/hub/videos'); setVideos(r.videos); setCursor(r.nextCursor); } catch (e) { setError((e as Error).message); }
@@ -61,6 +64,12 @@ export function HubContent({ handle }: { handle: string }) {
         <div><h1 className="flex items-center gap-2 text-[28px] font-semibold tracking-tight"><Icon.Hub size={28} className="text-brand" />Creator Hub</h1><p className="text-[14px] text-muted">Channel <Link href={`/@${handle}`} className="text-brand">@{handle}</Link></p></div>
         <button type="button" onClick={() => openDialog()} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand hover:bg-brand-strong"><Icon.Upload size={18} />Upload video</button>
       </div>
+      {pass && !pass.pass.active && (
+        <p className={`mt-4 flex flex-wrap items-center gap-2 rounded-2xl px-4 py-3 text-[14px] ${pass.canUpload ? 'bg-surface' : 'bg-danger/10 text-danger'}`}>
+          {pass.canUpload ? `${pass.freeLeft} of ${pass.freeVideos} free ${pass.freeVideos === 1 ? 'upload' : 'uploads'} left.` : 'Your free uploads are used.'}
+          <Link href="/hub/pass" className="font-semibold text-brand underline">Creator pass</Link>
+        </p>
+      )}
       <div role="tablist" className="mt-5 flex gap-1 overflow-x-auto border-b border-line [scrollbar-width:none]">
         {([['videos', 'Videos', Icon.Videos], ['stats', 'Stats', Icon.Trail], ['money', 'Monetisation', Icon.Wallet], ['notices', 'Removals and notices', Icon.Shield]] as const).map(([k, l, I]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`-mb-px flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-[14px] font-medium ${tab === k ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'}`}><I size={18} filled={tab === k} />{l}</button>

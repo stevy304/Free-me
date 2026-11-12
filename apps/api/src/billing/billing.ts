@@ -46,6 +46,20 @@ export const cpmRevenue = (views: bigint, cpmRateCents: number) => (views * BigI
 /** Redis counter of a campaign's ad views on one UTC day. */
 export const adDayKey = (campaignId: string, t = new Date()) => `ads:day:${campaignId}:${t.toISOString().slice(0, 10)}`;
 
+/** Uploading after the free videos: the Creator pass, Premium (which includes it), or an administrator account. */
+export const hasCreatorPass = (u: Pick<User, 'premiumUntil' | 'roles' | 'creatorPassUntil'>, now = new Date()) =>
+  hasPremiumAccess(u, now) || (!!u.creatorPassUntil && u.creatorPassUntil > now);
+
+/**
+ * Whether this account may start another upload: every channel gets `creatorFreeVideos` uploads to try Free Me,
+ * then needs the pass. Videos already published stay online whether or not the pass is kept up.
+ */
+export function uploadAccess(u: Pick<User, 'premiumUntil' | 'roles' | 'creatorPassUntil'>, uploadCount: number, b: Pick<BillingConfig, 'creatorFreeVideos'>, now = new Date()) {
+  const pass = hasCreatorPass(u, now);
+  const freeLeft = Math.max(0, b.creatorFreeVideos - uploadCount);
+  return { allowed: pass || freeLeft > 0, pass, freeLeft };
+}
+
 /** Premium per month for someone in `country` (their profile's country): the country's own price, else the standard one. */
 export const premiumPriceFor = (b: Pick<BillingConfig, 'premiumUsdCents' | 'premiumByCountry'>, country: string | null | undefined) =>
   (country && b.premiumByCountry?.[country.toUpperCase()]) || b.premiumUsdCents;
@@ -80,7 +94,7 @@ export class Billing {
   }
 
   /** Creates a payment and asks the provider to collect it. */
-  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN'; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }) {
+  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_PASS'; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }) {
     const provider = (await this.providers())[p.method];
     if (!provider) throw new BillingError(p.method === 'mtn_momo' ? 'MTN MoMo payments are not set up on this server yet.' : p.method === 'flutterwave' ? 'Card payments are not set up on this server yet.' : 'This way of paying is not available.');
     let phone: string | undefined;
@@ -140,6 +154,8 @@ export class Billing {
   private async fulfil(tx: Prisma.TransactionClient, p: Payment) {
     if (p.purpose === 'PREMIUM') {
       await this.extendPremium(tx, p.userId, p.months ?? 1);
+    } else if (p.purpose === 'CREATOR_PASS') {
+      await this.extendCreatorPass(tx, p.userId, p.months ?? 1);
     } else if (p.campaignId) {
       await tx.campaign.updateMany({ where: { id: p.campaignId, status: 'DRAFT' }, data: { status: 'PENDING_REVIEW' } });
     }
@@ -177,6 +193,18 @@ export class Billing {
     await this.prisma.$transaction((tx) => this.extendPremium(tx, userId, months));
   }
 
+  /** Gives the Creator pass without a payment (administrators: invited creators at launch, partners). */
+  async grantCreatorPass(userId: string, months: number) {
+    await this.prisma.$transaction((tx) => this.extendCreatorPass(tx, userId, months));
+  }
+
+  private async extendCreatorPass(tx: Prisma.TransactionClient, userId: string, months: number) {
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    const from = user.creatorPassUntil && user.creatorPassUntil > new Date() ? user.creatorPassUntil.getTime() : Date.now();
+    await tx.user.update({ where: { id: userId }, data: { creatorPassUntil: new Date(from + months * MONTH) } });
+  }
+
   private async extendPremium(tx: Prisma.TransactionClient, userId: string, months: number) {
     // Serialize grants and purchases for the same account so both extensions are applied.
     await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
@@ -201,11 +229,11 @@ export class Billing {
         const digits = currencyDigits(payment.currency);
         const raw = payment.amountMinor.toString().padStart(digits + 1, '0');
         const amount = digits ? `${raw.slice(0, -digits)}.${raw.slice(-digits)}` : raw;
-        const item = payment.purpose === 'PREMIUM' ? `Premium (${payment.months ?? 1} month(s))` : 'Ad campaign';
+        const item = payment.purpose === 'PREMIUM' ? `Premium (${payment.months ?? 1} month(s))` : payment.purpose === 'CREATOR_PASS' ? `Creator pass (${payment.months ?? 1} month(s))` : 'Ad campaign';
         await mail.send(noticeMail(payment.user.email, 'Your Free Me payment receipt', [
           item, `Amount paid: ${payment.currency} ${amount}`, `Payment date (UTC): ${payment.paidAt!.toISOString().slice(0, 10)}`,
           `Receipt reference: ${payment.id}`,
-        ], { label: 'View payment history', url: `${this.config.appUrl}${payment.purpose === 'PREMIUM' ? '/premium' : '/studio/ads'}` }));
+        ], { label: 'View payment history', url: `${this.config.appUrl}${payment.purpose === 'PREMIUM' ? '/premium' : payment.purpose === 'CREATOR_PASS' ? '/hub/pass' : '/studio/ads'}` }));
         await this.prisma.payment.updateMany({
           where: { id: payment.id, receiptDueAt: retryAt }, data: { receiptDueAt: null, receiptSentAt: new Date() },
         });

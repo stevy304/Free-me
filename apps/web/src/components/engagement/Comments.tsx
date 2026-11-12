@@ -15,7 +15,7 @@ import { useRealtime } from '@/lib/realtime';
 
 export interface CommentData {
   id: string; parentId: string | null; content: string; deleted: boolean; isPinned: boolean; replyCount: number; createdAt: string; editedAt: string | null;
-  author: { name: string; handle: string | null; avatarUrl: string | null; isCreator: boolean; isVerified: boolean } | null;
+  author: { name: string; handle: string | null; avatarUrl: string | null; isCreator: boolean; isVerified: boolean; badge?: 'verified' | 'premium' | null } | null;
   can: { edit: boolean; delete: boolean; pin: boolean };
 }
 interface Page { open: boolean; closedReason?: string; count: number; comments: CommentData[]; nextCursor: string | null }
@@ -98,7 +98,7 @@ function CommentItem({ c, videoId, onChange, onRemoved, onReplied, isReply = fal
         {c.isPinned && <p className="mb-0.5 flex items-center gap-1 text-[12px] text-muted"><Icon.Pin size={13} filled />Pinned by the creator</p>}
         <p className="flex flex-wrap items-center gap-x-1.5 text-[13px]">
           <span className={author.isCreator ? 'rounded-full bg-surface px-2 py-0.5' : ''}>{who}</span>
-          {author.isVerified && <VerifiedBadge size={14} />}
+          {author.isVerified && <VerifiedBadge size={14} kind={author.badge} />}
           <span className="text-muted" suppressHydrationWarning>{timeAgo(c.createdAt, locale)}{c.editedAt ? ' (edited)' : ''}</span>
         </p>
         {editing

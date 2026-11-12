@@ -100,7 +100,7 @@ export function UploadDialog() {
   let status: React.ReactNode = null;
   if (snap) {
     const pct = snap.total ? Math.floor((snap.sent / snap.total) * 100) : 0;
-    if (snap.state === 'error') status = <span className="flex items-center gap-2 text-danger"><Icon.Warning size={16} />{snap.error}</span>;
+    if (snap.state === 'error') status = <span className="flex flex-wrap items-center gap-2 text-danger"><Icon.Warning size={16} />{snap.error}{snap.error?.includes('Creator pass') && <a href="/hub/pass" className="font-semibold text-brand underline">Get the Creator pass</a>}</span>;
     else if (snap.reconnecting) status = <span role="status">Reconnecting… Upload resumes when you’re back online.</span>;
     else if (snap.state === 'cancelled') status = 'Upload cancelled';
     else if (snap.state === 'compressing') status = <span className="tabular-nums">Making it smaller to save data · {Math.floor((snap.compress?.progress ?? 0) * 100)}% of {formatBytes(snap.compress?.originalBytes ?? snap.total)}</span>;

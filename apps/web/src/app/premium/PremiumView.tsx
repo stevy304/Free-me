@@ -14,13 +14,13 @@ import { useShell } from '@/components/shell/ShellContext';
 interface Me { premium: { active: boolean; until: string | null; admin?: boolean }; payments: Payment[] }
 
 const PERKS = [
-  { icon: 'badge', title: 'Verified badge', text: 'Show the Free Me seal on your Space, videos and conversations.' },
+  { icon: 'badge', title: 'Premium badge', text: 'A gold Premium seal on your Space, videos and conversations. (The teal Verified seal is only for Spaces whose identity Free Me checked.)' },
   { icon: Icon.Wallet, title: 'Earn from your videos', text: 'Eligible creators share 60% of daily ad revenue based on the ads shown on their videos.' },
   { icon: Icon.Live, title: 'Live Studio', text: 'Stream with OBS or a hardware encoder, and manage your broadcast from Live Studio.' },
   { icon: Icon.Hub, title: 'Premium dashboard', text: 'Your membership, earnings, withdrawals and tools in one place.' },
 ] as const;
 
-const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Premium', AD_CAMPAIGN: 'Ad campaign' };
+const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Premium', AD_CAMPAIGN: 'Ad campaign', CREATOR_PASS: 'Creator pass' };
 const STATUS: Record<Payment['status'], string> = { PENDING: 'Waiting', SUCCEEDED: 'Paid', FAILED: 'Not paid' };
 
 export function PremiumView({ viewer }: { viewer: Viewer }) {
@@ -40,7 +40,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
   useEffect(() => { void load(); }, [load]);
 
   const paid = useCallback((p: Payment) => {
-    if (p.status === 'SUCCEEDED') { setNotice('Welcome to Premium. Your verified badge is on.'); setExtend(false); void load(); router.refresh(); }
+    if (p.status === 'SUCCEEDED') { setNotice('Welcome to Premium. Your Premium badge is on.'); setExtend(false); void load(); router.refresh(); }
     else setError(p.failureReason ?? 'The payment did not go through.');
   }, [load, router]);
   // Back from the card checkout: follow that payment.
@@ -92,12 +92,12 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
         <div aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-[radial-gradient(circle,#2bc4b8_0%,transparent_65%)] opacity-40" />
         <div aria-hidden className="pointer-events-none absolute -bottom-28 left-10 h-72 w-72 rounded-full bg-[radial-gradient(circle,#f2a93b_0%,transparent_65%)] opacity-25" />
         <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center">
-          <VerifiedBadge size={72} label="Free Me verified seal" />
+          <VerifiedBadge size={72} kind="premium" />
           <div className="flex-1">
             <p className="text-[13px] font-bold uppercase tracking-[0.18em] text-[#ffd88a]">Free Me Premium</p>
             {active ? (
               <>
-                <h1 className="mt-1 flex items-center gap-2 font-display text-[30px] font-extrabold leading-tight sm:text-[38px]">{name}<VerifiedBadge size={28} /></h1>
+                <h1 className="mt-1 flex items-center gap-2 font-display text-[30px] font-extrabold leading-tight sm:text-[38px]">{name}<VerifiedBadge size={28} kind="premium" /></h1>
                 <p className="mt-1 text-[15px] text-[#c9d6d4]">{until && until.getTime() > Date.now() ? <>Member until <b className="text-white">{until.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })}</b> · {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left</> : 'Every Premium feature is included with your administrator account.'}</p>
               </>
             ) : (
@@ -136,7 +136,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
           <ul className="grid content-start gap-3 sm:grid-cols-2">
             {PERKS.map((p) => (
               <li key={p.title} className="rounded-3xl border border-line bg-elevated p-5">
-                <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-soft text-brand">{p.icon === 'badge' ? <VerifiedBadge size={26} /> : <p.icon size={22} />}</span>
+                <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-soft text-brand">{p.icon === 'badge' ? <VerifiedBadge size={26} kind="premium" /> : <p.icon size={22} />}</span>
                 <p className="mt-3 font-display text-[17px] font-bold">{p.title}</p>
                 <p className="mt-1 text-[14px] leading-relaxed text-muted">{p.text}</p>
               </li>

@@ -91,6 +91,8 @@ async function main() {
   await maintenance.upsertJobScheduler('recover-stuck', { every: 5 * 60_000 }, { name: 'recover-stuck' });
   // Popularity-based encoding: videos that reached HD_MIN_VIEWS get their 1080p and above.
   await maintenance.upsertJobScheduler('hd-upgrades', { every: 60_000 }, { name: 'hd-upgrades' });
+  // Storage saving: originals of ready videos older than SOURCE_RETENTION_DAYS (off by default).
+  if (config.media.sourceRetentionDays) await maintenance.upsertJobScheduler('expire-sources', { every: 3600_000 }, { name: 'expire-sources' });
   // Money: check pending payments every minute; end memberships and share yesterday's ad revenue every 15 minutes.
   const billing = new Billing(prisma, config);
   const mail = new MailService(config);
@@ -108,6 +110,7 @@ async function main() {
     else if (job.name === 'billing-receipts') await billing.sendReceipts(mail);
     else if (job.name === 'billing-payments') await billing.reconcile();
     else if (job.name === 'billing-daily') { await billing.expirePremium(); const n = await billing.settleAds(); if (n) log.log(`Settled ${n} day(s) of ad revenue`); }
+    else if (job.name === 'expire-sources') await jobs.expireSources();
     else if (job.name === 'hd-upgrades') {
       const ids = await jobs.popularUpgrades();
       for (const videoId of ids) {

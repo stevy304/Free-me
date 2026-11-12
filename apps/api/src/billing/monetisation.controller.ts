@@ -173,6 +173,17 @@ export class AdminBillingController {
     return { premium: premiumView(await this.prisma.user.findUniqueOrThrow({ where: { id: u.id } })) };
   }
 
+  @Post('creator-pass')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Give someone the Creator pass without payment (creators invited at launch, partners)' })
+  async grantPass(@CurrentAuth() auth: AuthContext, @Body() body: GrantDto, @Req() req: AppRequest) {
+    const u = await this.prisma.user.findUnique({ where: { email: body.email.trim().toLowerCase() } });
+    if (!u) throw new NotFoundException('No account uses this email. They need to sign in once first.');
+    await this.billing.grantCreatorPass(u.id, body.months);
+    await this.audit.record({ userId: auth.user.id, action: 'CREATOR_PASS_GRANTED', entityType: 'User', entityId: u.id, req, details: { months: body.months } });
+    return { creatorPass: { until: (await this.prisma.user.findUniqueOrThrow({ where: { id: u.id } })).creatorPassUntil } };
+  }
+
   @Post('verification')
   @HttpCode(200)
   @ApiOperation({ summary: 'Set or remove an administrator-issued verification badge' })

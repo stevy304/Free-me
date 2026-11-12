@@ -9,7 +9,7 @@ import type { Payment } from '@/lib/types';
 import { useShell } from '@/components/shell/ShellContext';
 
 interface Settings {
-  prices: { premiumUsdCents: number; premiumByCountry?: Record<string, number>; adDayUsdCents: number; adCpmUsdCents: number; payoutMinUsdCents: number };
+  prices: { creatorPassUsdCents: number; creatorFreeVideos: number; premiumUsdCents: number; premiumByCountry?: Record<string, number>; adDayUsdCents: number; adCpmUsdCents: number; payoutMinUsdCents: number };
   momo: { source: string; active: boolean; enabled: boolean; sandbox: boolean; baseUrl: string; targetEnvironment: string; apiUser: string; subscriptionKey: string; apiKey: string; currency: string; perUsd: number | null };
   flutterwave: { source: string; active: boolean; enabled: boolean; secretKey: string; webhookHash: string; webhookUrl: string };
   manual: { active: boolean; enabled: boolean; currency: string; perUsd: number | null; accounts: Array<{ label: string; number: string; name: string }>; instructions: string | null };
@@ -64,7 +64,7 @@ export function PaymentSettings({ onSaved }: { onSaved: () => void }) {
   const apply = (r: Settings) => {
     setS(r);
     setForm({
-      premium: r.prices.premiumUsdCents / 100, premiumByCountry: Object.entries(r.prices.premiumByCountry ?? {}).map(([c, v]) => `${c}=${v}`).join(', '), adDay: r.prices.adDayUsdCents / 100, adCpm: r.prices.adCpmUsdCents / 100, payoutMin: r.prices.payoutMinUsdCents / 100,
+      creatorPass: r.prices.creatorPassUsdCents / 100, creatorFree: r.prices.creatorFreeVideos, premium: r.prices.premiumUsdCents / 100, premiumByCountry: Object.entries(r.prices.premiumByCountry ?? {}).map(([c, v]) => `${c}=${v}`).join(', '), adDay: r.prices.adDayUsdCents / 100, adCpm: r.prices.adCpmUsdCents / 100, payoutMin: r.prices.payoutMinUsdCents / 100,
       momoEnabled: r.momo.enabled, momoSandbox: r.momo.sandbox, momoBaseUrl: r.momo.sandbox ? '' : r.momo.baseUrl, momoTarget: r.momo.targetEnvironment, momoUser: r.momo.apiUser, momoSub: '', momoKey: '', momoCurrency: r.momo.currency, momoRate: r.momo.perUsd ?? '',
       sandboxKey: '',
       flwEnabled: r.flutterwave.enabled, flwSecret: '', flwHash: '',
@@ -97,10 +97,12 @@ export function PaymentSettings({ onSaved }: { onSaved: () => void }) {
           <label><span className={label}>Premium per month</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.premium} onChange={(e) => set('premium', e.target.value)} /></label>
           <label><span className={label}>Ad, per day</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.adDay} onChange={(e) => set('adDay', e.target.value)} /></label>
           <label><span className={label}>Ad, per 1,000 views</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.adCpm} onChange={(e) => set('adCpm', e.target.value)} /></label>
+          <label><span className={label}>Creator pass per month</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.creatorPass} onChange={(e) => set('creatorPass', e.target.value)} /></label>
+          <label><span className={label}>Free uploads per Space before the pass</span><input type="number" min={0} step={1} className={`mt-1 ${inputClass}`} value={form.creatorFree} onChange={(e) => set('creatorFree', e.target.value)} /></label>
           <label className="sm:col-span-4"><span className={label}>Premium in some countries (US cents a month, e.g. RW=300, KE=500; empty = the price above everywhere)</span><input className={`mt-1 ${inputClass}`} value={form.premiumByCountry ?? ''} onChange={(e) => set('premiumByCountry', e.target.value)} placeholder="RW=300, KE=500" /></label>
           <label><span className={label}>Smallest creator withdrawal</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.payoutMin} onChange={(e) => set('payoutMin', e.target.value)} /></label>
         </div>
-        <button type="button" disabled={!!busy} onClick={() => void run('prices', () => api('/admin/billing/settings', { method: 'PUT', body: { prices: { premiumUsdCents: cents(form.premium), premiumByCountry: form.premiumByCountry ?? '', adDayUsdCents: cents(form.adDay), adCpmUsdCents: cents(form.adCpm), payoutMinUsdCents: cents(form.payoutMin) } } }), 'Prices saved.')} className="mt-3 h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Save prices</button>
+        <button type="button" disabled={!!busy} onClick={() => void run('prices', () => api('/admin/billing/settings', { method: 'PUT', body: { prices: { creatorPassUsdCents: cents(form.creatorPass), creatorFreeVideos: form.creatorFree, premiumUsdCents: cents(form.premium), premiumByCountry: form.premiumByCountry ?? '', adDayUsdCents: cents(form.adDay), adCpmUsdCents: cents(form.adCpm), payoutMinUsdCents: cents(form.payoutMin) } } }), 'Prices saved.')} className="mt-3 h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Save prices</button>
       </div>
 
       {/* Manual */}

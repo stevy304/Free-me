@@ -68,7 +68,7 @@ export function HubMoney() {
       <p className="rounded-2xl border border-line bg-elevated p-4 text-sm text-muted">Payouts currently have a Rwanda MTN Mobile Money pilot. Review <Link href="/earn/availability" className="font-semibold text-brand underline">country availability</Link> before joining. Premium access does not verify a payout account.</p>
       {!m.premium.active ? (
         <section className="flex flex-col gap-4 rounded-3xl bg-[#071312] p-6 text-white sm:flex-row sm:items-center">
-          <VerifiedBadge size={52} />
+          <VerifiedBadge size={52} kind="premium" />
           <div className="flex-1"><p className="font-display text-[22px] font-extrabold">Monetisation is part of Premium</p><p className="text-[15px] text-[#c9d6d4]">For {usd(p.premiumUsdCents, locale)} a month you get Premium features and access to the ad earnings programme. Earnings depend on eligible ad activity.</p></div>
           <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />Upgrade</Link>
         </section>

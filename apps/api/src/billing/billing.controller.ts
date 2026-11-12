@@ -9,7 +9,7 @@ import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import { Webhook } from '../common/origin.guard';
 import { RateLimitService } from '../common/rate-limit.service';
 import type { AuthContext } from '../common/request';
-import { Billing, BillingError, isPremium, PREMIUM_MONTHS, premiumPriceFor } from './billing';
+import { Billing, BillingError, isPremium, PREMIUM_MONTHS, premiumPriceFor, uploadAccess } from './billing';
 import type { ProviderName } from './providers';
 
 @Injectable()
@@ -57,6 +57,7 @@ export class BillingController {
     const usdCents = premiumPriceFor(b, country);
     return {
       premium: { usdCents, months: PREMIUM_MONTHS, standardUsdCents: b.premiumUsdCents, country: usdCents !== b.premiumUsdCents ? country : null },
+      creatorPass: { usdCents: b.creatorPassUsdCents, months: PREMIUM_MONTHS, freeVideos: b.creatorFreeVideos },
       // A paid day buys up to viewsPerDay ad views (priced per 1,000 views); views not delivered run on afterwards.
       ads: { usdCentsPerDay: b.adDayUsdCents, usdCentsPer1000Views: b.adCpmUsdCents, viewsPerDay: Math.floor((b.adDayUsdCents * 1000) / b.adCpmUsdCents), maxAdsPerVideo: 2 },
       payoutMinimumUsdCents: b.payoutMinUsdCents,
@@ -85,6 +86,33 @@ export class BillingController {
     await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
     const usdCents = premiumPriceFor(await this.billing.settings(), await this.country(auth)) * body.months;
     const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'PREMIUM', method: body.method, phone: body.phone, months: body.months, usdCents, description: `Free Me Premium, ${body.months} ${body.months === 1 ? 'month' : 'months'}`, returnPath: '/premium' }));
+    return { payment: paymentView(p) };
+  }
+
+  @Get('creator-pass')
+  @RequireAuth()
+  @ApiOperation({ summary: 'My Creator pass: whether I can upload, free videos left, and the price' })
+  async creatorPass(@CurrentAuth() auth: AuthContext) {
+    const [u, channel, b] = await Promise.all([
+      this.prisma.user.findUniqueOrThrow({ where: { id: auth.user.id } }),
+      this.prisma.channel.findUnique({ where: { userId: auth.user.id }, select: { uploadCount: true } }),
+      this.billing.settings(),
+    ]);
+    const access = uploadAccess(u, channel?.uploadCount ?? 0, b);
+    return {
+      pass: { active: access.pass, until: u.creatorPassUntil, includedWithPremium: access.pass && isPremium(u) },
+      canUpload: access.allowed, freeVideos: b.creatorFreeVideos, freeLeft: access.freeLeft, uploads: channel?.uploadCount ?? 0,
+      usdCents: b.creatorPassUsdCents, months: PREMIUM_MONTHS,
+    };
+  }
+
+  @Post('creator-pass')
+  @RequireAuth()
+  @ApiOperation({ summary: 'Pay for the Creator pass (needed to upload after the free videos)' })
+  async buyCreatorPass(@CurrentAuth() auth: AuthContext, @Body() body: PremiumDto) {
+    await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
+    const usdCents = (await this.billing.settings()).creatorPassUsdCents * body.months;
+    const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'CREATOR_PASS', method: body.method, phone: body.phone, months: body.months, usdCents, description: `Free Me Creator pass, ${body.months} ${body.months === 1 ? 'month' : 'months'}`, returnPath: '/hub/pass' }));
     return { payment: paymentView(p) };
   }
 
