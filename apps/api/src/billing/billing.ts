@@ -134,7 +134,7 @@ export class Billing {
   }
 
   /** Creates a payment and asks the provider to collect it. */
-  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_PASS' | 'PLUS' | 'FAMILY' | 'VERIFICATION'; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }) {
+  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_SUPPORT' | 'CREATOR_PASS' | 'PLUS' | 'FAMILY' | 'VERIFICATION'; supportChannelId?: string; requestKey?: string; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }): Promise<Payment> {
     const provider = (await this.providers())[p.method];
     if (!provider) throw new BillingError(p.method === 'airtel_money' ? 'Airtel Money payments are not set up on this server yet.' : p.method === 'mtn_momo' ? 'MTN MoMo payments are not set up on this server yet.' : p.method === 'flutterwave' ? 'Card payments are not set up on this server yet.' : 'This way of paying is not available.');
     let phone: string | undefined;
@@ -143,13 +143,31 @@ export class Billing {
       if (!phone) throw new BillingError(p.method === 'airtel_money' ? 'Enter your Airtel Money number, e.g. 0731 234 567 or +250 731 234 567.' : 'Enter your MTN Mobile Money number, e.g. 0788 123 456 or +250 788 123 456.');
     }
     const amountMinor = provider.charge(p.usdCents);
-    const payment = await this.prisma.payment.create({
-      data: { userId: user.id, purpose: p.purpose, provider: p.method, providerRef: `pending-${randomUUID()}`, amountMinor, currency: provider.currency, usdCents: p.usdCents, months: p.months ?? null, campaignId: p.campaignId ?? null, phone: phone ?? null },
-    });
+    const existing = p.requestKey ? await this.prisma.payment.findUnique({ where: { requestKey: p.requestKey } }) : null;
+    if (existing) {
+      if (existing.userId !== user.id || existing.supportChannelId !== p.supportChannelId || existing.usdCents !== p.usdCents || existing.provider !== p.method || existing.phone !== (phone ?? null)) throw new BillingError('This request was already used for a different payment.');
+      return existing;
+    }
+    const paymentId = randomUUID();
+    const preparedRef = p.purpose === 'CREATOR_SUPPORT' && p.method !== 'manual'
+      ? p.method === 'flutterwave' ? `fm-${paymentId}` : randomUUID()
+      : `pending-${randomUUID()}`;
+    let payment: Payment;
+    try { payment = await this.prisma.payment.create({
+      data: { id: paymentId, userId: user.id, purpose: p.purpose, provider: p.method, providerRef: preparedRef, amountMinor, currency: provider.currency, usdCents: p.usdCents, months: p.months ?? null, campaignId: p.campaignId ?? null, phone: phone ?? null, supportChannelId: p.supportChannelId, requestKey: p.requestKey },
+    }); } catch (e) {
+      // A competing request may have created this payment while we checked.
+      if (p.requestKey && (e as { code?: string }).code === 'P2002') return this.start(user, p);
+      throw e;
+    }
     try {
-      const r = await provider.start({ paymentId: payment.id, amountMinor, currency: provider.currency, description: p.description, email: user.email, phone, returnUrl: `${this.config.appUrl}${p.returnPath}${p.returnPath.includes('?') ? '&' : '?'}payment=${payment.id}` });
+      const r = await provider.start({ paymentId: payment.id, providerRef: preparedRef.startsWith('pending-') ? undefined : preparedRef, amountMinor, currency: provider.currency, description: p.description, email: user.email, phone, returnUrl: `${this.config.appUrl}${p.returnPath}${p.returnPath.includes('?') ? '&' : '?'}payment=${payment.id}` });
       return this.prisma.payment.update({ where: { id: payment.id }, data: { providerRef: r.providerRef, checkoutUrl: r.checkoutUrl } });
     } catch (e) {
+      if (p.purpose === 'CREATOR_SUPPORT' && p.method !== 'manual') {
+        this.log.warn(`Support payment ${payment.id}: collection response uncertain; checking saved reference`);
+        return this.prisma.payment.update({ where: { id: payment.id }, data: { failureReason: 'Confirmation is delayed. We are checking the saved payment reference. Do not send another payment.' } });
+      }
       await this.prisma.payment.update({ where: { id: payment.id }, data: { status: 'FAILED', failureReason: 'The payment could not be started.' } });
       this.log.warn(`payment ${payment.id}: ${(e as Error).message}`);
       throw new BillingError(e instanceof ProviderError ? 'The payment service did not answer. Please try again in a moment.' : 'The payment could not be started.');
@@ -184,7 +202,7 @@ export class Billing {
     }
     await this.prisma.$transaction(async (tx) => {
       // Only the first caller to flip PENDING → SUCCEEDED fulfils (the API and the worker may both check).
-      const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', paidAt: new Date(), receiptDueAt: new Date() } });
+      const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', failureReason: null, paidAt: new Date(), receiptDueAt: new Date() } });
       if (flipped.count) await this.fulfil(tx, p);
     });
     publish(room.user(p.userId), 'payment', { id });
@@ -194,6 +212,15 @@ export class Billing {
   private async fulfil(tx: Prisma.TransactionClient, p: Payment) {
     if (p.purpose === 'PREMIUM') {
       await this.extendPremium(tx, p.userId, p.months ?? 1);
+    } else if (p.purpose === 'CREATOR_SUPPORT' && p.supportChannelId) {
+      const amount = BigInt(p.usdCents);
+      const bal = await tx.creatorBalance.upsert({ where: { channelId: p.supportChannelId },
+        create: { channelId: p.supportChannelId, currency: EARNINGS_CURRENCY, pendingBalanceCents: amount, lifetimeEarningsCents: amount },
+        update: { pendingBalanceCents: { increment: amount }, lifetimeEarningsCents: { increment: amount } } });
+      if (bal.currency !== EARNINGS_CURRENCY) throw new BillingError('Creator balance currency needs review.');
+      await tx.revenueLedger.create({ data: { channelId: p.supportChannelId, sourceType: 'AUDIENCE_SUPPORT_PENDING', referenceId: p.id,
+        currency: EARNINGS_CURRENCY, grossAmountCents: amount, creatorShareCents: amount, platformShareCents: 0n, reinvestShareCents: 0n,
+        splitBps: '10000/0/0', balanceAfterCents: bal.confirmedBalanceCents, description: 'Audience support received; awaiting settlement review' } });
     } else if (p.purpose === 'CREATOR_PASS') {
       await this.extendCreatorPass(tx, p.userId, p.months ?? 12);
     } else if (p.purpose === 'VERIFICATION') {
@@ -222,7 +249,7 @@ export class Billing {
     if (p.status !== 'PENDING') throw new BillingError('This payment is already settled.');
     if (approve) {
       await this.prisma.$transaction(async (tx) => {
-        const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', paidAt: new Date(), receiptDueAt: new Date() } });
+        const flipped = await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'SUCCEEDED', failureReason: null, paidAt: new Date(), receiptDueAt: new Date() } });
         if (flipped.count) await this.fulfil(tx, p);
       });
     } else {
@@ -299,7 +326,7 @@ export class Billing {
         const amount = digits ? `${raw.slice(0, -digits)}.${raw.slice(-digits)}` : raw;
         const item = payment.purpose === 'PREMIUM' ? `Premium (${payment.months ?? 1} month(s))` : payment.purpose === 'CREATOR_PASS' ? `Creator pass (${Math.round((payment.months ?? 12) / 12)} year(s))`
           : payment.purpose === 'PLUS' ? `Plus (${payment.months ?? 1} month(s))` : payment.purpose === 'FAMILY' ? `Family & TV (${payment.months ?? 1} month(s))`
-            : payment.purpose === 'VERIFICATION' ? 'Verified business badge (1 year)' : 'Ad funds';
+            : payment.purpose === 'VERIFICATION' ? 'Verified business badge (1 year)' : payment.purpose === 'CREATOR_SUPPORT' ? 'One-time creator support' : 'Ad funds';
         await mail.send(noticeMail(payment.user.email, 'Your Free Me payment receipt', [
           item, `Amount paid: ${payment.currency} ${amount}`, `Payment date (UTC): ${payment.paidAt!.toISOString().slice(0, 10)}`,
           `Receipt reference: ${payment.id}`,

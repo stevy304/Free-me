@@ -24,7 +24,7 @@ export class BillingService extends Billing {
 
 export const paymentView = (p: Payment) => ({
   id: p.id, purpose: p.purpose, method: p.provider, status: p.status, amount: p.amountMinor.toString(), currency: p.currency, usdCents: p.usdCents,
-  months: p.months, campaignId: p.campaignId, checkoutUrl: p.status === 'PENDING' ? p.checkoutUrl : null, failureReason: p.failureReason, createdAt: p.createdAt, paidAt: p.paidAt,
+  supportChannelId: p.supportChannelId, supportClearedAt: p.supportClearedAt, months: p.months, campaignId: p.campaignId, checkoutUrl: p.status === 'PENDING' ? p.checkoutUrl : null, failureReason: p.failureReason, createdAt: p.createdAt, paidAt: p.paidAt,
   // Manual payments: the code to write in the transfer message, and the transaction id the payer gave.
   reference: p.provider === 'manual' ? p.providerRef.split('-').slice(0, 2).join('-') : null, payerReference: p.payerReference,
 });

@@ -227,6 +227,8 @@ model Channel {
   isVerified            Boolean           @default(false)
   /// Why the badge shows: "PREMIUM" (removed when membership ends) or "ADMIN" (kept).
   verificationSource    String?
+  supportEnabled        Boolean           @default(false)
+  supportPayments       Payment[]         @relation("SupportRecipient")
   /// Uploads ever started (deleting a video does not give a free upload back)
   uploadCount           Int               @default(0)
   businessVerification  BusinessVerification?
@@ -904,6 +906,7 @@ enum PaymentStatus {
 enum PaymentPurpose {
   PREMIUM
   AD_CAMPAIGN
+  CREATOR_SUPPORT
   CREATOR_PASS
   PLUS
   FAMILY
@@ -925,6 +928,10 @@ model Payment {
   /// The price in US cents, whatever currency was charged.
   usdCents              Int
   status                PaymentStatus     @default(PENDING)
+  supportChannelId      String?
+  supportChannel        Channel?          @relation("SupportRecipient", fields: [supportChannelId], references: [id], onDelete: Restrict)
+  supportClearedAt      DateTime?
+  requestKey            String?           @unique
   months                Int?
   campaignId            String?
   campaign              Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
@@ -938,6 +945,7 @@ model Payment {
   receiptDueAt          DateTime?
   receiptSentAt         DateTime?
 
+  @@index([supportChannelId, status])
   @@index([receiptDueAt])
 
   @@index([userId, createdAt])

@@ -47,3 +47,10 @@ Calculate effective CPM as spend divided by valid impressions times 1,000. Compa
 ## Release boundary
 
 This release implements account review, signed withdrawal previews, reservation and settlement safeguards, a public availability page and an isolated Flutterwave test-transfer adapter. It does not activate live provider disbursements or perform automatic identity verification. A legal and payment-provider review of the actual business arrangements remains necessary before any expansion.
+
+
+### Audience support experiment
+
+The first additional revenue path is an optional one-time contribution, not a free-Spark cash reward. Hypothesis: a small group of existing supporters, including diaspora viewers, may fund a programme before local advertising becomes dependable. This has not yet been demonstrated by customer research. Test opt-in, checkout completion, repeat support, collection fees, disputes, time to clearance and successful withdrawal with the pilot cohort. Do not extrapolate household mobile-money adoption into willingness to pay.
+
+The initial $1/$3/$5/$10/$20 USD choices are test amounts, not researched optimal prices. The checkout shows the configured local-currency charge. Zero platform commission is a temporary experiment whose provider costs must be covered by the operator; measure contribution margin before expanding. A creator keeps the recorded USD amount pending settlement review; payout fees and conversion are disclosed separately in the withdrawal preview. The account holder must opt in, and the existing Rwanda review remains necessary. Tips alone do not establish demand for recurring memberships or paid sponsorships.

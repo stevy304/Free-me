@@ -1,3 +1,4 @@
+import { CreatorSupport } from '@/components/billing/CreatorSupport';
 import * as Icon from '@/components/icons';
 import type { Metadata } from 'next';
 import Link from 'next/link';
@@ -55,6 +56,7 @@ export default async function Channel({ params, searchParams }: { params: Promis
           </div>
         </div>
       </div>
+      <CreatorSupport handle={c.handle} owner={viewer.isOwner} />
       <nav className="mt-6 flex gap-6 border-b border-line" aria-label="Space">
         <Link href={`/@${c.handle}`} className={tabClass(tab === 'videos')} aria-current={tab === 'videos' ? 'page' : undefined}>Videos</Link>
         <Link href={`/@${c.handle}?tab=about`} className={tabClass(tab === 'about')} aria-current={tab === 'about' ? 'page' : undefined}>About</Link>

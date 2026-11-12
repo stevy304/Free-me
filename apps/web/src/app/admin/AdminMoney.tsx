@@ -8,11 +8,12 @@ import { api } from '@/lib/client-api';
 import { duration } from '@/lib/format';
 import { usd } from '@/lib/money';
 import { useShell } from '@/components/shell/ShellContext';
+import { AdminSupport } from './AdminSupport';
 import { AdminPayouts } from './AdminPayouts';
 import { ManualQueue, PaymentSettings } from './AdminPayments';
 
 interface Summary {
-  premiumMembers: number; last30Days: { premiumUsdCents: number; adsUsdCents: number; payments: number }; waiting: { adReviews: number; payouts: number };
+  premiumMembers: number; last30Days: { premiumUsdCents: number; adsUsdCents: number; supportUsdCents: number; payments: number }; waiting: { adReviews: number; payouts: number };
   settlements: Array<{ day: string; grossCents: number; creatorPoolCents: number; paidToCreatorsCents: number; impressions: number; channels: number }>; methods: Array<{ name: string; currency: string }>;
 }
 interface Review { id: string; businessName: string; email: string; country: string; headline: string; destinationUrl: string; days: number; totalCents: number; targetCountries: string[]; video: { id: string; title: string; durationSeconds: number } | null; createdAt: string }
@@ -50,8 +51,9 @@ export function AdminMoney() {
       <ManualQueue />
       <AdminBusinesses />
       <AdminPayouts />
+      <AdminSupport />
       <div className="grid gap-3 sm:grid-cols-4">
-        {[['Premium members', s.premiumMembers.toLocaleString(locale)], ['Premium, 30 days', usd(s.last30Days.premiumUsdCents, locale)], ['Ads sold, 30 days', usd(s.last30Days.adsUsdCents, locale)], ['Payments, 30 days', s.last30Days.payments.toLocaleString(locale)]].map(([l, v]) => (
+        {[['Premium members', s.premiumMembers.toLocaleString(locale)], ['Premium, 30 days', usd(s.last30Days.premiumUsdCents, locale)], ['Ads sold, 30 days', usd(s.last30Days.adsUsdCents, locale)], ['Support received, 30 days', usd(s.last30Days.supportUsdCents ?? 0, locale)], ['Payments, 30 days', s.last30Days.payments.toLocaleString(locale)]].map(([l, v]) => (
           <div key={l} className="rounded-2xl border border-line p-4"><p className="text-[13px] text-muted">{l}</p><p className="font-display text-[24px] font-extrabold tabular-nums">{v}</p></div>
         ))}
       </div>

@@ -21,7 +21,7 @@ const PERKS = [
   { icon: Icon.Upload, title: 'Unlimited uploads and Plus', text: 'No yearly upload limit, every quality at once, and Plus (no ads) included.' },
 ] as const;
 
-const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Pro', AD_CAMPAIGN: 'Ad funds', CREATOR_PASS: 'Creator pass', PLUS: 'Plus', FAMILY: 'Family & TV', VERIFICATION: 'Verified business' };
+const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Pro', AD_CAMPAIGN: 'Ad funds', CREATOR_PASS: 'Creator pass', PLUS: 'Plus', FAMILY: 'Family & TV', VERIFICATION: 'Verified business', CREATOR_SUPPORT: 'Creator support' };
 const STATUS: Record<Payment['status'], string> = { PENDING: 'Waiting', SUCCEEDED: 'Paid', FAILED: 'Not paid' };
 
 export function PremiumView({ viewer }: { viewer: Viewer }) {

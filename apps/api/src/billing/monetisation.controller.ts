@@ -117,9 +117,9 @@ export class AdminBillingController {
       this.prisma.payout.count({ where: { status: { in: ['REQUESTED', 'UNDER_REVIEW', 'APPROVED'] } } }),
       this.prisma.adDaySettlement.findMany({ orderBy: { day: 'desc' }, take: 14 }),
     ]);
-    const sum = (p: 'PREMIUM' | 'AD_CAMPAIGN') => income.find((i) => i.purpose === p)?._sum.usdCents ?? 0;
+    const sum = (p: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_SUPPORT') => income.find((i) => i.purpose === p)?._sum.usdCents ?? 0;
     return {
-      premiumMembers: members, last30Days: { premiumUsdCents: sum('PREMIUM'), adsUsdCents: sum('AD_CAMPAIGN'), payments: income.reduce((a, i) => a + i._count, 0) },
+      premiumMembers: members, last30Days: { premiumUsdCents: sum('PREMIUM'), adsUsdCents: sum('AD_CAMPAIGN'), supportUsdCents: sum('CREATOR_SUPPORT'), payments: income.reduce((a, i) => a + i._count, 0) },
       waiting: { adReviews: reviews, payouts },
       settlements: days.map((d) => ({ day: d.day.toISOString().slice(0, 10), grossCents: Number(d.grossCents), creatorPoolCents: Number(d.creatorPoolCents), paidToCreatorsCents: Number(d.allocatedCents), impressions: d.impressions, channels: d.channels })),
       methods: await this.billing.methods(),

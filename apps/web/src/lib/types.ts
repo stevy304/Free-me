@@ -19,7 +19,7 @@ export interface PayMethod { name: 'mtn_momo' | 'airtel_money' | 'flutterwave' |
 export interface PlanPrice { usdCents: number; months: number[]; standardUsdCents?: number; country?: string | null }
 export interface Plans { premium: PlanPrice; plus?: PlanPrice; family?: PlanPrice & { seats: number }; creatorPass?: PlanPrice & { freeVideos: number; videosPerYear?: number }; uploadMaxBytes?: number; ads: { usdCentsPer1000Views?: number; minBudgetUsdCents?: number; maxAdsPerVideo: number }; payoutMinimumUsdCents: number; methods: PayMethod[] }
 export interface Payment {
-  id: string; purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_PASS' | 'PLUS' | 'FAMILY' | 'VERIFICATION'; method: PayMethod['name']; status: 'PENDING' | 'SUCCEEDED' | 'FAILED'; amount: string; currency: string; usdCents: number;
+  id: string; purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_SUPPORT' | 'CREATOR_PASS' | 'PLUS' | 'FAMILY' | 'VERIFICATION'; supportChannelId?: string | null; supportClearedAt?: string | null; method: PayMethod['name']; status: 'PENDING' | 'SUCCEEDED' | 'FAILED'; amount: string; currency: string; usdCents: number;
   months: number | null; campaignId: string | null; checkoutUrl: string | null; failureReason: string | null; createdAt: string; paidAt: string | null;
   /** Manual payments: the code to write in the transfer, and the transaction id the payer gave. */
   reference?: string | null; payerReference?: string | null;
