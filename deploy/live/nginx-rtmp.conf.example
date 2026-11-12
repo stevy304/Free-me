@@ -1,0 +1,28 @@
+# Include at nginx's top level, outside http{}. Requires libnginx-mod-rtmp.
+# Replace the private API address and callback secret before loading.
+rtmp {
+  server {
+    listen 127.0.0.1:1935;
+    chunk_size 4096;
+    ping 15s;
+    ping_timeout 10s;
+    application live {
+      live on;
+      record off;
+      allow play 127.0.0.1;
+      deny play all;
+      notify_method post;
+      on_publish http://10.0.0.2:4000/api/live/rtmp/publish?secret=REPLACE_WITH_RANDOM_SECRET;
+      on_publish_done http://10.0.0.2:4000/api/live/rtmp/done?secret=REPLACE_WITH_RANDOM_SECRET;
+      on_update http://10.0.0.2:4000/api/live/rtmp/update?secret=REPLACE_WITH_RANDOM_SECRET;
+      notify_update_timeout 5s;
+      notify_update_strict on;
+      hls on;
+      hls_path /var/lib/freeme/live;
+      hls_nested on;
+      hls_fragment 2s;
+      hls_playlist_length 6h;
+      hls_cleanup off;
+    }
+  }
+}

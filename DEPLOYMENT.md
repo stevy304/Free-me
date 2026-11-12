@@ -96,7 +96,9 @@ API server, which encodes it with ffmpeg into HLS (2-second segments, 720p, abou
 storage as it grows; viewers play it from the CDN. Each browser stream uses about one CPU core on the API server
 that receives it. Each API process defaults to three concurrent browser streams. Set `LIVE_BROWSER_LIMIT` to match the CPU available per process.
 
-**Premium encoder streaming (RTMP):** install nginx with the RTMP module on the media server and let it
+**Premium encoder streaming (Streamlabs / OBS / RTMPS):** see [the encoder setup guide](docs/ENCODER-STREAMING.md) for creator instructions, encrypted ingest, and deployable nginx/stunnel examples. The plaintext RTMP example below is suitable only for trusted networks.
+
+**RTMP ingest:** install nginx with the RTMP module on the media server and let it
 write HLS that the worker copies to storage. The encoder's key is checked by the API, and the stream is published
 under the stream id, so the key never appears in any public address.
 
@@ -119,6 +121,9 @@ rtmp {
       deny play all;
       on_publish http://10.0.0.2:4000/api/live/rtmp/publish?secret=LIVE_RTMP_SECRET;
       on_publish_done http://10.0.0.2:4000/api/live/rtmp/done?secret=LIVE_RTMP_SECRET;
+      on_update http://10.0.0.2:4000/api/live/rtmp/update?secret=LIVE_RTMP_SECRET;
+      notify_update_timeout 5s;
+      notify_update_strict on;
       hls on;
       hls_path /var/lib/freeme/live;
       hls_nested on;

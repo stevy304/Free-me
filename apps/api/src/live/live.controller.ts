@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Header, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, Length, MaxLength } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, Length, MaxLength, ValidateIf } from 'class-validator';
 import type { Channel, LiveStream, Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { APP_CONFIG, type AppConfig } from '../config/config';
@@ -10,25 +10,23 @@ import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import { Webhook } from '../common/origin.guard';
 import type { AuthContext } from '../common/request';
 import { publish, room } from '../realtime/publish';
-import { LiveError, LiveService } from './live.service';
+import { LiveError, LiveService, newStreamKey } from './live.service';
 import { hasPremiumAccess } from '../billing/billing';
 import { endLive, LIVE_PLAYLIST } from './sync';
+import { encoderCallback } from './encoder';
 
 /** Live settings: every field optional; only those sent change. */
 class LiveSettingsDto {
-  @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 100) title?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) description?: string;
-  @ApiPropertyOptional({ enum: ['PUBLIC', 'UNLISTED'] }) @IsOptional() @IsIn(['PUBLIC', 'UNLISTED']) visibility?: 'PUBLIC' | 'UNLISTED';
+  @ApiPropertyOptional() @ValidateIf((_, value) => value !== undefined) @IsString() @Length(1, 100) title?: string;
+  @ApiPropertyOptional() @ValidateIf((_, value) => value !== undefined) @IsString() @MaxLength(2000) description?: string;
+  @ApiPropertyOptional({ enum: ['PUBLIC', 'UNLISTED'] }) @ValidateIf((_, value) => value !== undefined) @IsIn(['PUBLIC', 'UNLISTED']) visibility?: 'PUBLIC' | 'UNLISTED';
   @ApiPropertyOptional({ description: 'ISO date and time it is planned to start; null clears it' }) @IsOptional() @IsDateString() scheduledFor?: string | null;
-  @ApiPropertyOptional({ enum: ['everyone', 'followers', 'off'] }) @IsOptional() @IsIn(['everyone', 'followers', 'off']) chatMode?: string;
-  @ApiPropertyOptional({ enum: [0, 5, 10, 30, 60, 120] }) @IsOptional() @IsInt() @IsIn([0, 5, 10, 30, 60, 120]) slowModeSeconds?: number;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() captionsEnabled?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() saveReplay?: boolean;
-  @ApiPropertyOptional({ enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'] }) @IsOptional() @IsIn(['PUBLIC', 'UNLISTED', 'PRIVATE']) replayVisibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+  @ApiPropertyOptional({ enum: ['everyone', 'followers', 'off'] }) @ValidateIf((_, value) => value !== undefined) @IsIn(['everyone', 'followers', 'off']) chatMode?: string;
+  @ApiPropertyOptional({ enum: [0, 5, 10, 30, 60, 120] }) @ValidateIf((_, value) => value !== undefined) @IsInt() @IsIn([0, 5, 10, 30, 60, 120]) slowModeSeconds?: number;
+  @ApiPropertyOptional() @ValidateIf((_, value) => value !== undefined) @IsBoolean() captionsEnabled?: boolean;
+  @ApiPropertyOptional() @ValidateIf((_, value) => value !== undefined) @IsBoolean() saveReplay?: boolean;
+  @ApiPropertyOptional({ enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'] }) @ValidateIf((_, value) => value !== undefined) @IsIn(['PUBLIC', 'UNLISTED', 'PRIVATE']) replayVisibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
 }
-/** nginx-rtmp posts its callbacks as a form: the stream name (the key the encoder used) and more. */
-class RtmpDto { @IsOptional() @IsString() name?: string; @IsOptional() @IsString() call?: string; @IsOptional() @IsString() app?: string; @IsOptional() @IsString() addr?: string }
-
 @ApiTags('live')
 @Controller()
 export class LiveController {
@@ -37,7 +35,7 @@ export class LiveController {
   private playback(s: LiveStream) { return s.status === 'LIVE' ? `${this.config.media.publicBaseUrl}/live/${s.id}/${LIVE_PLAYLIST}` : null; }
   private async view(s: LiveStream & { channel: Channel }) {
     return {
-      id: s.id, title: s.title, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, playbackUrl: this.playback(s), viewers: s.status === 'LIVE' ? await this.live.viewers(s.id) : 0,
+      id: s.id, title: s.title, status: s.status, source: s.source, startedAt: s.startedAt, endedAt: s.endedAt, playbackUrl: this.playback(s), viewers: s.status === 'LIVE' ? await this.live.viewers(s.id) : 0,
       peakViewers: s.peakViewers, replayVideoId: s.replayVideoId,
       description: s.description, visibility: s.visibility, scheduledFor: s.scheduledFor,
       chat: { mode: s.chatMode, slowModeSeconds: s.slowModeSeconds }, captionsEnabled: s.captionsEnabled,
@@ -78,6 +76,7 @@ export class LiveController {
   }
 
   @Get('hub/live')
+  @Header('Cache-Control', 'private, no-store')
   @RequireAuth()
   @ApiOperation({ summary: 'My Live Studio: the current stream, the encoder address and key' })
   async studio(@CurrentAuth() auth: AuthContext) {
@@ -88,23 +87,28 @@ export class LiveController {
     return {
       // The host also sees what happens to the recording (not part of the public view).
       premium, stream: { ...(await this.view(full)), saveReplay: full.saveReplay, replayVisibility: full.replayVisibility },
-      encoder: this.config.live.rtmpUrl && premium ? { server: this.config.live.rtmpUrl, streamKey: await this.live.streamKey(auth.user.id) } : null,
+      encoder: this.config.live.rtmpUrl && premium ? { server: this.config.live.rtmpUrl, streamKey: await this.live.streamKey(auth.user.id), protocol: this.config.live.rtmpUrl.startsWith('rtmps:') ? 'RTMPS' : 'RTMP' } : null,
       past: past.map((p) => ({ id: p.id, title: p.title, startedAt: p.startedAt, endedAt: p.endedAt, peakViewers: p.peakViewers, replayVideoId: p.replayVideoId })),
     };
   }
 
   @Patch('hub/live')
+  @Header('Cache-Control', 'private, no-store')
   @RequireAuth()
   @ApiOperation({ summary: 'Change my stream\'s settings: title, description, who can find it, schedule, chat, live captions and the replay' })
   async setTitle(@CurrentAuth() auth: AuthContext, @Body() body: LiveSettingsDto) {
     const s = await this.attempt(() => this.live.mine(auth.user.id));
     const data: Prisma.LiveStreamUpdateInput = {};
-    if (body.title?.trim()) data.title = body.title.trim();
+    if (body.title !== undefined) {
+      if (!body.title.trim()) throw new BadRequestException('Enter a stream title.');
+      data.title = body.title.trim();
+    }
     if (body.description !== undefined) data.description = body.description.trim() || null;
     if (body.visibility) data.visibility = body.visibility;
     if (body.scheduledFor !== undefined) {
       const at = body.scheduledFor ? new Date(body.scheduledFor) : null;
-      if (at && (at.getTime() < Date.now() - 60_000 || at.getTime() > Date.now() + 90 * 86_400_000)) throw new BadRequestException('Choose a time in the next 90 days.');
+      const unchanged = at?.getTime() === s.scheduledFor?.getTime();
+      if (at && !unchanged && (at.getTime() < Date.now() - 60_000 || at.getTime() > Date.now() + 90 * 86_400_000)) throw new BadRequestException('Choose a time in the next 90 days.');
       data.scheduledFor = at;
     }
     if (body.chatMode) data.chatMode = body.chatMode;
@@ -122,12 +126,13 @@ export class LiveController {
   }
 
   @Post('hub/live/key')
+  @Header('Cache-Control', 'private, no-store')
   @RequireAuth()
   @HttpCode(200)
   @ApiOperation({ summary: 'Make a new encoder key (the old one stops working)' })
   async resetKey(@CurrentAuth() auth: AuthContext) {
     if (!hasPremiumAccess(auth.user)) throw new ForbiddenException('Live Studio is part of Premium.');
-    return { streamKey: await this.live.streamKey(auth.user.id, true) };
+    return { streamKey: await this.attempt(() => this.live.streamKey(auth.user.id, true)) };
   }
 
   @Post('hub/live/end')
@@ -136,6 +141,10 @@ export class LiveController {
   @ApiOperation({ summary: 'End my stream (encoder streams end by themselves when the encoder stops)' })
   async end(@CurrentAuth() auth: AuthContext) {
     const s = await this.attempt(() => this.live.mine(auth.user.id));
+    // Revoke reconnects too: otherwise an encoder can immediately start a new broadcast with its old key.
+    if (s.status === 'LIVE' && s.source === 'rtmp') {
+      await this.prisma.channel.update({ where: { id: s.channelId }, data: { liveStreamKey: newStreamKey() } });
+    }
     if (!(await this.live.stopBrowser(s.id))) await endLive(this.prisma, s.id);
     return { ended: true };
   }
@@ -147,9 +156,9 @@ export class LiveController {
   @Post('live/rtmp/publish')
   @Webhook()
   @ApiOperation({ summary: 'nginx-rtmp on_publish: the encoder\'s key is checked; the stream is renamed to its id (never the key) so the key never appears in public addresses' })
-  async rtmpPublish(@Query('secret') secret: string, @Body() body: RtmpDto, @Res() res: Response) {
+  async rtmpPublish(@Query('secret') secret: string, @Body() body: Record<string, unknown>, @Res() res: Response) {
     this.checkSecret(secret);
-    const key = body.name ?? '';
+    const { name: key } = encoderCallback(body);
     const ch = key ? await this.prisma.channel.findUnique({ where: { liveStreamKey: key }, include: { user: true } }) : null;
     if (!ch || ch.user.status !== 'ACTIVE') return res.status(403).send('unknown key');
     try {
@@ -157,16 +166,34 @@ export class LiveController {
       await this.live.goLive(ch.user, s.id, 'rtmp');
       // A 3xx answer makes nginx-rtmp publish under the name in Location: the stream id.
       return res.redirect(302, s.id);
-    } catch (e) { return res.status(403).send(e instanceof LiveError ? e.message : 'refused'); }
+    } catch (e) {
+      if (!(e instanceof LiveError)) throw e;
+      return res.status(403).send(e.message);
+    }
+  }
+
+  @Post('live/rtmp/update')
+  @Webhook()
+  @HttpCode(200)
+  @ApiOperation({ summary: 'nginx on_update: disconnect ended broadcasts or accounts without encoder access' })
+  async rtmpUpdate(@Query('secret') secret: string, @Body() body: Record<string, unknown>) {
+    this.checkSecret(secret);
+    const { name } = encoderCallback(body);
+    const s = await this.prisma.liveStream.findFirst({ where: {
+      status: 'LIVE', source: 'rtmp',
+      ...(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name) ? { id: name } : { channel: { liveStreamKey: name } }),
+    }, include: { channel: { include: { user: true } } } });
+    if (!s || s.channel.user.status !== 'ACTIVE' || !hasPremiumAccess(s.channel.user)) throw new ForbiddenException('Broadcast is no longer authorized.');
+    return { ok: true };
   }
 
   @Post('live/rtmp/done')
   @Webhook()
   @HttpCode(200)
   @ApiOperation({ summary: 'nginx-rtmp on_publish_done: the encoder stopped' })
-  async rtmpDone(@Query('secret') secret: string, @Body() body: RtmpDto) {
+  async rtmpDone(@Query('secret') secret: string, @Body() body: Record<string, unknown>) {
     this.checkSecret(secret);
-    const name = body.name ?? '';
+    const { name } = encoderCallback(body);
     // After the rename, nginx reports the stream id; before it, the key.
     const s = /^[0-9a-f-]{36}$/.test(name) ? await this.prisma.liveStream.findUnique({ where: { id: name } })
       : await this.prisma.liveStream.findFirst({ where: { status: 'LIVE', source: 'rtmp', channel: { liveStreamKey: name } } });
