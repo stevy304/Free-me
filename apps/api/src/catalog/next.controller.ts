@@ -6,6 +6,7 @@ import { CurrentAuth } from '../common/auth.guard';
 import type { AuthContext } from '../common/request';
 import { MediaUrls } from '../videos/media-urls';
 import { PUBLIC_VIDEO, videoCard } from './serialize';
+import { coWatched } from './trending';
 
 type Candidate = Video & { channel: Channel; tags: { tagId: string }[] };
 
@@ -13,11 +14,14 @@ const DAY = 86_400_000;
 
 /**
  * Scores one candidate for "what to watch after this one". Pure, so it can be tested on its own.
- * Relevance first (same Space, shared tags, same topic), then what the viewer likes, then popularity and freshness;
- * anything the viewer already finished sinks to the bottom.
+ * Relevance first (same Space, shared tags, same topic, watched by the same people), then what the viewer likes,
+ * then popularity and freshness; anything the viewer already finished sinks to the bottom.
  */
-export function scoreNext(c: Candidate, ctx: { current: Video; tagIds: Set<string>; interests: Set<string>; finished: Set<string>; started: Set<string>; now: number }) {
+export function scoreNext(c: Candidate, ctx: { current: Video; tagIds: Set<string>; interests: Set<string>; finished: Set<string>; started: Set<string>; now: number; coWatch?: Map<string, number> }) {
   let s = 0;
+  // Watched by at least 3 of the same people: 3 → +2, 7 → +3, 15 or more → +4.
+  const together = ctx.coWatch?.get(c.id) ?? 0;
+  if (together) s += Math.min(4, Math.log2(together + 1));
   if (c.channelId === ctx.current.channelId) s += 3;
   const shared = c.tags.filter((t) => ctx.tagIds.has(t.tagId)).length;
   s += Math.min(3, shared) * 2;
@@ -62,7 +66,10 @@ export class NextController {
       const latest = await this.prisma.video.findMany({ where: base, orderBy: { publishedAt: 'desc' }, take, include });
       return { videos: latest.map((v) => videoCard(v, this.urls)) };
     }
-    const tagIds = (await this.prisma.videoTag.findMany({ where: { videoId: id }, select: { tagId: true } })).map((t) => t.tagId);
+    const [tagIds, coWatch] = await Promise.all([
+      this.prisma.videoTag.findMany({ where: { videoId: id }, select: { tagId: true } }).then((rows) => rows.map((t) => t.tagId)),
+      coWatched(this.prisma, id),
+    ]);
     // A few small, indexed queries instead of scoring the whole catalogue.
     const pools = await Promise.all([
       this.prisma.video.findMany({ where: { ...base, channelId: current.channelId }, orderBy: { publishedAt: 'desc' }, take: 10, include }),
@@ -70,6 +77,7 @@ export class NextController {
       current.categoryId ? this.prisma.video.findMany({ where: { ...base, categoryId: current.categoryId }, orderBy: { viewCount: 'desc' }, take: 30, include }) : [],
       this.prisma.video.findMany({ where: { ...base, publishedAt: { gte: new Date(Date.now() - 30 * DAY) } }, orderBy: { viewCount: 'desc' }, take: 20, include }),
       this.prisma.video.findMany({ where: base, orderBy: { publishedAt: 'desc' }, take: 20, include }),
+      coWatch.size ? this.prisma.video.findMany({ where: { ...base, id: { in: [...coWatch.keys()] } }, include }) : [],
     ]);
     const byId = new Map<string, Candidate>();
     for (const v of pools.flat()) byId.set(v.id, v);
@@ -80,7 +88,7 @@ export class NextController {
       this.prisma.watchHistory.findMany({ where: { userId: auth.user.id, videoId: { in: candidates.map((c) => c.id) } }, select: { videoId: true, completed: true } }),
     ]) : [[], []];
     const ctx = {
-      current, tagIds: new Set(tagIds), interests: new Set(interests.map((i) => i.categoryId)), now: Date.now(),
+      current, tagIds: new Set(tagIds), coWatch, interests: new Set(interests.map((i) => i.categoryId)), now: Date.now(),
       finished: new Set(history.filter((h) => h.completed).map((h) => h.videoId)), started: new Set(history.filter((h) => !h.completed).map((h) => h.videoId)),
     };
     const ordered = arrangeNext(candidates.map((c) => Object.assign(c, { score: scoreNext(c, ctx) })), take);

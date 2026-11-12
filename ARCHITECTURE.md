@@ -91,6 +91,12 @@ Viewer: CDN serves pub/<id>/hls/master.m3u8 and its fMP4 segments; private video
 - **Views.** The player reports a view after real watching (30 s, or half of a short video). The API de-duplicates per viewer for 6 hours in Redis and adds up views and watch time; the worker writes the totals to PostgreSQL every 15 seconds.
 - **Processes.** The worker (`apps/api/src/worker.ts`) shares code with the API but runs on the media node. Several instances can run on several servers; failed jobs retry (transcode 3 times, others with backoff), and a file that is not a video fails at once with a clear reason shown in Studio.
 
+## Discovery
+
+- **Next** (`/api/videos/:id/next`): same Space, shared tags and topic, the viewer's topics, popularity and freshness, plus **watched together**: among the latest 500 signed-in viewers of the video, the other videos at least 3 of them watched. A count shared by fewer than 3 people is never used, so no one's own history can be read from it.
+- **Trending** (`/api/feed/rising?country=RW`, and the home page's Trending shelf): videos of the last 30 days ranked by views in the last two days (`VideoDailyStat`), so a video rising now beats last month's hit. With a country, only creators who chose that country. The home page shows the viewer's country when it has at least 4 such videos, else everywhere.
+- The home page still ranks nothing by the viewer's own watching: picked topics, followed Spaces, trending and recency.
+
 ## Coming in later phases
 
 - **Phase 3:** comments, likes, watch history, playlists, captions (WebVTT), recommendations beyond "latest".

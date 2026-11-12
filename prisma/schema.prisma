@@ -494,6 +494,7 @@ model WatchHistory {
 
   @@unique([userId, videoId])
   @@index([userId, lastWatchedAt])
+  @@index([videoId, lastWatchedAt])
 }
 
 // -------------------------------------------------------------
