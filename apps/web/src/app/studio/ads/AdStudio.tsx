@@ -47,6 +47,9 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
   const [form, setForm] = useState({ businessName: '', country: viewer.profile?.country ?? null as string | null, headline: '', destinationUrl: 'https://', videoId: '', funds: '', days: 7, placements: '', channels: '', target: null as string | null });
   const [creating, setCreating] = useState(false);
   const [paying, setPaying] = useState<Campaign | null>(null);
+  // Add funds: which paid ad, and how much (dollars, as typed).
+  const [topUp, setTopUp] = useState<{ id: string; amount: string } | null>(null);
+  const topUpRef = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -127,6 +130,20 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
   const running = list.campaigns.filter((c) => c.status === 'ACTIVE').length;
   const shown = list.campaigns.reduce((n, c) => n + c.impressions, 0);
   const visits = list.campaigns.reduce((n, c) => n + c.clicks, 0);
+  // Funds: what was paid in, what views have used, and what is left to spend (paid ads only).
+  const paidAds = list.campaigns.filter((c) => c.status !== 'DRAFT' && c.status !== 'REJECTED');
+  const fundable = paidAds.filter((c) => c.cpmCents);
+  const added = paidAds.reduce((n, c) => n + c.totalCents, 0);
+  const spent = paidAds.reduce((n, c) => n + (c.spentCents ?? 0), 0);
+  const left = Math.max(0, added - spent);
+  const topUpAd = topUp ? list.campaigns.find((c) => c.id === topUp.id) ?? null : null;
+  const topUpCents = Math.round(Number(topUp?.amount || 0) * 100);
+  const openTopUp = (c?: Campaign) => {
+    const target = c ?? fundable.find((x) => x.status === 'ACTIVE') ?? fundable[0];
+    if (!target) { setCreating(true); setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); return; }
+    setPaying(null); setTopUp({ id: target.id, amount: String(minimum / 100) });
+    setTimeout(() => topUpRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
 
   return (
     <div className="mx-auto max-w-5xl px-4 pb-16 pt-6 sm:px-6">
@@ -149,11 +166,51 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
         </section>
       ) : (
         <>
-          <dl className="mt-6 grid grid-cols-3 gap-3">
-            {([['Running now', running], ['Times shown', shown], ['Visits to your site', visits]] as const).map(([l, n]) => (
-              <div key={l} className="rounded-2xl border border-line p-4"><dt className="text-[13px] text-muted">{l}</dt><dd className="font-display text-[24px] font-extrabold tabular-nums">{n.toLocaleString(locale)}</dd></div>
-            ))}
-          </dl>
+          <section aria-labelledby="funds-heading" className="mt-6 overflow-hidden rounded-3xl border border-line bg-elevated">
+            <div className="flex flex-wrap items-center gap-4 p-5 sm:p-6">
+              <div className="min-w-0 flex-1">
+                <h2 id="funds-heading" className="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-muted"><Icon.Wallet size={16} />Ad funds</h2>
+                <p className="mt-1 font-display text-[34px] font-extrabold leading-none tabular-nums">{usd(left, locale)}</p>
+                <p className="mt-1.5 text-[14px] text-muted">left to spend · about <b className="text-ink">{Math.floor((left * 1000) / cpm).toLocaleString(locale)} more views</b> at {usd(cpm, locale)} per 1,000</p>
+              </div>
+              <button type="button" onClick={() => openTopUp()} className="flex h-12 items-center gap-2 rounded-2xl bg-brand px-5 text-[15px] font-bold text-on-brand hover:bg-brand-strong"><Icon.Plus size={20} />Add funds</button>
+            </div>
+            <dl className="grid grid-cols-2 border-t border-line sm:grid-cols-4">
+              {([['Added', usd(added, locale)], ['Spent', usd(spent, locale)], ['Times shown', shown.toLocaleString(locale)], ['Visits to your site', visits.toLocaleString(locale)]] as const).map(([l, v], i) => (
+                <div key={l} className={`p-4 sm:px-6 ${i % 2 ? 'border-l border-line' : ''} ${i >= 2 ? 'border-t border-line sm:border-t-0' : ''} ${i === 2 ? 'sm:border-l' : ''}`}><dt className="text-[13px] text-muted">{l}</dt><dd className="font-display text-[20px] font-bold tabular-nums">{v}</dd></div>
+              ))}
+            </dl>
+            {added > 0 && <div className="h-1.5 bg-surface" title={`${Math.round((spent / added) * 100)}% spent`}><div className="h-full bg-brand transition-[width]" style={{ width: `${Math.min(100, (spent / added) * 100)}%` }} /></div>}
+            <p className="border-t border-line bg-surface px-5 py-2.5 text-[13px] text-muted sm:px-6">{running ? `${running} ${running === 1 ? 'ad is' : 'ads are'} running now.` : 'No ad is running right now.'} You pay only for views; funds not used keep running your ad until they are spent.</p>
+          </section>
+
+          {topUp && topUpAd && (
+            <section ref={topUpRef} aria-labelledby="topup-heading" className="mt-6 scroll-mt-24 rounded-3xl border-2 border-brand bg-elevated p-5 sm:p-6">
+              <div className="flex items-start gap-3">
+                <div className="flex-1"><h2 id="topup-heading" className="font-display text-[20px] font-bold">Add funds</h2><p className="text-[14px] text-muted">More views for an ad you already run, at the same daily pace. A finished ad starts again.</p></div>
+                <button type="button" onClick={() => setTopUp(null)} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-xl hover:bg-surface"><Icon.Close size={20} /></button>
+              </div>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <label className="block"><span className="text-[13px] font-semibold">Ad</span>
+                  <select className={`mt-1 ${inputClass}`} value={topUp.id} onChange={(e) => setTopUp({ ...topUp, id: e.target.value })}>
+                    {fundable.map((c) => <option key={c.id} value={c.id}>{c.headline} · {STATUS[c.status][0]}</option>)}
+                  </select>
+                </label>
+                <label className="block"><span className="text-[13px] font-semibold">Amount (US dollars, from {usd(minimum, locale)})</span>
+                  <input type="number" min={minimum / 100} step={1} inputMode="decimal" className={`mt-1 ${inputClass}`} value={topUp.amount} onChange={(e) => setTopUp({ ...topUp, amount: e.target.value })} />
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[7, 15, 30, 50, 100].filter((d) => d * 100 >= minimum).map((d) => (
+                  <button key={d} type="button" onClick={() => setTopUp({ ...topUp, amount: String(d) })} className={`h-9 rounded-full border px-4 text-[13px] font-semibold ${Number(topUp.amount) === d ? 'border-brand bg-brand-soft text-brand' : 'border-line hover:bg-surface'}`}>{usd(d * 100, locale)}</button>
+                ))}
+              </div>
+              <p className="mt-3 text-[15px]"><b className="font-display text-[20px]">{usd(topUpCents, locale)}</b> = about <b>{Math.floor((topUpCents * 1000) / (topUpAd.cpmCents ?? cpm)).toLocaleString(locale)} more views</b> for “{topUpAd.headline}”</p>
+              {topUpCents >= minimum
+                ? <div className="mt-4 max-w-lg"><PayPanel key={topUp.id} usdCents={topUpCents} plans={plans} label="Add funds" onPaid={() => { setTopUp(null); setNotice(`Funds added to “${topUpAd.headline}”.`); void load(); }} start={async (method, phone) => (await api<{ payment: Payment }>(`/ads/campaigns/${topUp.id}/funds`, { body: { method, phone, usdCents: topUpCents } })).payment} /></div>
+                : <p className="mt-3 text-[13px] text-danger">Add at least {usd(minimum, locale)}.</p>}
+            </section>
+          )}
 
           <section className="mt-8" aria-labelledby="ad-videos">
             <div className="flex items-baseline gap-2"><h2 id="ad-videos" className="font-display text-[20px] font-bold">Ad videos</h2><span className="text-[13px] text-muted">{MIN_SECONDS}–{MAX_SECONDS} seconds · only played as ads, never in feeds</span></div>
@@ -270,6 +327,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                     <div className="mt-3 flex flex-wrap gap-2">
                       {c.status === 'DRAFT' && isAdmin && <button type="button" onClick={() => void startFree(c)} className="h-9 rounded-xl border border-brand px-4 text-[13px] font-bold text-brand hover:bg-brand-soft">Start now without payment</button>}
                       {c.status === 'DRAFT' && <><button type="button" onClick={() => setPaying(c)} className="h-9 rounded-xl bg-brand px-4 text-[13px] font-bold text-on-brand">Pay {usd(c.totalCents, locale)}</button><button type="button" onClick={() => void act(c, 'delete')} className="h-9 rounded-xl px-3 text-[13px] font-semibold text-muted hover:bg-surface">Delete</button></>}
+                      {c.cpmCents && c.status !== 'DRAFT' && c.status !== 'REJECTED' && <button type="button" onClick={() => openTopUp(c)} className="flex h-9 items-center gap-1.5 rounded-xl bg-brand px-4 text-[13px] font-bold text-on-brand"><Icon.Plus size={16} />Add funds</button>}
                       {(c.status === 'ACTIVE' || c.status === 'PAUSED') && <button type="button" onClick={() => void act(c, 'pause')} className="h-9 rounded-xl bg-surface px-4 text-[13px] font-semibold hover:bg-surface-hover">{c.status === 'ACTIVE' ? 'Pause' : 'Resume'}</button>}
                     </div>
                   </article>

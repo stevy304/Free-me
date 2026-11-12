@@ -503,3 +503,44 @@ test('ad funds start at $7; a business is checked, then pays for the Verified ba
   expect((await ctx.prisma.businessVerification.findFirstOrThrow()).status).toBe('APPROVED');
   expect((await request(ctx.http).get('/api/channels/bankrw').expect(200)).body.channel).toMatchObject({ isVerified: false, badge: null });
 });
+
+test('Add funds to a paid ad: more views at the same pace, over more days; a finished ad runs again', async () => {
+  const biz = await creator('topup@example.com', 'topup');
+  const ch = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'topup' } });
+  const adVideo = await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Ad', durationSeconds: 15, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', isAd: true } });
+  ctx.app.get(BillingService).invalidate();
+  const created = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ businessName: 'Top Up Ltd', country: 'RW', headline: 'More views', destinationUrl: 'https://topup.example.com', videoId: adVideo.id, budgetUsdCents: 700 }).expect(201)).body.campaign;
+  const pay = { method: 'mtn_momo', phone: '0788000555' };
+  // Funds are added to a paid ad; a draft is paid first.
+  expect((await biz.post(`/api/ads/campaigns/${created.id}/funds`).set('Origin', WEB).send({ ...pay, usdCents: 1400 }).expect(400)).body.message).toContain('Pay for this ad first');
+  const first = (await biz.post(`/api/ads/campaigns/${created.id}/pay`).set('Origin', WEB).send(pay).expect(201)).body.payment;
+  [...momo.values()].at(-1)!.status = 'SUCCESSFUL';
+  await biz.get(`/api/billing/payments/${first.id}`).expect(200);
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  await admin.post(`/api/admin/billing/campaigns/${created.id}/review`).set("Origin", WEB).send({ approve: true }).expect(200);
+  const before = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: created.id } });
+
+  expect((await biz.post(`/api/ads/campaigns/${created.id}/funds`).set('Origin', WEB).send({ ...pay, usdCents: 500 }).expect(400)).body.message).toBe('Add at least $7.');
+  const more = (await biz.post(`/api/ads/campaigns/${created.id}/funds`).set('Origin', WEB).send({ ...pay, usdCents: 1400 }).expect(200)).body.payment;
+  expect(more).toMatchObject({ purpose: 'AD_CAMPAIGN', usdCents: 1400 });
+  // Nothing changes until the payment succeeds.
+  expect(Number((await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: created.id } })).budgetAmountCents)).toBe(700);
+  [...momo.values()].at(-1)!.status = 'SUCCESSFUL';
+  await biz.get(`/api/billing/payments/${more.id}`).expect(200);
+  await biz.get(`/api/billing/payments/${more.id}`).expect(200); // checked twice, added once
+  const view = (await biz.get('/api/ads/campaigns').expect(200)).body.campaigns.find((c: { id: string }) => c.id === created.id);
+  expect(view).toMatchObject({ status: 'ACTIVE', totalCents: 2100, days: 21, viewsBought: 21_000, viewsPerDay: 1000 });
+  const after = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: created.id } });
+  expect(after.endDate.getTime() - before.endDate.getTime()).toBe(14 * 86_400_000);
+  expect(after.deliverUntil!.getTime()).toBeGreaterThan(after.endDate.getTime());
+
+  // A finished ad starts again when funds are added.
+  await ctx.prisma.campaign.update({ where: { id: created.id }, data: { status: 'COMPLETED', endDate: new Date(Date.now() - 86_400_000), deliverUntil: new Date(Date.now() - 1000) } });
+  const again = (await biz.post(`/api/ads/campaigns/${created.id}/funds`).set('Origin', WEB).send({ ...pay, usdCents: 700 }).expect(200)).body.payment;
+  [...momo.values()].at(-1)!.status = 'SUCCESSFUL';
+  await biz.get(`/api/billing/payments/${again.id}`).expect(200);
+  const restarted = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: created.id } });
+  expect(restarted).toMatchObject({ status: 'ACTIVE', budgetAmountCents: 2800n, days: 28 });
+  expect(restarted.endDate.getTime()).toBeGreaterThan(Date.now() + 6 * 86_400_000);
+  expect(restarted.deliverUntil!.getTime()).toBeGreaterThan(restarted.endDate.getTime());
+});

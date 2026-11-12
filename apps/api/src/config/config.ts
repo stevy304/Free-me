@@ -100,6 +100,8 @@ export interface AppConfig {
   workerMetricsHost: string;
   media: MediaConfig;
   safety: SafetyConfig;
+  /** To join monetisation: watch hours in the last 365 days and followers (0: not required). */
+  monetisation: { minWatchHours: number; minFollowers: number };
   /** Who runs the service, shown on the legal pages and in notices (see ENVIRONMENT.md). */
   legal: LegalConfig;
   billing: BillingConfig;
@@ -329,6 +331,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)), feedCacheSeconds: nodeEnv === 'test' && !env.FEED_CACHE_SECONDS ? 0 : count('FEED_CACHE_SECONDS', 60), metricsToken, workerMetricsPort, workerMetricsHost: env.WORKER_METRICS_HOST?.trim() || '127.0.0.1',
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
     media, legal, billing, live,
+    monetisation: { minWatchHours: count('MONETISE_MIN_WATCH_HOURS', 0), minFollowers: count('MONETISE_MIN_FOLLOWERS', 0) },
     safety: {
       scanUrl: env.SAFETY_SCAN_URL?.trim() || null, scanToken: env.SAFETY_SCAN_TOKEN?.trim() || null,
       timeoutMs: Math.max(1000, Number(env.SAFETY_SCAN_TIMEOUT_MS) || 60_000), failClosed: env.SAFETY_SCAN_FAIL_CLOSED === 'true',

@@ -41,6 +41,27 @@ export function adViewLimits(c: Pick<Campaign, 'cpmRateCents' | 'budgetAmountCen
   const total = Number((c.budgetAmountCents * 1000n) / BigInt(c.cpmRateCents));
   return { total, perDay: Math.max(1, Math.floor(total / Math.max(1, c.days))) };
 }
+/**
+ * Adds funds to a paid ad. Days grow with the budget so the daily pace stays the same; a reviewed ad's end and
+ * delivery window move out by those days (from now if it had ended), and a finished ad starts running again.
+ */
+export async function addAdFunds(tx: Prisma.TransactionClient, campaignId: string, amount: bigint) {
+  const c = await tx.campaign.findUnique({ where: { id: campaignId } });
+  if (!c || amount <= 0n) return;
+  const budget = c.budgetAmountCents + amount;
+  const days = c.budgetAmountCents > 0n ? Math.max(c.days, Math.ceil(Number((budget * BigInt(Math.max(1, c.days))) / c.budgetAmountCents))) : Math.max(1, c.days);
+  const extra = (days - c.days) * 86_400_000;
+  const now = Date.now();
+  const reviewed = !!c.reviewedAt;
+  const end = new Date(Math.max(c.endDate.getTime(), now) + extra);
+  const until = new Date(Math.max(c.deliverUntil?.getTime() ?? 0, end.getTime() + Math.max(days, 30) * 86_400_000));
+  await tx.campaign.update({ where: { id: campaignId }, data: {
+    budgetAmountCents: budget, days, dailyRateCents: Math.ceil(Number(budget) / days),
+    ...(reviewed ? { endDate: end, deliverUntil: until } : {}),
+    ...(c.status === 'COMPLETED' && reviewed ? { status: 'ACTIVE' } : {}),
+  } });
+}
+
 /** Revenue (cents) of a campaign's first `views` views: whole cents only, so days add up exactly to the total. */
 export const cpmRevenue = (views: bigint, cpmRateCents: number) => (views * BigInt(cpmRateCents)) / 1000n;
 /** Redis counter of a campaign's ad views on one UTC day. */
@@ -228,7 +249,10 @@ export class Billing {
     } else if (p.purpose === 'PLUS' || p.purpose === 'FAMILY') {
       await this.extendPlan(tx, p.userId, p.purpose === 'PLUS' ? 'plusUntil' : 'familyUntil', p.months ?? 1);
     } else if (p.campaignId) {
-      await tx.campaign.updateMany({ where: { id: p.campaignId, status: 'DRAFT' }, data: { status: 'PENDING_REVIEW' } });
+      // The first payment for an ad sends it to review. Any later payment (Add funds, or a second payment for the same
+      // ad) adds to its budget: more views at the same price, over proportionally more days, so the daily pace stays.
+      const first = await tx.campaign.updateMany({ where: { id: p.campaignId, status: 'DRAFT' }, data: { status: 'PENDING_REVIEW' } });
+      if (!first.count) await addAdFunds(tx, p.campaignId, BigInt(p.usdCents));
     }
   }
 

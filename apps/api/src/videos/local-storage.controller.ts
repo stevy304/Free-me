@@ -56,11 +56,11 @@ export class LocalStorageController {
     this.send(res, p.k, 'private, max-age=3600');
   }
 
-  /** Stand-in CDN for the pub/ prefix. */
+  /** Stand-in CDN for the pub/ prefix: videos, live streams, and profile and Space pictures. */
   @Get('pub/*key')
   pub(@Param('key') key: string | string[], @Res() res: Response) {
     const rel = Array.isArray(key) ? key.join('/') : key;
-    if (!/^(live\/)?[0-9a-f-]{36}\/[\w./-]+$/.test(rel) || rel.includes('..')) throw new NotFoundException();
+    if (!/^((live|profiles|channels)\/)?[0-9a-f-]{36}\/[\w./-]+$/.test(rel) || rel.includes('..')) throw new NotFoundException();
     // A live playlist changes every two seconds.
     this.send(res, `pub/${rel}`, rel.endsWith('.m3u8') ? (rel.startsWith('live/') ? 'no-cache, max-age=1' : 'public, max-age=30') : 'public, max-age=31536000, immutable');
   }

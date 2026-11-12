@@ -39,6 +39,9 @@ class VerificationDto {
   @ApiProperty({ description: 'A phone number we can call to check' }) @IsString() @Length(6, 24) phone!: string;
   @ApiPropertyOptional() @IsOptional() @IsUrl({ protocols: ['https', 'http'], require_protocol: true }) website?: string;
 }
+class FundsDto extends PayDto {
+  @ApiProperty({ description: 'Funds to add, in US cents (at least the minimum ad budget)' }) @IsInt() @Min(100) @Max(100_000_000) usdCents!: number;
+}
 class ImpressionDto { @ApiProperty() @IsUUID() campaignId!: string; @ApiProperty() @IsUUID() videoId!: string }
 class AdEventDto { @ApiProperty({ enum: ['COMPLETE', 'SKIP', 'CLICK'] }) @IsIn(['COMPLETE', 'SKIP', 'CLICK']) type!: string; @ApiProperty() @IsInt() @Min(0) @Max(3_600_000) ms!: number }
 
@@ -177,6 +180,22 @@ export class AdsController {
     const c = await this.own(auth, id);
     if (c.status !== 'DRAFT') throw new BadRequestException('This campaign is already paid.');
     const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'AD_CAMPAIGN', method: body.method, phone: body.phone, campaignId: c.id, usdCents: Number(c.budgetAmountCents), description: 'Free Me ad funds', returnPath: '/studio/ads' }));
+    return { payment: paymentView(p) };
+  }
+
+  @Post('ads/campaigns/:id/funds')
+  @RequireAuth()
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Add funds to a paid ad (running, paused, in review or finished): more views at the same price, delivered over proportionally more days' })
+  async addFunds(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() body: FundsDto) {
+    await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
+    const c = await this.own(auth, id);
+    if (c.status === 'DRAFT') throw new BadRequestException('Pay for this ad first; then you can add more funds.');
+    if (c.status === 'REJECTED') throw new BadRequestException('This ad was not approved. Create a new ad instead.');
+    if (!c.cpmRateCents) throw new BadRequestException('This older ad is priced per day. Create a new ad to keep advertising.');
+    const { adMinBudgetUsdCents: minimum } = await this.billing.settings();
+    if (body.usdCents < minimum) throw new BadRequestException(`Add at least $${(minimum / 100).toFixed(minimum % 100 ? 2 : 0)}.`);
+    const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'AD_CAMPAIGN', method: body.method, phone: body.phone, campaignId: c.id, usdCents: body.usdCents, description: 'Free Me ad funds', returnPath: '/studio/ads' }));
     return { payment: paymentView(p) };
   }
 

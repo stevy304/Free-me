@@ -13,6 +13,7 @@ import { fullDate, timeAgo } from '@/lib/format';
 import type { Viewer } from '@/lib/types';
 import type { SessionRow } from './page';
 import { useShell } from '@/components/shell/ShellContext';
+import { ImageField } from '@/components/ImageField';
 
 function Section({ id, title, intro, children }: { id: string; title: string; intro?: string; children: ReactNode }) {
   return (
@@ -53,6 +54,8 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
   const [channel, setChannel] = useState({ name: c?.name ?? '', description: c?.description ?? '', country: c?.country ?? null, defaultLanguage: c?.defaultLanguage ?? null });
   const [cBusy, setCBusy] = useState(false);
   const [cMsg, setCMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pics, setPics] = useState({ profile: p?.avatarUrl ?? null, avatar: c?.avatarUrl ?? null, banner: c?.bannerUrl ?? null });
+  const setPic = (k: keyof typeof pics) => (url: string | null) => { setPics((x) => ({ ...x, [k]: url })); router.refresh(); };
   const [sessions, setSessions] = useState(initial);
   const [sMsg, setSMsg] = useState<string | null>(null);
   const deviceZone = useMemo(() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return null; } }, []);
@@ -96,6 +99,7 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
         </Section>
 
         <Section id="profile" title="Profile" intro="Your name and picture appear with your comments.">
+          <div className="mb-6"><ImageField label="Profile picture" hint="A square photo works best. JPEG, PNG or WebP." url={pics.profile} endpoint="/me/avatar" shape="round" fallback={profile.displayName || viewer.user.email} onChange={setPic('profile')} /></div>
           <form onSubmit={(e) => { e.preventDefault(); void saveProfile(); }} className="grid gap-5 sm:grid-cols-2">
             <div className="sm:col-span-2"><label htmlFor="dn" className={label}>Display name</label><input id="dn" required maxLength={DISPLAY_NAME_MAX} value={profile.displayName} onChange={(e) => setProfile({ ...profile, displayName: e.target.value })} className={`${inputClass} mt-2`} /></div>
             <div className="sm:col-span-2"><label htmlFor="bio" className={label}>About you</label><textarea id="bio" rows={3} maxLength={BIO_MAX} value={profile.bio} onChange={(e) => setProfile({ ...profile, bio: e.target.value })} className="mt-2 w-full rounded-xl border border-line bg-bg px-3 py-2.5 text-[15px] outline-none focus:border-brand" /></div>
@@ -115,6 +119,10 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
 
         {c && (
           <Section id="channel" title="Space" intro={`Shown on your Space at /@${c.handle}.`}>
+            <div className="mb-6 space-y-6">
+              <ImageField label="Banner" hint="Shown across the top of your Space. A wide picture (6:1, such as 2560 × 427) works best." url={pics.banner} endpoint="/channels/mine/banner" shape="banner" onChange={setPic('banner')} />
+              <ImageField label="Space picture" hint="Shown next to your videos and comments. A square logo or photo works best." url={pics.avatar} endpoint="/channels/mine/avatar" shape="square" fallback={channel.name} onChange={setPic('avatar')} />
+            </div>
             <form onSubmit={(e) => { e.preventDefault(); void saveChannel(); }} className="grid gap-5 sm:grid-cols-2">
               <div className="sm:col-span-2"><label htmlFor="cn" className={label}>Channel name</label><input id="cn" required maxLength={CHANNEL_NAME_MAX} value={channel.name} onChange={(e) => setChannel({ ...channel, name: e.target.value })} className={`${inputClass} mt-2`} /></div>
               <div className="sm:col-span-2"><label htmlFor="cd" className={label}>Description</label><textarea id="cd" rows={5} maxLength={CHANNEL_DESCRIPTION_MAX} value={channel.description} onChange={(e) => setChannel({ ...channel, description: e.target.value })} className="mt-2 w-full rounded-xl border border-line bg-bg px-3 py-2.5 text-[15px] outline-none focus:border-brand" /></div>

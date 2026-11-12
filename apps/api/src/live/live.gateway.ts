@@ -7,6 +7,8 @@ import { LiveError, LiveService } from './live.service';
 import { publish, room } from '../realtime/publish';
 
 const ID = /^[0-9a-f-]{36}$/;
+/** One line of plain text: no control characters, single spaces, at most `max` characters. */
+const clean = (text: string, max: number) => text.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /**
  * Live over the socket: a creator's browser sends its recording in one-second pieces; viewers chat.
@@ -180,6 +182,46 @@ export class LiveGateway implements OnGatewayDisconnect, OnGatewayInit {
     if (!s) return { ok: false };
     publish(room.live(streamId), 'caption', { text: clean, final: final === true, at: Date.now() });
     return { ok: true };
+  }
+
+  /** The host asks a question: `{ streamId, question, options }` (2 to 4 answers). */
+  @SubscribeMessage('live:poll-start')
+  async pollStart(@ConnectedSocket() socket: Socket, @MessageBody() body: unknown) {
+    const { streamId, question, options } = (body ?? {}) as { streamId?: unknown; question?: unknown; options?: unknown };
+    const userId = socket.data.userId as string | undefined;
+    if (!userId || typeof streamId !== 'string' || !ID.test(streamId) || typeof question !== 'string' || !Array.isArray(options)) return { ok: false };
+    const q = clean(question, 120);
+    const answers = options.filter((o): o is string => typeof o === 'string').map((o) => clean(o, 60)).filter(Boolean);
+    if (!q || answers.length < 2 || answers.length > 4 || new Set(answers.map((a) => a.toLowerCase())).size !== answers.length) return { ok: false, error: 'Ask a question with 2 to 4 different answers.' };
+    try { await this.limits.consume(`live:poll:${userId}`, 10, 600); } catch { return { ok: false, error: 'Too many polls. Wait a few minutes.' }; }
+    if (!(await this.hosts(userId, streamId))) return { ok: false, error: 'Only the host can start a poll while live.' };
+    return { ok: true, poll: await this.live.startPoll(streamId, q, answers) };
+  }
+
+  @SubscribeMessage('live:poll-close')
+  async pollClose(@ConnectedSocket() socket: Socket, @MessageBody() body: unknown) {
+    const { streamId } = (body ?? {}) as { streamId?: unknown };
+    const userId = socket.data.userId as string | undefined;
+    if (!userId || typeof streamId !== 'string' || !ID.test(streamId) || !(await this.hosts(userId, streamId))) return { ok: false };
+    return { ok: true, poll: await this.live.closePoll(streamId) };
+  }
+
+  /** A signed-in viewer votes: `{ streamId, pollId, option }`; one vote per account per poll. */
+  @SubscribeMessage('live:poll-vote')
+  async pollVote(@ConnectedSocket() socket: Socket, @MessageBody() body: unknown) {
+    const { streamId, pollId, option } = (body ?? {}) as { streamId?: unknown; pollId?: unknown; option?: unknown };
+    const u = await this.user(socket);
+    if (!u || u.status !== 'ACTIVE') return { ok: false, error: 'Sign in to vote.' };
+    if (typeof streamId !== 'string' || !ID.test(streamId) || typeof pollId !== 'string' || !ID.test(pollId) || typeof option !== 'number') return { ok: false };
+    try { await this.limits.consume(`live:vote:${u.id}`, 20, 60); } catch { return { ok: false, error: 'Slow down a little.' }; }
+    const r = await this.live.vote(streamId, pollId, u.id, option);
+    if (!r) return { ok: false, error: 'Voting has closed.' };
+    return { ok: true, counted: r.counted, poll: r.poll };
+  }
+
+  /** The signed-in owner of a stream that is live now. */
+  private async hosts(userId: string, streamId: string) {
+    return !!(await this.prisma.liveStream.findFirst({ where: { id: streamId, status: 'LIVE', channel: { userId } }, select: { id: true } }));
   }
 
   handleDisconnect(socket: Socket) { this.leaveGuests(socket); this.live.dropSocket(socket.id); }

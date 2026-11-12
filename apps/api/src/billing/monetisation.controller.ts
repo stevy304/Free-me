@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
 import { payoutView } from './payouts';
@@ -9,6 +9,7 @@ import type { AppRequest, AuthContext } from '../common/request';
 import { BillingService, paymentView, premiumView } from './billing.controller';
 import { EARNINGS_CURRENCY, hasPremiumAccess, isPremium, PREMIUM_MONTHS, premiumPriceFor, utcDay } from './billing';
 import { MAX_ADS_PER_VIDEO } from './ads.controller';
+import { APP_CONFIG, type AppConfig } from '../config/config';
 
 class ReviewDto {
   @ApiProperty() @IsBoolean() approve!: boolean;
@@ -27,7 +28,30 @@ class VerificationDto {
 @Controller('hub/monetisation')
 @RequireAuth()
 export class MonetisationController {
-  constructor(private readonly prisma: PrismaService, private readonly billing: BillingService, private readonly audit: AuditService) {}
+  constructor(private readonly prisma: PrismaService, private readonly billing: BillingService, private readonly audit: AuditService, @Inject(APP_CONFIG) private readonly config: AppConfig) {}
+
+  /**
+   * Watch hours, views and followers of a Space: the last 365 and 28 days, from the daily stats (views and watch time
+   * are counted by the player's heartbeats, checked against real time). Also what joining needs, if anything.
+   */
+  private async audience(ch: { id: string; subscriberCount: number }) {
+    const today = utcDay(new Date());
+    const from365 = new Date(today.getTime() - 364 * 86_400_000);
+    const from28 = new Date(today.getTime() - 27 * 86_400_000);
+    const [r] = await this.prisma.$queryRaw<Array<{ w365: bigint | null; w28: bigint | null; v365: bigint | null; v28: bigint | null; wToday: bigint | null }>>`
+      SELECT SUM(s."watchSeconds")::bigint AS w365, SUM(s."watchSeconds") FILTER (WHERE s."day" >= ${from28.toISOString().slice(0, 10)}::date)::bigint AS w28,
+             SUM(s."views")::bigint AS v365, SUM(s."views") FILTER (WHERE s."day" >= ${from28.toISOString().slice(0, 10)}::date)::bigint AS v28,
+             SUM(s."watchSeconds") FILTER (WHERE s."day" = ${today.toISOString().slice(0, 10)}::date)::bigint AS "wToday"
+      FROM "VideoDailyStat" s JOIN "Video" v ON v."id" = s."videoId" WHERE v."channelId" = ${ch.id} AND s."day" >= ${from365.toISOString().slice(0, 10)}::date`;
+    const hours = (x: bigint | null | undefined) => Math.floor(Number(x ?? 0n) / 36) / 100; // two decimals
+    const need = this.config.monetisation;
+    const watchHours365 = hours(r?.w365);
+    return {
+      watchHours365, watchHours28: hours(r?.w28), watchHoursToday: hours(r?.wToday), views365: Number(r?.v365 ?? 0n), views28: Number(r?.v28 ?? 0n), followers: ch.subscriberCount,
+      required: { watchHours: need.minWatchHours, followers: need.minFollowers },
+      meetsRequirements: watchHours365 >= need.minWatchHours && ch.subscriberCount >= need.minFollowers,
+    };
+  }
 
   private async channel(auth: AuthContext) {
     const ch = await this.prisma.channel.findUnique({ where: { userId: auth.user.id }, include: { eligibility: true, balance: true } });
@@ -54,6 +78,7 @@ export class MonetisationController {
       earning: !!ch.eligibility?.isEligible && hasPremiumAccess(u),
       balance: { currency: ch.balance?.currency ?? EARNINGS_CURRENCY, availableCents: Number(ch.balance?.confirmedBalanceCents ?? 0n), lifetimeCents: Number(ch.balance?.lifetimeEarningsCents ?? 0n), withdrawnCents: Number(ch.balance?.withdrawnCents ?? 0n), reservedCents: Number(reserved._sum.amountCents ?? 0n), paidCents: Number(paid._sum.amountCents ?? 0n), pendingCents: Number(ch.balance?.pendingBalanceCents ?? 0n) },
       adsShownLast28Days: impressions,
+      audience: await this.audience(ch),
       earnings: ledger.map((l) => ({ id: l.id, kind: l.sourceType, amountCents: Number(l.creatorShareCents), day: l.referenceId, description: l.description, at: l.createdAt })),
       payouts: payouts.map(payoutView),
       programme: { maxAdsPerVideo: MAX_ADS_PER_VIDEO, payoutMinimumUsdCents: b.payoutMinUsdCents, premiumUsdCents: premiumPriceFor(b, (await this.prisma.profile.findUnique({ where: { userId: u.id }, select: { country: true } }))?.country) },
@@ -89,8 +114,14 @@ export class MonetisationController {
     if (!hasPremiumAccess(u)) throw new ForbiddenException('Monetisation is part of Premium. Upgrade to start earning from ads on your videos.');
     const strikes = await this.prisma.video.count({ where: { channelId: ch.id, takenDownAt: { gt: new Date(Date.now() - 90 * 86_400_000) } } });
     if (strikes) throw new ForbiddenException('A video of yours was removed in the last 90 days. You can join once 90 days have passed since the last removal.');
+    const a = await this.audience(ch);
+    if (!a.meetsRequirements) {
+      const missing = [a.watchHours365 < a.required.watchHours ? `${a.required.watchHours.toLocaleString('en')} watch hours in the last 12 months (you have ${a.watchHours365.toLocaleString('en')})` : null,
+        ch.subscriberCount < a.required.followers ? `${a.required.followers.toLocaleString('en')} followers (you have ${ch.subscriberCount.toLocaleString('en')})` : null].filter(Boolean);
+      throw new ForbiddenException(`To join, a Space needs ${missing.join(' and ')}.`);
+    }
     await this.prisma.creatorEligibility.upsert({
-      where: { channelId: ch.id }, create: { channelId: ch.id, isEligible: true, appliedForMonetization: true, approvedAt: new Date(), subscribersRequired: 0, watchHoursRequired: 0 },
+      where: { channelId: ch.id }, create: { channelId: ch.id, isEligible: true, appliedForMonetization: true, approvedAt: new Date(), subscribersRequired: a.required.followers, watchHoursRequired: a.required.watchHours },
       update: { isEligible: true, appliedForMonetization: true, approvedAt: new Date(), rejectionReason: null },
     });
     await this.audit.record({ userId: auth.user.id, action: 'MONETISATION_JOINED', entityType: 'Channel', entityId: ch.id, req });

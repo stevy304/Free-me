@@ -199,9 +199,9 @@ See MONETISATION.md for how the money is shared.
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/live` | Spaces live now: `{ id, title, status, startedAt, playbackUrl (HLS), viewers, channel }` |
-| GET | `/live/:id` | One stream (`status` IDLE, LIVE or ENDED; `replayVideoId` once its recording is published) and the recent chat |
+| GET | `/live/:id` | One stream (`status` IDLE, LIVE or ENDED; `replayVideoId` once its recording is published; `latencyMode`; the current `poll` while live) and the recent chat |
 | GET | `/hub/live` 🔒 | My Live Studio: `premium`, the current `stream`, `encoder: { server, streamKey }` (Premium, when RTMP is set up), past streams (Premium) |
-| PATCH | `/hub/live` 🔒 | `{ title }` |
+| PATCH | `/hub/live` 🔒 | Stream settings: `{ title, description, visibility, scheduledFor, chatMode, slowModeSeconds, captionsEnabled, saveReplay, replayVisibility, latencyMode }` (`latencyMode`: `normal`, about 10–15 s behind, or `low`, about 4–6 s) |
 | POST | `/hub/live/key` 🔒 | A new encoder key (the old one stops working) |
 | POST | `/hub/live/end` 🔒 | End my stream |
 | POST | `/live/rtmp/publish?secret=` | nginx-rtmp `on_publish` (form `name` = the encoder's key): 302 to the stream id, or 403 |
@@ -221,6 +221,10 @@ Connect to path `/api/socket` (WebSocket transport, no trailing slash). Signed-i
 | send | `live:start` / `live:stop` | stream id (signed-in owner with a Space) → `{ ok, error? }` |
 | send | `live:chunk` | `[streamId, ArrayBuffer]`: one piece of the browser's MediaRecorder recording |
 | send | `live:chat` | `{ streamId, text }` (signed in, up to 200 characters, 10 lines in 20 s) |
+| send | `live:poll-start` | `{ streamId, question, options }`: the host, while live; 2 to 4 different answers; replaces any earlier poll → `{ ok, poll }` |
+| send | `live:poll-vote` | `{ streamId, pollId, option }` (signed in; one vote per account per poll) → `{ ok, counted, poll }` |
+| send | `live:poll-close` | `{ streamId }`: the host ends voting → `{ ok, poll }` |
+| receive (`live:<id>`) | `poll` | `{ poll: { id, question, options, votes, total, open } }`, at most four times a second while votes arrive |
 
 ## Notifications 🔒
 

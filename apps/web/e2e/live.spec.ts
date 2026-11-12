@@ -126,14 +126,27 @@ test('a Premium creator goes live from the browser; a viewer watches, chats and 
   if (supportsH264) {
     const restoredAt = await playbackTime();
     await expect.poll(playbackTime, { timeout: 20_000 }).toBeGreaterThan(restoredAt + 1);
-    const quality = viewer.getByLabel('Quality', { exact: true });
+    // The live player's quality menu (controls show while the pointer is over the picture).
+    const quality = viewer.getByRole('button', { name: 'Quality', exact: true });
+    const pick = async (label: string) => {
+      await viewer.getByLabel('Live video').hover();
+      await quality.click();
+      await viewer.getByRole('menuitemradio', { name: label, exact: true }).click();
+    };
     const height = () => video.evaluate((element) => (element as HTMLVideoElement).videoHeight);
-    await quality.selectOption({ label: '360p' });
+    await pick('360p');
     await expect.poll(height, { timeout: 30_000 }).toBe(360);
-    await quality.selectOption({ label: '720p' });
+    await pick('720p');
     await expect.poll(height, { timeout: 30_000 }).toBe(720);
-    await quality.selectOption('-1');
-    await expect(quality).toHaveValue('-1');
+    await pick('Auto');
+    await expect(quality).toHaveText(/^Auto/);
+    // The live-edge control: "Live" at the newest pieces; "Go to live" when behind (after the outage and quality
+    // switches above the player may be), which brings the viewer back to the edge.
+    await viewer.getByLabel('Live video').hover();
+    const edge = viewer.getByRole('button', { name: /^(Live$|Go to live)/ });
+    await expect(edge).toBeVisible();
+    if ((await edge.getAttribute('aria-label')) !== 'Live') await edge.click();
+    await expect(viewer.getByRole('button', { name: 'Live', exact: true })).toBeVisible({ timeout: 15_000 });
   }
   expect(viewer.url()).toBe(watchPage);
 

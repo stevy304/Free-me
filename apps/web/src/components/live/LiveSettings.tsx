@@ -5,11 +5,12 @@ import * as Icon from '@/components/icons';
 import { inputClass } from '@/components/Pickers';
 import { api } from '@/lib/client-api';
 import { getSocket } from '@/lib/realtime';
+import { HostPoll } from './LivePoll';
 
 export interface LiveStreamSettings {
   id: string; title: string; description: string | null; visibility: 'PUBLIC' | 'UNLISTED'; scheduledFor: string | null;
   chat: { mode: 'everyone' | 'followers' | 'off'; slowModeSeconds: number }; captionsEnabled: boolean;
-  saveReplay?: boolean; replayVisibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+  saveReplay?: boolean; replayVisibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE'; latencyMode?: 'normal' | 'low';
 }
 
 const SLOW = [0, 5, 10, 30, 60, 120];
@@ -21,12 +22,16 @@ const toLocalInput = (iso: string | null) => { if (!iso) return ''; const d = ne
  * works (everyone, followers only or off; slow mode), live captions, and what happens to the recording. Title and
  * chat rules can change during the stream; viewers see the change at once.
  */
-export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSettings; live: boolean; onSaved: () => void }) {
+/** `narrow`: one column, for a side panel (two columns would cut the choices short). */
+/** `tools`: also show live captions and polls (off where a page shows them in their own place). */
+export function LiveSettings({ stream, live, onSaved, narrow = false, tools = true }: { stream: LiveStreamSettings; live: boolean; onSaved: () => void; narrow?: boolean; tools?: boolean }) {
   const [f, setF] = useState(() => ({
     description: stream.description ?? '', visibility: stream.visibility, scheduledFor: toLocalInput(stream.scheduledFor),
     chatMode: stream.chat.mode, slowModeSeconds: stream.chat.slowModeSeconds, captionsEnabled: stream.captionsEnabled,
-    saveReplay: stream.saveReplay ?? true, replayVisibility: stream.replayVisibility ?? 'PRIVATE',
+    saveReplay: stream.saveReplay ?? true, replayVisibility: stream.replayVisibility ?? 'PRIVATE', latencyMode: stream.latencyMode ?? 'normal',
   }));
+  // Full-width fields span both columns; in the narrow (one-column) layout a span would add a second column.
+  const span = narrow ? '' : 'sm:col-span-2';
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,8 +51,8 @@ export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSett
   return (
     <section aria-labelledby="live-settings" className="rounded-3xl border border-line bg-elevated p-4 sm:p-5">
       <h2 id="live-settings" className="flex items-center gap-2 font-display text-[18px] font-bold"><Icon.Settings size={20} />Stream settings</h2>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <label className="block sm:col-span-2"><span className={label}>Description</span>
+      <div className={`mt-3 grid gap-3 ${narrow ? '' : 'sm:grid-cols-2'}`}>
+        <label className={`block ${span}`}><span className={label}>Description</span>
           <textarea className={`mt-1 min-h-[84px] ${inputClass} py-2`} value={f.description} maxLength={2000} onChange={(e) => set('description', e.target.value)} placeholder="What this stream is about, links, who is on" />
         </label>
         <label className="block"><span className={label}>Who can find it</span>
@@ -58,6 +63,13 @@ export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSett
         </label>
         <label className="block"><span className={label}>Planned start (optional)</span>
           <input type="datetime-local" className={`mt-1 ${inputClass}`} value={f.scheduledFor} onChange={(e) => set('scheduledFor', e.target.value)} disabled={live} />
+        </label>
+        <label className={`block ${span}`}><span className={label}>Delay for viewers</span>
+          <select className={select} value={f.latencyMode} onChange={(e) => set('latencyMode', e.target.value as typeof f.latencyMode)} disabled={live}>
+            <option value="normal">Normal: about 10–15 seconds, steadiest on weak connections</option>
+            <option value="low">Low latency: about 4–6 seconds, for talking with chat</option>
+          </select>
+          {live && <span className="mt-1 block text-[12px] text-muted">Change it before you go live.</span>}
         </label>
         <label className="block"><span className={label}>Who can chat</span>
           <select className={select} value={f.chatMode} onChange={(e) => set('chatMode', e.target.value as typeof f.chatMode)}>
@@ -71,7 +83,7 @@ export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSett
             {SLOW.map((s) => <option key={s} value={s}>{s ? `One message every ${s < 60 ? `${s} seconds` : `${s / 60} minute${s > 60 ? 's' : ''}`}` : 'Off'}</option>)}
           </select>
         </label>
-        <label className="flex items-start gap-3 rounded-2xl bg-surface p-3 sm:col-span-2">
+        <label className={`flex items-start gap-3 rounded-2xl bg-surface p-3 ${span}`}>
           <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--brand)]" checked={f.captionsEnabled} onChange={(e) => set('captionsEnabled', e.target.checked)} />
           <span><span className={label}>Live captions</span><span className="block text-[13px] text-muted">Viewers can turn on captions of what you say. Start them below once you are live.</span></span>
         </label>
@@ -92,7 +104,8 @@ export function LiveSettings({ stream, live, onSaved }: { stream: LiveStreamSett
         <button type="button" disabled={busy} onClick={() => void save()} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-5 text-[14px] font-bold text-on-brand disabled:opacity-50">{busy && <Icon.Spinner size={16} className="animate-spin" />}Save settings</button>
         {note && <span role="status" className="text-[13px] font-semibold text-brand">{note}</span>}
       </div>
-      {f.captionsEnabled && <HostCaptions streamId={stream.id} live={live} />}
+      {tools && f.captionsEnabled && <HostCaptions streamId={stream.id} live={live} />}
+      {tools && <HostPoll streamId={stream.id} live={live} />}
     </section>
   );
 }
@@ -105,7 +118,7 @@ type Recognition = { lang: string; continuous: boolean; interimResults: boolean;
  * sent to viewers as caption lines. Chrome and Edge support it (they use their speech service for this). The
  * recording also gets automatic English captions afterwards, from the media server.
  */
-function HostCaptions({ streamId, live }: { streamId: string; live: boolean }) {
+export function HostCaptions({ streamId, live }: { streamId: string; live: boolean }) {
   const [on, setOn] = useState(false);
   const [lang, setLang] = useState('en-US');
   const [last, setLast] = useState('');

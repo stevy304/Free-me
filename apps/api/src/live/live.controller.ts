@@ -31,6 +31,7 @@ class LiveSettingsDto {
   @ApiPropertyOptional() @ValidateIf((_, value) => value !== undefined) @IsBoolean() captionsEnabled?: boolean;
   @ApiPropertyOptional() @ValidateIf((_, value) => value !== undefined) @IsBoolean() saveReplay?: boolean;
   @ApiPropertyOptional({ enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'] }) @ValidateIf((_, value) => value !== undefined) @IsIn(['PUBLIC', 'UNLISTED', 'PRIVATE']) replayVisibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+  @ApiPropertyOptional({ enum: ['normal', 'low'], description: 'normal: about 10-15 s behind, steadiest; low: about 4-6 s, for talking with chat' }) @ValidateIf((_, value) => value !== undefined) @IsIn(['normal', 'low']) latencyMode?: 'normal' | 'low';
 }
 @ApiTags('live')
 @Controller()
@@ -43,7 +44,8 @@ export class LiveController {
       id: s.id, title: s.title, status: s.status === 'PREVIEW' ? 'IDLE' : s.status, source: s.status === 'PREVIEW' ? null : s.source, startedAt: s.startedAt, endedAt: s.endedAt, playbackUrl: this.playback(s), viewers: s.status === 'LIVE' ? await this.live.viewers(s.id) : 0,
       peakViewers: s.peakViewers, replayVideoId: s.replayVideoId,
       description: s.description, visibility: s.visibility, scheduledFor: s.scheduledFor,
-      chat: { mode: s.chatMode, slowModeSeconds: s.slowModeSeconds }, captionsEnabled: s.captionsEnabled,
+      chat: { mode: s.chatMode, slowModeSeconds: s.slowModeSeconds }, captionsEnabled: s.captionsEnabled, latencyMode: s.latencyMode,
+      poll: s.status === 'LIVE' ? await this.live.poll(s.id) : null,
       channel: { handle: s.channel.handle, name: s.channel.name, avatarUrl: s.channel.avatarUrl, isVerified: s.channel.isVerified },
     };
   }
@@ -149,12 +151,13 @@ export class LiveController {
     if (body.chatMode) data.chatMode = body.chatMode;
     if (body.slowModeSeconds !== undefined) data.slowModeSeconds = body.slowModeSeconds;
     if (body.captionsEnabled !== undefined) data.captionsEnabled = body.captionsEnabled;
+    if (body.latencyMode) data.latencyMode = body.latencyMode;
     if (body.saveReplay !== undefined) data.saveReplay = body.saveReplay;
     if (body.replayVisibility) data.replayVisibility = body.replayVisibility;
     if (Object.keys(data).length) {
       const next = await this.prisma.liveStream.update({ where: { id: s.id }, data });
       // Viewers see title, description and chat rules change at once.
-      publish(room.live(s.id), 'settings', { title: next.title, description: next.description, chat: { mode: next.chatMode, slowModeSeconds: next.slowModeSeconds }, captionsEnabled: next.captionsEnabled });
+      publish(room.live(s.id), 'settings', { title: next.title, description: next.description, chat: { mode: next.chatMode, slowModeSeconds: next.slowModeSeconds }, captionsEnabled: next.captionsEnabled, latencyMode: next.latencyMode });
       if (data.title) publish(room.live(s.id), 'title', { title: next.title });
     }
     return this.studio(auth);
