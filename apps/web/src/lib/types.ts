@@ -14,10 +14,12 @@ export interface Viewer {
 }
 
 export interface PayAccount { label: string; number: string; name: string }
-export interface PayMethod { name: 'mtn_momo' | 'flutterwave' | 'manual'; currency: string; perUsd: number; accounts?: PayAccount[]; instructions?: string | null }
-export interface Plans { premium: { usdCents: number; months: number[]; standardUsdCents?: number; country?: string | null }; creatorPass?: { usdCents: number; months: number[]; freeVideos: number }; ads: { usdCentsPerDay: number; usdCentsPer1000Views?: number; viewsPerDay?: number; maxAdsPerVideo: number }; payoutMinimumUsdCents: number; methods: PayMethod[] }
+export interface PayMethod { name: 'mtn_momo' | 'airtel_money' | 'flutterwave' | 'manual'; currency: string; perUsd: number; accounts?: PayAccount[]; instructions?: string | null }
+/** One plan's price for this viewer (per month; the Creator pass per year) and the lengths on sale. */
+export interface PlanPrice { usdCents: number; months: number[]; standardUsdCents?: number; country?: string | null }
+export interface Plans { premium: PlanPrice; plus?: PlanPrice; family?: PlanPrice & { seats: number }; creatorPass?: PlanPrice & { freeVideos: number; videosPerYear?: number }; ads: { usdCentsPerDay: number; usdCentsPer1000Views?: number; viewsPerDay?: number; maxAdsPerVideo: number }; payoutMinimumUsdCents: number; methods: PayMethod[] }
 export interface Payment {
-  id: string; purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_PASS'; method: PayMethod['name']; status: 'PENDING' | 'SUCCEEDED' | 'FAILED'; amount: string; currency: string; usdCents: number;
+  id: string; purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_PASS' | 'PLUS' | 'FAMILY'; method: PayMethod['name']; status: 'PENDING' | 'SUCCEEDED' | 'FAILED'; amount: string; currency: string; usdCents: number;
   months: number | null; campaignId: string | null; checkoutUrl: string | null; failureReason: string | null; createdAt: string; paidAt: string | null;
   /** Manual payments: the code to write in the transfer, and the transaction id the payer gave. */
   reference?: string | null; payerReference?: string | null;

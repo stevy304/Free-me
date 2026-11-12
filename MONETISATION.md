@@ -1,16 +1,35 @@
 # How Free Me makes money, and how creators are paid
 
+## Plans
+
+Watching is free. Plans are **paid ahead** (mobile money cannot renew by itself), for 1, 3, 6 or 12 months (the Creator pass for 1 or 2 years), with MTN MoMo, Airtel Money, a card (Flutterwave) or by hand. Paying early adds the time to the end, and a reminder email goes out three days before a plan ends. Prices are in US cents, with a price per country where incomes differ. The defaults below are set in ENVIRONMENT.md and can be changed by administrators in Administration → Money.
+
+| Plan | Rwanda (VAT included) | Elsewhere | For | Includes |
+| --- | --- | --- | --- | --- |
+| **Free** | 0 | 0 | Everyone | Everything, with short ads, up to 720p; 3 uploads to try creating |
+| **Creator pass** | about RWF 2,900 a year | $2 a year | New creators | Up to 50 uploads in any 365 days; videos stay online if it ends |
+| **Plus** | RWF 2,500 a month | $3 | Viewers | No ads, every quality; half goes to the creators they watch |
+| **Family & TV** | RWF 9,000 a month | $12 | Homes | Plus for up to 4 people (the holder adds members by email) |
+| **Pro** (Premium) | RWF 6,000 a month | $10 | Creators | Gold Premium badge, ad earnings, Live, unlimited uploads, Plus included |
+| **Business** | on request | on request | Bars, hotels, buses, churches, schools, NGOs | Public screening, private hosting, Verified business badge (contract; not sold in the app) |
+
+**Round prices.** Mobile money charges in francs are rounded to the nearest RWF 100 (RWF 2,494 becomes 2,500), the same on the page and in the charge.
+
+**Members pay creators too.** Plus and Family members see no ads, so creators would earn nothing from them. Each day, `SUBSCRIPTION_CREATOR_SHARE_PERCENT` (50%) of the Plus and Family money of that day (each payment spread over the days it pays for) is shared between monetised Spaces by the watch time members gave their videos that day. It appears in Creator Hub as "Plus and Family members' share". The share is of what members pay, VAT included: lower the percentage if you want to share the amount after VAT (for example 42% of the price is about 50% after 18% VAT).
+
+**Prices in Rwanda.** The defaults compare with what people already pay: Canal+ from RWF 5,000 a month, Netflix Mobile about $3. A Plus member who watches 30 minutes a day would bring only about $0.06 a month in ads, so RWF 2,500 is far more than ads earn from them. Check exchange rates (`MOMO_RATE_PER_USD`) and the country prices every few months.
+
 Free Me has two sources of income, both paid up front with MTN MoMo or a card. Prices are the operator's to change (ENVIRONMENT.md → Payments).
 
 | Income | Price | Who pays | What they get |
 | --- | --- | --- | --- |
 | **Premium** | $10 a month (3, 6 and 12 months too) | Viewers and creators | The gold **Premium badge** next to their name, the Creator pass, monetisation (earning from ads), Live Studio, the Premium dashboard |
-| **Creator pass** | $2 a month (3, 6 and 12 months too) | Creators | Uploading after the free uploads (3 per Space by default). Pays for encoding (about $1) and storage (about $1) |
+| **Creator pass** | $2 a year (2 years too) | Creators | Uploading after the free uploads (3 per Space by default), up to 50 a year. Pays for encoding and storage |
 | **Video ads** | $3 a day, at $1 per 1,000 views (up to 3,000 views a day) | Businesses | A 5–90 second video ad playing before videos of monetised creators, in the countries they choose, with a "Visit" button; uploaded and run from **Ad Studio** (`/studio/ads`, part of Premium), with results (shown, visits, rate) there. Ad videos are kept apart from the Space's videos and never appear in feeds or search. Viewers see the ad full-frame before the video starts, with a small *Sponsored* label, the business card with *Visit*, and *Skip* after 5 seconds; the video does not start until the ad is known (at most 1.5 seconds). Each campaign is reviewed by an administrator before it runs |
 
 ## Creator pass
 
-Every Space can upload **3 videos free** (`CREATOR_FREE_VIDEOS`), so anyone can try Free Me before paying. After that, uploading needs the **Creator pass**, $2 a month (`CREATOR_PASS_PRICE_USD_CENTS`), paid like Premium (MoMo, card or manual). Premium includes it.
+Every Space can upload **3 videos free** (`CREATOR_FREE_VIDEOS`), so anyone can try Free Me before paying. After that, uploading needs the **Creator pass**, $2 a **year** (`CREATOR_PASS_PRICE_USD_CENTS`), for up to 50 uploads in any 365 days (`CREATOR_PASS_VIDEOS_PER_YEAR`; deleting a video frees its place). Pro (Premium) includes it, with no limit.
 
 - **Only new uploads need it.** Managing videos, earnings, removal notices and counter-notices in Creator Hub stays free. Published videos stay online when a pass ends: viewers and the creator's audience never lose them. Removing videos because a creator stopped paying would hurt viewers and Free Me's reputation more than it saves.
 - **Deleting a draft does not give a free upload back** (`Channel.uploadCount` counts uploads ever started).

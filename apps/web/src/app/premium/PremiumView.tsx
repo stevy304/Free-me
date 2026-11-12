@@ -18,9 +18,10 @@ const PERKS = [
   { icon: Icon.Wallet, title: 'Earn from your videos', text: 'Eligible creators share 60% of daily ad revenue based on the ads shown on their videos.' },
   { icon: Icon.Live, title: 'Live Studio', text: 'Stream with OBS or a hardware encoder, and manage your broadcast from Live Studio.' },
   { icon: Icon.Hub, title: 'Premium dashboard', text: 'Your membership, earnings, withdrawals and tools in one place.' },
+  { icon: Icon.Upload, title: 'Unlimited uploads and Plus', text: 'No yearly upload limit, every quality at once, and Plus (no ads) included.' },
 ] as const;
 
-const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Premium', AD_CAMPAIGN: 'Ad campaign', CREATOR_PASS: 'Creator pass' };
+const PURPOSE: Record<Payment['purpose'], string> = { PREMIUM: 'Premium', AD_CAMPAIGN: 'Ad campaign', CREATOR_PASS: 'Creator pass', PLUS: 'Plus', FAMILY: 'Family & TV' };
 const STATUS: Record<Payment['status'], string> = { PENDING: 'Waiting', SUCCEEDED: 'Paid', FAILED: 'Not paid' };
 
 export function PremiumView({ viewer }: { viewer: Viewer }) {
@@ -157,7 +158,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
                   <tr key={p.id}>
                     <td className="px-4 py-3 text-muted">{new Date(p.createdAt).toLocaleDateString(locale)}</td>
                     <td className="px-4 py-3">{PURPOSE[p.purpose]}{p.months ? `, ${p.months} ${p.months === 1 ? 'month' : 'months'}` : ''}</td>
-                    <td className="px-4 py-3">{p.method === 'mtn_momo' ? 'MTN MoMo' : 'Card'}</td>
+                    <td className="px-4 py-3">{p.method === 'mtn_momo' ? 'MTN MoMo' : p.method === 'airtel_money' ? 'Airtel Money' : p.method === 'manual' ? 'Sent by hand' : 'Card'}</td>
                     <td className="px-4 py-3 tabular-nums">{money(p.amount, p.currency, locale)}</td>
                     <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${p.status === 'SUCCEEDED' ? 'bg-brand-soft text-brand' : p.status === 'FAILED' ? 'bg-danger/10 text-danger' : 'bg-surface'}`} title={p.failureReason ?? undefined}>{STATUS[p.status]}</span></td>
                   </tr>

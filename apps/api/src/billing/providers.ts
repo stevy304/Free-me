@@ -37,6 +37,16 @@ const major = (minor: bigint, currency: string) => {
   const unit = 10n ** BigInt(d);
   return `${minor / unit}.${(minor % unit).toString().padStart(d, '0')}`;
 };
+/**
+ * A dollar price in a local currency, as people expect to pay it: whole units, and amounts of 1,000 or more rounded
+ * to the nearest 100 (RWF 2,494 → 2,500, 6,003 → 6,000). Returned in minor units. The web app rounds the same way.
+ */
+export function localCharge(usdCents: number, perUsd: number, currency: string): bigint {
+  const d = currencyDigits(currency);
+  const exact = (usdCents / 100) * perUsd;
+  const units = d === 0 && exact >= 1000 ? Math.round(exact / 100) * 100 : Math.ceil(exact);
+  return BigInt(units) * 10n ** BigInt(d);
+}
 const toMinor = (amount: number | string, currency: string) => BigInt(Math.round(Number(amount) * 10 ** currencyDigits(currency)));
 
 async function call(url: string, init: RequestInit, what: string) {
@@ -53,11 +63,7 @@ export class MomoProvider implements PaymentProvider {
   constructor(private readonly c: NonNullable<BillingConfig['momo']>) {}
   get currency() { return this.c.currency; }
 
-  charge(usdCents: number) {
-    // Rounded up to a whole unit, so the charge never falls below the dollar price.
-    const d = currencyDigits(this.c.currency);
-    return BigInt(Math.ceil((usdCents / 100) * this.c.perUsd)) * 10n ** BigInt(d);
-  }
+  charge(usdCents: number) { return localCharge(usdCents, this.c.perUsd, this.c.currency); }
 
   private async bearer() {
     if (this.token && this.token.until > Date.now()) return this.token.value;
@@ -114,10 +120,7 @@ export class AirtelProvider implements PaymentProvider {
   constructor(private readonly c: NonNullable<BillingConfig['airtel']>) {}
   get currency() { return this.c.currency; }
 
-  charge(usdCents: number) {
-    const d = currencyDigits(this.c.currency);
-    return BigInt(Math.ceil((usdCents / 100) * this.c.perUsd)) * 10n ** BigInt(d);
-  }
+  charge(usdCents: number) { return localCharge(usdCents, this.c.perUsd, this.c.currency); }
 
   private async bearer() {
     if (this.token && this.token.until > Date.now()) return this.token.value;
@@ -211,10 +214,7 @@ export class ManualProvider implements PaymentProvider {
   readonly name = 'manual' as const;
   constructor(readonly c: ManualConfig) {}
   get currency() { return this.c.currency; }
-  charge(usdCents: number) {
-    const d = currencyDigits(this.c.currency);
-    return this.c.currency === 'USD' ? BigInt(usdCents) : BigInt(Math.ceil((usdCents / 100) * this.c.perUsd)) * 10n ** BigInt(d);
-  }
+  charge(usdCents: number) { return this.c.currency === 'USD' ? BigInt(usdCents) : localCharge(usdCents, this.c.perUsd, this.c.currency); }
   async start() {
     // A short code people can type in a MoMo or bank transfer message.
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

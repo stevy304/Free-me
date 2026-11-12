@@ -87,9 +87,9 @@ test('Plus by Airtel Money: no ads, every quality; it ends with its time', async
   const viewer = await person('viewer@example.com', 'RW');
   await viewer.agent.post('/api/billing/plans/plus').set('Origin', WEB).send({ method: 'airtel_money', phone: '0731234567', months: 5 }).expect(400);
   const pay = (await viewer.agent.post('/api/billing/plans/plus').set('Origin', WEB).send({ method: 'airtel_money', phone: '0731234567', months: 3 }).expect(201)).body.payment;
-  expect(pay).toMatchObject({ purpose: 'PLUS', method: 'airtel_money', usdCents: 516, amount: String(Math.ceil(5.16 * 1450)), currency: 'RWF', months: 3 });
+  expect(pay).toMatchObject({ purpose: 'PLUS', method: 'airtel_money', usdCents: 516, amount: '7500', currency: 'RWF', months: 3 });
   const sent = [...airtel.values()][0];
-  expect(sent.body).toMatchObject({ subscriber: { country: 'RW', currency: 'RWF', msisdn: '731234567' }, transaction: { amount: Math.ceil(5.16 * 1450), country: 'RW', currency: 'RWF' } });
+  expect(sent.body).toMatchObject({ subscriber: { country: 'RW', currency: 'RWF', msisdn: '731234567' }, transaction: { amount: 7500, country: 'RW', currency: 'RWF' } });
   expect(sent.headers).toMatchObject({ 'x-country': 'RW', 'x-currency': 'RWF' });
   expect((await viewer.agent.get(`/api/billing/payments/${pay.id}`).expect(200)).body.payment.status).toBe('PENDING');
   sent.status = 'TS';
@@ -117,7 +117,7 @@ test('Plus by Airtel Money: no ads, every quality; it ends with its time', async
 test('Family & TV: the holder adds up to 3 people; they get Plus while the plan lasts; they can be removed or leave', async () => {
   const holder = await person('holder@example.com', 'RW');
   const pay = (await holder.agent.post('/api/billing/plans/family').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788111222', months: 1 }).expect(201)).body.payment;
-  expect(pay).toMatchObject({ purpose: 'FAMILY', usdCents: 621, amount: String(Math.ceil(6.21 * 1450)) });
+  expect(pay).toMatchObject({ purpose: 'FAMILY', usdCents: 621, amount: '9000' }); // RWF 9,005 rounded to the nearest 100
   await holder.agent.post('/api/billing/family/members').set('Origin', WEB).send({ email: 'kid1@example.com' }).expect(400); // not paid yet
   [...momo.values()][0].status = 'SUCCESSFUL';
   await holder.agent.get(`/api/billing/payments/${pay.id}`).expect(200);

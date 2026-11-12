@@ -64,9 +64,9 @@ export function HubContent({ handle }: { handle: string }) {
         <div><h1 className="flex items-center gap-2 text-[28px] font-semibold tracking-tight"><Icon.Hub size={28} className="text-brand" />Creator Hub</h1><p className="text-[14px] text-muted">Channel <Link href={`/@${handle}`} className="text-brand">@{handle}</Link></p></div>
         <button type="button" onClick={() => openDialog()} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand hover:bg-brand-strong"><Icon.Upload size={18} />Upload video</button>
       </div>
-      {pass && !pass.pass.active && (
+      {pass && (!pass.pass.active || !pass.canUpload) && (
         <p className={`mt-4 flex flex-wrap items-center gap-2 rounded-2xl px-4 py-3 text-[14px] ${pass.canUpload ? 'bg-surface' : 'bg-danger/10 text-danger'}`}>
-          {pass.canUpload ? `${pass.freeLeft} of ${pass.freeVideos} free ${pass.freeVideos === 1 ? 'upload' : 'uploads'} left.` : 'Your free uploads are used.'}
+          {pass.canUpload ? `${pass.freeLeft} of ${pass.freeVideos} free ${pass.freeVideos === 1 ? 'upload' : 'uploads'} left.` : pass.reason === 'PASS_LIMIT' ? 'You used this year’s uploads of the Creator pass.' : 'Your free uploads are used.'}
           <Link href="/hub/pass" className="font-semibold text-brand underline">Creator pass</Link>
         </p>
       )}

@@ -143,9 +143,9 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   expect(camp).toMatchObject({ status: 'DRAFT', days: 7, dailyRateCents: 300, totalCents: 2100, cpmCents: 100, viewsBought: 21000, viewsPerDay: 3000, spentCents: 0 });
   expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.ads).toMatchObject({ usdCentsPerDay: 300, usdCentsPer1000Views: 100, viewsPerDay: 3000 });
 
-  // Paid by MoMo (21 USD → 30,450 RWF), then waits for review.
+  // Paid by MoMo (21 USD → RWF 30,450, rounded to the nearest 100: 30,500), then waits for review.
   const pay = (await biz.post(`/api/ads/campaigns/${camp.id}/pay`).set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000111' }).expect(201)).body.payment;
-  expect(pay).toMatchObject({ amount: '30450', usdCents: 2100 });
+  expect(pay).toMatchObject({ amount: '30500', usdCents: 2100 });
   [...momo.values()][0].status = 'SUCCESSFUL';
   await biz.get(`/api/billing/payments/${pay.id}`).expect(200);
   expect((await biz.get('/api/ads/campaigns').expect(200)).body.campaigns[0].status).toBe('PENDING_REVIEW');
@@ -335,7 +335,7 @@ test('Premium priced per country: the viewer\'s profile country sets the price s
   expect((await rw.get('/api/billing/plans').expect(200)).body.premium).toMatchObject({ usdCents: 300, standardUsdCents: 1000, country: 'RW' });
   expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.premium.usdCents).toBe(1000); // visitors
   const pay = (await rw.post('/api/billing/premium').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000222', months: 3 }).expect(201)).body.payment;
-  expect(pay).toMatchObject({ usdCents: 900, amount: String(9 * 1450) });
+  expect(pay).toMatchObject({ usdCents: 900, amount: '13100' }); // RWF 13,050 rounded to the nearest 100
 });
 
 test('Creator pass: free uploads, then the pass (paid, given or with Premium); videos stay; badges tell Premium from verified', async () => {

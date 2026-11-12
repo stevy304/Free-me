@@ -9,7 +9,7 @@ import type { Payment } from '@/lib/types';
 import { useShell } from '@/components/shell/ShellContext';
 
 interface Settings {
-  prices: { creatorPassUsdCents: number; creatorFreeVideos: number; premiumUsdCents: number; premiumByCountry?: Record<string, number>; adDayUsdCents: number; adCpmUsdCents: number; payoutMinUsdCents: number };
+  prices: { plusUsdCents: number; plusByCountry?: Record<string, number>; familyUsdCents: number; familyByCountry?: Record<string, number>; creatorPassUsdCents: number; creatorFreeVideos: number; premiumUsdCents: number; premiumByCountry?: Record<string, number>; adDayUsdCents: number; adCpmUsdCents: number; payoutMinUsdCents: number };
   momo: { source: string; active: boolean; enabled: boolean; sandbox: boolean; baseUrl: string; targetEnvironment: string; apiUser: string; subscriptionKey: string; apiKey: string; currency: string; perUsd: number | null };
   flutterwave: { source: string; active: boolean; enabled: boolean; secretKey: string; webhookHash: string; webhookUrl: string };
   manual: { active: boolean; enabled: boolean; currency: string; perUsd: number | null; accounts: Array<{ label: string; number: string; name: string }>; instructions: string | null };
@@ -19,6 +19,9 @@ const label = 'text-[13px] font-semibold';
 const Status = ({ on }: { on: boolean }) => <span className={`rounded-full px-2.5 py-0.5 text-[12px] font-bold ${on ? 'bg-brand-soft text-brand' : 'bg-surface text-muted'}`}>{on ? 'On' : 'Off'}</span>;
 
 /** Manual payments waiting for an administrator: check the money arrived, then confirm (Premium or the ad starts). */
+
+/** { RW: 172, KE: 250 } → "RW=172, KE=250" for the price fields. */
+const byCountry = (m: Record<string, number> | undefined) => Object.entries(m ?? {}).map(([c, v]) => `${c}=${v}`).join(', ');
 export function ManualQueue() {
   const { locale } = useShell();
   const [rows, setRows] = useState<Manual[] | null>(null);
@@ -64,7 +67,7 @@ export function PaymentSettings({ onSaved }: { onSaved: () => void }) {
   const apply = (r: Settings) => {
     setS(r);
     setForm({
-      creatorPass: r.prices.creatorPassUsdCents / 100, creatorFree: r.prices.creatorFreeVideos, premium: r.prices.premiumUsdCents / 100, premiumByCountry: Object.entries(r.prices.premiumByCountry ?? {}).map(([c, v]) => `${c}=${v}`).join(', '), adDay: r.prices.adDayUsdCents / 100, adCpm: r.prices.adCpmUsdCents / 100, payoutMin: r.prices.payoutMinUsdCents / 100,
+      plus: r.prices.plusUsdCents / 100, family: r.prices.familyUsdCents / 100, plusByCountry: byCountry(r.prices.plusByCountry), familyByCountry: byCountry(r.prices.familyByCountry), creatorPass: r.prices.creatorPassUsdCents / 100, creatorFree: r.prices.creatorFreeVideos, premium: r.prices.premiumUsdCents / 100, premiumByCountry: byCountry(r.prices.premiumByCountry), adDay: r.prices.adDayUsdCents / 100, adCpm: r.prices.adCpmUsdCents / 100, payoutMin: r.prices.payoutMinUsdCents / 100,
       momoEnabled: r.momo.enabled, momoSandbox: r.momo.sandbox, momoBaseUrl: r.momo.sandbox ? '' : r.momo.baseUrl, momoTarget: r.momo.targetEnvironment, momoUser: r.momo.apiUser, momoSub: '', momoKey: '', momoCurrency: r.momo.currency, momoRate: r.momo.perUsd ?? '',
       sandboxKey: '',
       flwEnabled: r.flutterwave.enabled, flwSecret: '', flwHash: '',
@@ -97,12 +100,16 @@ export function PaymentSettings({ onSaved }: { onSaved: () => void }) {
           <label><span className={label}>Premium per month</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.premium} onChange={(e) => set('premium', e.target.value)} /></label>
           <label><span className={label}>Ad, per day</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.adDay} onChange={(e) => set('adDay', e.target.value)} /></label>
           <label><span className={label}>Ad, per 1,000 views</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.adCpm} onChange={(e) => set('adCpm', e.target.value)} /></label>
-          <label><span className={label}>Creator pass per month</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.creatorPass} onChange={(e) => set('creatorPass', e.target.value)} /></label>
+          <label><span className={label}>Plus per month</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.plus} onChange={(e) => set('plus', e.target.value)} /></label>
+          <label><span className={label}>Family & TV per month</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.family} onChange={(e) => set('family', e.target.value)} /></label>
+          <label className="sm:col-span-2"><span className={label}>Plus in some countries (US cents, e.g. RW=172)</span><input className={`mt-1 ${inputClass}`} value={form.plusByCountry ?? ''} onChange={(e) => set('plusByCountry', e.target.value)} /></label>
+          <label className="sm:col-span-2"><span className={label}>Family & TV in some countries (US cents, e.g. RW=621)</span><input className={`mt-1 ${inputClass}`} value={form.familyByCountry ?? ''} onChange={(e) => set('familyByCountry', e.target.value)} /></label>
+          <label><span className={label}>Creator pass per year</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.creatorPass} onChange={(e) => set('creatorPass', e.target.value)} /></label>
           <label><span className={label}>Free uploads per Space before the pass</span><input type="number" min={0} step={1} className={`mt-1 ${inputClass}`} value={form.creatorFree} onChange={(e) => set('creatorFree', e.target.value)} /></label>
           <label className="sm:col-span-4"><span className={label}>Premium in some countries (US cents a month, e.g. RW=300, KE=500; empty = the price above everywhere)</span><input className={`mt-1 ${inputClass}`} value={form.premiumByCountry ?? ''} onChange={(e) => set('premiumByCountry', e.target.value)} placeholder="RW=300, KE=500" /></label>
           <label><span className={label}>Smallest creator withdrawal</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.payoutMin} onChange={(e) => set('payoutMin', e.target.value)} /></label>
         </div>
-        <button type="button" disabled={!!busy} onClick={() => void run('prices', () => api('/admin/billing/settings', { method: 'PUT', body: { prices: { creatorPassUsdCents: cents(form.creatorPass), creatorFreeVideos: form.creatorFree, premiumUsdCents: cents(form.premium), premiumByCountry: form.premiumByCountry ?? '', adDayUsdCents: cents(form.adDay), adCpmUsdCents: cents(form.adCpm), payoutMinUsdCents: cents(form.payoutMin) } } }), 'Prices saved.')} className="mt-3 h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Save prices</button>
+        <button type="button" disabled={!!busy} onClick={() => void run('prices', () => api('/admin/billing/settings', { method: 'PUT', body: { prices: { plusUsdCents: cents(form.plus), familyUsdCents: cents(form.family), plusByCountry: form.plusByCountry ?? '', familyByCountry: form.familyByCountry ?? '', creatorPassUsdCents: cents(form.creatorPass), creatorFreeVideos: form.creatorFree, premiumUsdCents: cents(form.premium), premiumByCountry: form.premiumByCountry ?? '', adDayUsdCents: cents(form.adDay), adCpmUsdCents: cents(form.adCpm), payoutMinUsdCents: cents(form.payoutMin) } } }), 'Prices saved.')} className="mt-3 h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Save prices</button>
       </div>
 
       {/* Manual */}

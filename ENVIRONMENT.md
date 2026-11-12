@@ -94,9 +94,18 @@ To make someone an administrator (everything, including every Premium feature su
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `PREMIUM_PRICE_USD_CENTS` | | `1000` ($10) | Premium, per month |
-| `CREATOR_PASS_PRICE_USD_CENTS` | | `200` ($2) | Creator pass per month: needed to upload after the free uploads. Premium includes it. Administrators can change it in the app |
+| `CREATOR_PASS_PRICE_USD_CENTS` | | `200` ($2) | Creator pass per **year**: needed to upload after the free uploads. Premium includes it. Administrators can change it in the app |
 | `CREATOR_FREE_VIDEOS` | | `3` | Uploads every Space gets before it needs the Creator pass; `0` = the pass from the first upload. Administrators can change it in the app |
-| `PREMIUM_PRICE_BY_COUNTRY` | | none | Premium per month in some countries, in US cents: `RW=300,KE=500`. People whose profile country is listed pay that price; everyone else pays `PREMIUM_PRICE_USD_CENTS`. Administrators can change it in the app |
+| `PREMIUM_PRICE_BY_COUNTRY` | | `RW=414` | Premium (Pro) per month in some countries, in US cents: RW=414 is about RWF 6,000. People whose profile country is listed pay that price; everyone else pays `PREMIUM_PRICE_USD_CENTS`. Set it empty for one price everywhere. Administrators can change it in the app |
+| `PLUS_PRICE_USD_CENTS`, `PLUS_PRICE_BY_COUNTRY` | | `300`, `RW=172` | Plus (no ads, every quality) per month: $3, about RWF 2,500 in Rwanda |
+| `FAMILY_PRICE_USD_CENTS`, `FAMILY_PRICE_BY_COUNTRY` | | `1200`, `RW=621` | Family & TV per month: $12, about RWF 9,000 in Rwanda |
+| `FAMILY_SEATS` | | `4` | People in a Family & TV plan, the holder included |
+| `SUBSCRIPTION_CREATOR_SHARE_PERCENT` | | `50` | Share of Plus and Family money paid to monetised creators, by members' watch time |
+| `CREATOR_PASS_VIDEOS_PER_YEAR` | | `50` | Uploads the Creator pass allows in any 365 days (Pro: no limit) |
+| `AIRTEL_CLIENT_ID`, `AIRTEL_CLIENT_SECRET` | | none | Airtel Money Collections (Airtel Africa developer portal). Both or neither |
+| `AIRTEL_BASE_URL` | | `https://openapiuat.airtel.africa` (sandbox) | `https://openapi.airtel.africa` when live |
+| `AIRTEL_COUNTRY`, `AIRTEL_CURRENCY` | | `RW`, `RWF` | Where the Airtel Money account is |
+| `AIRTEL_RATE_PER_USD` | | `MOMO_RATE_PER_USD` | RWF for one US dollar for Airtel charges |
 | `AD_PRICE_PER_DAY_USD_CENTS` | | `300` ($3) | One day of an ad campaign |
 | `AD_CPM_USD_CENTS` | | `100` ($1) | Price of 1,000 ad views. A paid day buys `AD_PRICE_PER_DAY_USD_CENTS × 1000 / AD_CPM_USD_CENTS` views at most (3,000 by default); views not delivered in the days bought keep running for as many days again. Administrators can change it in the app |
 | `PAYOUT_MINIMUM_USD_CENTS` | | `1000` ($10) | Smallest withdrawal a creator can ask for |

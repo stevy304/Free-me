@@ -125,6 +125,8 @@ export function AdminMoney() {
           <select className={`${inputClass} w-36`} value={gift.months} onChange={(e) => setGift({ ...gift, months: Number(e.target.value) })}>{[1, 3, 6, 12].map((m) => <option key={m} value={m}>{m} {m === 1 ? 'month' : 'months'}</option>)}</select>
           <button type="button" disabled={busy || !gift.email.includes('@')} onClick={() => void run(() => api('/admin/billing/premium', { body: gift }), `Premium given to ${gift.email}.`)} className="h-10 rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand disabled:opacity-50">Give Premium</button>
           <button type="button" disabled={busy || !gift.email.includes('@')} onClick={() => void run(() => api('/admin/billing/creator-pass', { body: gift }), `Creator pass given to ${gift.email}.`)} className="h-10 rounded-xl border border-brand px-4 text-[14px] font-semibold text-brand disabled:opacity-50">Give Creator pass</button>
+          <button type="button" disabled={busy || !gift.email.includes('@')} onClick={() => void run(() => api('/admin/billing/plans/plus', { body: gift }), `Plus given to ${gift.email}.`)} className="h-10 rounded-xl border border-brand px-4 text-[14px] font-semibold text-brand disabled:opacity-50">Give Plus</button>
+          <button type="button" disabled={busy || !gift.email.includes('@')} onClick={() => void run(() => api('/admin/billing/plans/family', { body: gift }), `Family & TV given to ${gift.email}.`)} className="h-10 rounded-xl border border-brand px-4 text-[14px] font-semibold text-brand disabled:opacity-50">Give Family & TV</button>
         </div>
       </section>
       <section className="rounded-2xl border border-line p-4">
