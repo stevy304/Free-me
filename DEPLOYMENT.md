@@ -142,7 +142,7 @@ Then `sudo systemctl reload nginx`, open TCP 1935 in the firewall for encoders (
 - on the media server (worker): `LIVE_RTMP_HLS_DIR=/var/lib/freeme/live`.
 
 Encoders send H.264 video and AAC audio as they are (no re-encoding), so one media server carries many RTMP
-streams. Creators see the address and their key in Live Studio. When a stream ends, its recording becomes a
+streams. Creators see the address and their key in Live Studio. Encoders open a private rehearsal first; the creator checks measured stream health and clicks Go live before any media is copied to the public CDN. When a stream ends, its recording becomes a
 private video, processed like an upload; the creator publishes it as a replay from Creator Hub.
 
 ## Instant updates

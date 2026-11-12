@@ -6,7 +6,7 @@ import { APP_CONFIG, type AppConfig } from '../config/config';
 import { STORAGE } from '../media/queue';
 import { LocalStorage, type Storage } from '../media/storage';
 
-const TYPES: Record<string, string> = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
+const TYPES: Record<string, string> = { '.ts': 'video/mp2t', '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
 
 /**
  * Development stand-in for object storage and the CDN (STORAGE_DRIVER=local only): receives upload parts at their

@@ -977,6 +977,7 @@ enum LiveStatus {
   IDLE
   LIVE
   ENDED
+  PREVIEW
 }
 
 model LiveStream {
@@ -1001,6 +1002,13 @@ model LiveStream {
   replayVisibility      Visibility        @default(PRIVATE)
   /// "normal" (about 10-15 s behind, steadiest on weak connections) or "low" (about 4-6 s, for talking with chat)
   latencyMode           String            @default("normal")
+  /// Encoder rehearsal is private until the creator explicitly publishes it.
+  finalizedAt           DateTime?
+  encoderConnectedAt    DateTime?
+  encoderHeartbeatAt    DateTime?
+  /// First HLS media sequence allowed in public playback and the replay.
+  encoderStartSequence  Int?
+  ingestHealth          Json?
   status                LiveStatus        @default(IDLE)
   /// "browser" or "rtmp", while live.
   source                String?

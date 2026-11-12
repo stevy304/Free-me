@@ -14,6 +14,9 @@ import { publish, room } from '../realtime/publish';
 import { pushTo } from '../push/push';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { endLive, finishLive, LiveSync } from './sync';
+import { encoderPlaylist } from './encoder-playlist';
+import { ingestHealth, type IngestSample } from './ingest-health';
+import { privateLivePrefix } from './sync';
 import { browserLiveArgs } from './browser-hls';
 
 export class LiveError extends Error {}
@@ -85,7 +88,7 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.$transaction(async (tx) => {
       // Serialize creation across API processes; opening two studio tabs must not create competing streams.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${ch.id}, 0))`;
-      const active = await tx.liveStream.findFirst({ where: { channelId: ch.id, status: 'LIVE' }, orderBy: { createdAt: 'desc' } });
+      const active = await tx.liveStream.findFirst({ where: { channelId: ch.id, status: { in: ['LIVE', 'PREVIEW'] } }, orderBy: { createdAt: 'desc' } });
       const cur = active ?? await tx.liveStream.findFirst({ where: { channelId: ch.id, status: 'IDLE' }, orderBy: { createdAt: 'desc' } });
       return cur ?? tx.liveStream.create({ data: { channelId: ch.id, title: `${ch.name} live` } });
     });
@@ -95,7 +98,7 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
   async streamKey(userId: string, reset = false) {
     const ch = await this.prisma.channel.findUniqueOrThrow({ where: { userId } });
     if (ch.liveStreamKey && !reset) return ch.liveStreamKey;
-    if (reset && await this.prisma.liveStream.findFirst({ where: { channelId: ch.id, status: 'LIVE', source: 'rtmp' }, select: { id: true } })) {
+    if (reset && await this.prisma.liveStream.findFirst({ where: { channelId: ch.id, status: { in: ['PREVIEW', 'LIVE'] }, source: 'rtmp' }, select: { id: true } })) {
       throw new LiveError('Stop your encoder before replacing its stream key.');
     }
     const key = newStreamKey();
@@ -113,6 +116,33 @@ export class LiveService implements OnModuleInit, OnModuleDestroy {
     if (to.length) await this.prisma.notification.createMany({ data: to.map((f) => ({ userId: f.userId, type: 'LIVE' as const, actorId: ch.userId, liveStreamId: s.id })) });
     for (const f of to) publish(room.user(f.userId), 'notifications');
     pushTo(to.map((f) => f.userId), { title: `${ch.name} is live`, body: s.title, url: `/live/${s.id}`, tag: `live-${s.id}` });
+  }
+
+  async previewEncoder(user: User, streamId: string) {
+    if (user.status !== 'ACTIVE' || !hasPremiumAccess(user)) throw new LiveError('Live Studio is part of Premium.');
+    const result = await this.prisma.liveStream.updateMany({ where: { id: streamId, status: 'IDLE', channel: { userId: user.id } }, data: {
+      status: 'PREVIEW', source: 'rtmp', encoderConnectedAt: new Date(), encoderHeartbeatAt: new Date(),
+    } });
+    if (!result.count) throw new LiveError('A broadcast is already connected. Stop it before connecting another encoder.');
+  }
+
+  async publishEncoder(user: User, streamId: string) {
+    if (user.status !== 'ACTIVE' || !hasPremiumAccess(user)) throw new LiveError('Live Studio is part of Premium.');
+    const s = await this.prisma.liveStream.findFirst({ where: { id: streamId, source: 'rtmp', status: 'PREVIEW', channel: { userId: user.id } } });
+    if (!s) throw new LiveError('Connect your encoder to a private preview first.');
+    const health = ingestHealth(s.ingestHealth as unknown as IngestSample | null, s.encoderHeartbeatAt, true);
+    if (!health.ready) throw new LiveError('Wait for a fresh, playable H.264 encoder signal before going live.');
+    const text = await this.storage.getText(privateLivePrefix(s.id) + 'index.m3u8');
+    if (!text) throw new LiveError('The private preview is not ready yet.');
+    const parsed = encoderPlaylist(text);
+    if (!parsed.segments.length) throw new LiveError('Wait for the first video segment.');
+    const result = await this.prisma.liveStream.updateMany({ where: { id: s.id, status: 'PREVIEW' }, data: {
+      status: 'LIVE', startedAt: new Date(), encoderStartSequence: null,
+    } });
+    if (!result.count) throw new LiveError('The preview changed. Refresh the studio and try again.');
+    const live = await this.prisma.liveStream.findUniqueOrThrow({ where: { id: s.id } });
+    await this.announce(live).catch((e) => this.log.warn(`Live notice ${s.id}: ${(e as Error).message}`));
+    publish(room.live(s.id), 'started', { id: s.id });
   }
 
   /** Starts a browser broadcast or a Premium encoder broadcast. */

@@ -7,13 +7,13 @@ import styles from './EncoderConnection.module.css';
 
 export interface Encoder { server: string; streamKey: string }
 const guides = {
-  streamlabs: { name: 'Streamlabs', steps: ['Open Settings → Stream.', 'Choose “Stream to custom ingest” (Custom RTMP).', 'Paste the server URL and stream key below, then save.', 'Start streaming in Streamlabs. Free Me publishes the broadcast automatically.'] },
-  obs: { name: 'OBS Studio', steps: ['Open Settings → Stream.', 'Set Service to “Custom”.', 'Paste the server URL and stream key below, then apply.', 'Click Start Streaming in OBS. Free Me publishes the broadcast automatically.'] },
-  encoder: { name: 'Other encoder', steps: ['Choose an RTMP/RTMPS streaming destination.', 'Enter the server URL and stream key in separate fields.', 'Use H.264 video, AAC audio and a 2-second keyframe interval.', 'Start your encoder and check the Free Me watch page.'] },
+  streamlabs: { name: 'Streamlabs', steps: ['Open Settings → Stream.', 'Choose “Stream to custom ingest” (Custom RTMP).', 'Paste the server URL and stream key below, then save.', 'Start streaming in Streamlabs. Check the private preview in Free Me, then click Go live when ready.'] },
+  obs: { name: 'OBS Studio', steps: ['Open Settings → Stream.', 'Set Service to “Custom”.', 'Paste the server URL and stream key below, then apply.', 'Click Start Streaming in OBS. Check the private preview in Free Me, then click Go live when ready.'] },
+  encoder: { name: 'Other encoder', steps: ['Choose an RTMP/RTMPS streaming destination.', 'Enter the server URL and stream key in separate fields.', 'Use H.264 video, AAC audio and a 2-second keyframe interval.', 'Start your encoder, check the private preview in Free Me, then click Go live.'] },
 };
 
-export function EncoderConnection({ encoder, live, external, busy, onKey, onPrepare }: {
-  encoder: Encoder | null; live: boolean; external: boolean; busy: boolean;
+export function EncoderConnection({ encoder, live, external, preview = false, busy, onKey, onPrepare }: {
+  encoder: Encoder | null; live: boolean; external: boolean; preview?: boolean; busy: boolean;
   onKey: (key: string) => void; onPrepare: () => Promise<void>;
 }) {
   const [guide, setGuide] = useState<keyof typeof guides>('streamlabs');
@@ -46,8 +46,8 @@ export function EncoderConnection({ encoder, live, external, busy, onKey, onPrep
       </div>
       <div role="status" className={styles.connection} data-live={external}>
         <span className={styles.dot} />
-        <div><strong>{external ? 'Encoder connected · On air' : live ? 'Browser broadcast is on air' : encoder ? 'Waiting for your encoder' : 'Encoder connection unavailable'}</strong>
-          <p>{external ? 'Open your watch page to verify video and sound. End broadcast also replaces your key to prevent automatic reconnects.' : live ? 'End the current broadcast before connecting another source.' : encoder ? 'Save your title and settings before starting. The broadcast starts publicly when your encoder connects, unless set to unlisted.' : 'Encoder streaming has not been enabled here yet. You can use the browser studio.'}</p></div>
+        <div><strong>{preview ? 'Private preview · Encoder connected' : external ? 'Encoder connected · On air' : live ? 'Browser broadcast is on air' : encoder ? 'Waiting for your encoder' : 'Encoder connection unavailable'}</strong>
+          <p>{preview ? 'Only you can watch this rehearsal. Check video, sound and stream health, then choose Go live in Free Me. End preview replaces your key.' : external ? 'Open your watch page to verify video and sound. End broadcast also replaces your key to prevent automatic reconnects.' : live ? 'End the current broadcast before connecting another source.' : encoder ? 'Save your title and settings, then start your encoder. Your feed stays private until you click Go live in Free Me.' : 'Encoder streaming has not been enabled here yet. You can use the browser studio.'}</p></div>
       </div>
       {encoder && <>
         <div className={styles.tabs} role="group" aria-label="Streaming software">
@@ -68,10 +68,10 @@ export function EncoderConnection({ encoder, live, external, busy, onKey, onPrep
         </details>
         <div className={styles.actions}>
           <button type="button" className={styles.primary} disabled={live || busy || working} onClick={() => void run(async () => { await onPrepare(); setSaved(true); })}>{working ? 'Saving…' : 'Save broadcast title'}</button>
-          <button type="button" disabled={live || busy || working} onClick={() => setConfirm(!confirm)}>Replace stream key</button>
+          <button type="button" disabled={live || preview || busy || working} onClick={() => setConfirm(!confirm)}>Replace stream key</button>
         </div>
-        {confirm && <div className={styles.confirm}><p>Your old key will stop working. Update your encoder with the replacement before streaming again.</p><button type="button" disabled={live || busy || working} onClick={() => void run(async () => { const r = await api<{ streamKey: string }>('/hub/live/key', { body: {} }); onKey(r.streamKey); setConfirm(false); })}>Replace key now</button><button type="button" onClick={() => setConfirm(false)}>Cancel</button></div>}
-        {saved && <p role="status" className={styles.success}>Title saved. Start streaming in {guides[guide].name} when ready.</p>}
+        {confirm && <div className={styles.confirm}><p>Your old key will stop working. Update your encoder with the replacement before streaming again.</p><button type="button" disabled={live || preview || busy || working} onClick={() => void run(async () => { const r = await api<{ streamKey: string }>('/hub/live/key', { body: {} }); onKey(r.streamKey); setConfirm(false); })}>Replace key now</button><button type="button" onClick={() => setConfirm(false)}>Cancel</button></div>}
+        {saved && <p role="status" className={styles.success}>Title saved. Start streaming in {guides[guide].name} to open your private preview.</p>}
         <p className={styles.hint}>A direct Streamlabs account connection is not available. Use the custom server option above.</p>
       </>}
       {copied && <span role="status" className="sr-only">{copied === 'key' ? 'Stream key' : 'Server URL'} copied</span>}

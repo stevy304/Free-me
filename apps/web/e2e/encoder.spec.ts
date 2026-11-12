@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { expectCode } from './codes';
 
@@ -5,7 +8,7 @@ const BASE = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
 const SECRET = process.env.E2E_RTMP_SECRET ?? '';
 
 test('Streamlabs setup protects keys and follows external broadcast state on desktop and mobile', async ({ page }) => {
-  test.skip(!SECRET || !process.env.E2E_API_LOG, 'Needs a configured encoder URL, callback secret and console mail log.');
+  test.skip(!SECRET || !process.env.E2E_API_LOG || !process.env.LIVE_RTMP_HLS_DIR, 'Needs a configured encoder URL, callback secret and console mail log.');
   const email = `encoder.${Date.now()}@example.com`;
   await page.goto('/login?returnTo=/');
   await page.getByLabel('Email address').fill(email);
@@ -29,6 +32,8 @@ test('Streamlabs setup protects keys and follows external broadcast state on des
   await admin.close();
 
   await page.goto('/studio/live');
+  await page.getByLabel('Title', { exact: true }).fill('Studio connection rehearsal');
+  await page.getByRole('button', { name: 'Encoder setup', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Connect your streaming software' });
   await expect(panel).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Streamlabs', exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -44,20 +49,41 @@ test('Streamlabs setup protects keys and follows external broadcast state on des
   await expect(page.getByLabel('Stream key', { exact: true })).not.toHaveValue(previousKey);
   await panel.getByRole('button', { name: 'OBS Studio', exact: true }).click();
   await expect(panel.getByText('Set Service to “Custom”.')).toBeVisible();
-  await page.getByLabel('Title', { exact: true }).fill('Studio connection rehearsal');
   await panel.getByRole('button', { name: 'Save broadcast title' }).click();
   await expect(panel.getByText('Title saved.', { exact: false })).toBeVisible();
+  await page.getByRole('dialog', { name: 'Broadcast settings' }).getByRole('button', { name: 'Close', exact: true }).click();
   const { encoder, stream } = await (await page.request.get(`${BASE}/api/hub/live`)).json();
   const callback = (action: string, name: string) => page.request.post(`http://127.0.0.1:4000/api/live/rtmp/${action}?secret=${SECRET}`, { form: { name, app: 'live', flashver: 'FMLE/3.0', clientid: '14', tcurl: encoder.server }, maxRedirects: 0 });
+  const folder = join(process.env.LIVE_RTMP_HLS_DIR!, stream.id);
+  mkdirSync(folder, { recursive: true });
+  const media = (duration: number) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', String(duration), '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-force_key_frames', 'expr:gte(t,n_forced*1)', '-sc_threshold', '0', '-f', 'hls', '-hls_time', '1', '-hls_list_size', '0', '-hls_segment_filename', join(folder, '%d.ts'), join(folder, 'index.m3u8')]);
+  media(4);
   expect((await callback('publish', encoder.streamKey)).status()).toBe(302);
-  await expect(panel.getByText('Encoder connected · On air')).toBeVisible({ timeout: 15_000 });
-  await expect(panel.getByRole('button', { name: 'Replace stream key', exact: true })).toBeDisabled();
+  await expect(page.getByText('● Private preview', { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: 'ENCODER PREVIEW' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Stream health' }).getByText('Video arriving')).toBeVisible({ timeout: 15_000 });
+  expect((await page.request.get(`${BASE}/api/live/${stream.id}`)).ok()).toBe(true);
+  expect((await (await page.request.get(`${BASE}/api/live/${stream.id}`)).json()).stream.playbackUrl).toBeNull();
+  expect((await page.request.get(`${BASE}/api/storage/local/pub/live/${stream.id}/0.ts`)).status()).toBe(404);
+  expect((await callback('update', stream.id)).status()).toBe(200);
+  await page.getByRole('button', { name: 'Go live', exact: true }).click();
+  await expect.poll(async () => (await (await page.request.get(`${BASE}/api/hub/live`)).json()).stream.publicationSequence, { timeout: 15_000 }).toBe(5);
+  media(8);
+  await expect.poll(async () => (await page.request.get(`${BASE}/api/storage/local/pub/live/${stream.id}/index.m3u8`)).status(), { timeout: 15_000 }).toBe(200);
+  const publicPlaylist = await (await page.request.get(`${BASE}/api/storage/local/pub/live/${stream.id}/index.m3u8`)).text();
+  expect(publicPlaylist).not.toContain('0.ts');
+  expect(publicPlaylist).not.toContain('3.ts');
+  expect(publicPlaylist).not.toContain('4.ts');
+  expect(publicPlaylist).toContain('5.ts');
+  await expect(page.getByText(/ON AIR/)).toBeVisible({ timeout: 15_000 });
   await page.getByRole('button', { name: 'End broadcast' }).click();
-  await expect(panel.getByText('Waiting for your encoder')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: 'PROGRAM PREVIEW' })).toBeVisible({ timeout: 15_000 });
   expect((await callback('update', stream.id)).status()).toBe(403);
   expect((await callback('publish', encoder.streamKey)).status()).toBe(403);
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Streamlabs / OBS', exact: true }).click();
   await expect(panel).toBeVisible();
   if (process.env.E2E_SCREENSHOT_DIR) await panel.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/encoder-mobile.png` });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
