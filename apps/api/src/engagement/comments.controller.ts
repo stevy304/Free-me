@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { badgeOf } from '../catalog/serialize';
 import { notifyComment } from '../notifications/notify';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
@@ -43,7 +44,7 @@ export class CommentsController {
       createdAt: c.createdAt, editedAt: c.editedAt,
       author: deleted ? null : {
         name: ch?.name ?? c.user.profile?.displayName ?? 'Free Me member', handle: ch?.handle ?? null,
-        avatarUrl: ch?.avatarUrl ?? c.user.profile?.avatarUrl ?? null, isCreator: ch?.id === video.channelId, isVerified: !!ch?.isVerified,
+        avatarUrl: ch?.avatarUrl ?? c.user.profile?.avatarUrl ?? null, isCreator: ch?.id === video.channelId, isVerified: !!ch?.isVerified, badge: ch ? badgeOf(ch) : null,
       },
       can: { edit: mine && !deleted, delete: !deleted && (mine || owner || isModerator(auth)), pin: owner && !c.parentId && !deleted },
     };

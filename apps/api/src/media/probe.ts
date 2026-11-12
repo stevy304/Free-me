@@ -15,14 +15,36 @@ export class MediaError extends Error {
 
 export function run(cmd: string, args: string[], onStdout?: (chunk: string) => void, signal?: AbortSignal, niceness = 0): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], signal });
+    if (signal?.aborted) { reject(signal.reason); return; }
+    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    // Wait for the child to exit before callers remove its scratch files or release a video lease.
+    // Some encoders ignore SIGTERM; bound cancellation with a forced kill.
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let aborted = false;
+    const onAbort = () => {
+      if (aborted) return;
+      aborted = true;
+      p.kill('SIGTERM');
+      killTimer = setTimeout(() => p.kill('SIGKILL'), 5_000);
+      killTimer.unref();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
     // Background work (higher qualities) yields the CPU to work a viewer is waiting for.
     if (niceness && p.pid) { try { setPriority(p.pid, niceness); } catch { /* not allowed here: run at normal priority */ } }
     let stdout = ''; let stderr = '';
     p.stdout.on('data', (d: Buffer) => { const s = d.toString(); if (onStdout) onStdout(s); else stdout += s; });
     p.stderr.on('data', (d: Buffer) => { stderr = (stderr + d.toString()).slice(-20_000); });
-    p.on('error', reject);
-    p.on('close', (code) => (code === 0 ? resolve({ stdout, stderr }) : reject(new Error(`${cmd} exited with ${code}: ${stderr.slice(-2000)}`))));
+    let spawnError: Error | undefined;
+    p.on('error', (error) => { spawnError = error; });
+    p.on('close', (code) => {
+      signal?.removeEventListener('abort', onAbort);
+      if (killTimer) clearTimeout(killTimer);
+      if (aborted) reject(signal?.reason ?? new Error('Processing canceled'));
+      else if (spawnError) reject(spawnError);
+      else if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(`${cmd} exited with ${code}: ${stderr.slice(-2000)}`));
+    });
   });
 }
 

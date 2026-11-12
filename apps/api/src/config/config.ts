@@ -5,6 +5,8 @@ import { normalizeEmail } from '@free-me/shared';
  * with a message that names it, instead of failing later on a user's request.
  */
 export interface SafetyConfig {
+  /** Reports from this many different accounts (at least a day old) hide a video until a moderator reviews it; 0 = never. Child-safety reports: 2. */
+  reportHoldThreshold: number;
   /** Optional outside matching service: POST { videoId, sha256, md5, durationSeconds, frames: [base64 JPEG] } → { match, label? }. */
   scanUrl: string | null;
   scanToken: string | null;
@@ -18,7 +20,32 @@ export interface SafetyConfig {
 /** Prices and payment providers (see ENVIRONMENT.md → Payments). Money is in US cents unless named otherwise. */
 export interface BillingConfig {
   premiumUsdCents: number;
+  /** Creator pass per YEAR: needed to upload after a channel's free videos (Premium includes it). */
+  creatorPassUsdCents: number;
+  /** Uploads a Creator pass allows in any 365 days (Premium: no limit). */
+  creatorPassVideosPerYear: number;
+  /** Plus (no ads, every quality) per month, and in some countries. */
+  plusUsdCents: number;
+  plusByCountry: Record<string, number>;
+  /** Family & TV (Plus for the holder and up to `familySeats - 1` members) per month, and in some countries. */
+  familyUsdCents: number;
+  familyByCountry: Record<string, number>;
+  familySeats: number;
+  /** Share of Plus and Family money paid to creators by members' watch time, in basis points (5000 = 50%). */
+  subscriptionCreatorShareBps: number;
+  /** Airtel Money Collections (Airtel Africa Open API). The charge is in `currency`, at `perUsd` units of it for one US dollar. */
+  airtel: { baseUrl: string; clientId: string; clientSecret: string; country: string; currency: string; perUsd: number } | null;
+  /** Videos every channel can upload without the pass; 0 = the pass is needed from the first upload. */
+  creatorFreeVideos: number;
+  /** Premium per month in some countries (ISO 3166-1 alpha-2 → US cents), e.g. lower where incomes are lower. */
+  premiumByCountry: Record<string, number>;
   adDayUsdCents: number;
+  /** What 1,000 ad views cost; a campaign's funds buy `budget * 1000 / adCpmUsdCents` views. */
+  adCpmUsdCents: number;
+  /** Smallest amount of funds a campaign can start with. */
+  adMinBudgetUsdCents: number;
+  /** Verified business badge, per year (paid after an administrator checked the business). */
+  verificationUsdCents: number;
   /** Smallest balance a creator can withdraw. */
   payoutMinUsdCents: number;
   payouts?: { rwfPerUsd: number; feeRwf: number } | null;
@@ -62,6 +89,14 @@ export interface AppConfig {
   /** Number of proxies in front of the API (Caddy = 1), so client IPs come from X-Forwarded-For. */
   trustProxy: number;
   docsEnabled: boolean;
+  /** How long answers that are the same for everyone (home shelves, trending) are reused, in seconds; 0 = never (tests). */
+  feedCacheSeconds: number;
+  /** Bearer token for /api/metrics and the worker's metrics port (Prometheus); null turns /api/metrics off. */
+  metricsToken: string | null;
+  /** Port where the worker serves its metrics (bind it to the private network); null: none. */
+  workerMetricsPort: number | null;
+  /** Address the worker's metrics port listens on: its private network address (default: this machine only). */
+  workerMetricsHost: string;
   media: MediaConfig;
   safety: SafetyConfig;
   /** Who runs the service, shown on the legal pages and in notices (see ENVIRONMENT.md). */
@@ -91,6 +126,8 @@ export interface MediaConfig {
   maxUploadBytes: number;
   /** Automatic captions with whisper.cpp on the media server; null turns them off. */
   whisper: { bin: string; model: string; threads: number } | null;
+  /** With whisper: also English captions (Whisper's translation) for videos spoken in another language. */
+  englishCaptions: boolean;
   /** Size of each upload part (S3 needs 5 MiB+, at most 10,000 parts). */
   partBytes: number;
   scratchDir: string;
@@ -104,6 +141,19 @@ export interface MediaConfig {
   encoder: 'libx264' | 'nvenc' | 'qsv';
   /** Use the upload's own H.264 for the top rung when it is already suitable (no re-encoding). */
   copyTopRung: boolean;
+  /**
+   * Popularity-based encoding: 1080p and above are made only once a video has this many views (Premium creators'
+   * uploads get them at once). Most uploads are rarely watched, so their most expensive rungs are never paid for.
+   * 0 makes every quality straight away.
+   */
+  hdMinViews: number;
+  /** Highest quality (short side, e.g. 720) in the master playlist free viewers get; 0 = no limit. Premium sees all. */
+  freeMaxShort: number;
+  /**
+   * Delete a ready video's original upload after this many days (0 = keep forever). Its renditions stay; a video that
+   * did not reach HD_MIN_VIEWS by then keeps its qualities up to 720p for good. Originals are often the largest file.
+   */
+  sourceRetentionDays: number;
   workerConcurrency: number;
   upgradeConcurrency: number;
   /** Long videos are encoded in pieces any worker server can take (see media/chunks.ts). */
@@ -120,6 +170,17 @@ export interface MediaConfig {
 
 export class ConfigError extends Error {}
 
+/** "RW=300, KE=500" → { RW: 300, KE: 500 }; null when malformed. Empty → {}. */
+export function parseCountryPrices(raw: string): Record<string, number> | null {
+  const out: Record<string, number> = {};
+  for (const part of raw.split(',').map((p) => p.trim()).filter(Boolean)) {
+    const m = /^([A-Za-z]{2})\s*=\s*(\d{1,7})$/.exec(part);
+    if (!m || Number(m[2]) < 1) return null;
+    out[m[1].toUpperCase()] = Number(m[2]);
+  }
+  return out;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const problems: string[] = [];
   const nodeEnv = (env.NODE_ENV === 'production' || env.NODE_ENV === 'test' ? env.NODE_ENV : 'development') as AppConfig['nodeEnv'];
@@ -132,6 +193,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   else if (prod && !appUrl.startsWith('https://')) problems.push('APP_URL must use https in production.');
 
   const databaseUrl = need('DATABASE_URL');
+  const metricsToken = env.METRICS_TOKEN?.trim() || null;
+  if (metricsToken && metricsToken.length < 24) problems.push('METRICS_TOKEN must have at least 24 characters.');
+  const workerMetricsPort = env.WORKER_METRICS_PORT?.trim() ? Number(env.WORKER_METRICS_PORT) : null;
+  if (workerMetricsPort !== null && !(Number.isInteger(workerMetricsPort) && workerMetricsPort > 0 && workerMetricsPort < 65536)) problems.push('WORKER_METRICS_PORT must be a port number.');
+  if (workerMetricsPort !== null && !metricsToken) problems.push('WORKER_METRICS_PORT needs METRICS_TOKEN.');
   const sessionSecret = env.SESSION_SECRET?.trim() || (prod ? '' : 'development-only-session-secret-change-me-0000');
   if (sessionSecret.length < 32) problems.push('SESSION_SECRET must have at least 32 characters.');
   if (prod && /development-only/.test(sessionSecret)) problems.push('SESSION_SECRET must be set in production.');
@@ -168,14 +234,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const presets = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow'];
   for (const k of ['TRANSCODE_PRESET', 'TRANSCODE_PRESET_HIGH']) if (env[k]?.trim() && !presets.includes(env[k]!.trim())) problems.push(`${k} must be one of ${presets.join(', ')}.`);
   if (env.VIDEO_ENCODER?.trim() && !['libx264', 'nvenc', 'qsv'].includes(env.VIDEO_ENCODER.trim())) problems.push('VIDEO_ENCODER must be libx264, nvenc or qsv.');
+  const count = (k: string, d: number) => { const v = env[k]?.trim(); if (!v) return d; const n = Number(v); if (!Number.isSafeInteger(n) || n < 0) { problems.push(`${k} must be a whole number of 0 or more.`); return d; } return n; };
+  const hdMinViews = count('HD_MIN_VIEWS', 100);
+  const freeMaxShort = count('FREE_MAX_QUALITY', 720);
+  if (freeMaxShort && ![144, 240, 360, 480, 720, 1080, 1440, 2160].includes(freeMaxShort)) problems.push('FREE_MAX_QUALITY must be 0 (no limit) or one of 144, 240, 360, 480, 720, 1080, 1440, 2160.');
   const media: MediaConfig = {
     driver, s3, localDir: env.LOCAL_STORAGE_DIR?.trim() || './.data/storage', publicBaseUrl, maxUploadBytes, partBytes,
     scratchDir: env.SCRATCH_DIR?.trim() || '/tmp/freeme-scratch', ffmpegPath: env.FFMPEG_PATH?.trim() || 'ffmpeg', ffprobePath: env.FFPROBE_PATH?.trim() || 'ffprobe',
     preset: env.TRANSCODE_PRESET?.trim() || 'veryfast', presetHigh: env.TRANSCODE_PRESET_HIGH?.trim() || 'superfast',
     copyTopRung: env.COPY_TOP_RUNG !== 'false',
+    hdMinViews, freeMaxShort, sourceRetentionDays: count('SOURCE_RETENTION_DAYS', 0),
     chunked: env.CHUNKED_ENCODING !== 'false', chunkMinSeconds: Math.max(10, Number(env.CHUNK_MIN_SECONDS) || 120),
     chunkSeconds: Math.max(4, Math.round((Number(env.CHUNK_SECONDS) || 30) / 2) * 2), chunkConcurrency: Math.max(1, Number(env.CHUNK_CONCURRENCY) || 1),
     encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), upgradeConcurrency: Math.max(1, Math.floor(Number(env.WORKER_UPGRADE_CONCURRENCY) || 1)), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
+    englishCaptions: env.AUTO_CAPTIONS_ENGLISH !== 'false',
     whisper: env.WHISPER_CPP_PATH?.trim() && env.WHISPER_MODEL?.trim()
       ? { bin: env.WHISPER_CPP_PATH.trim(), model: env.WHISPER_MODEL.trim(), threads: Math.max(1, Number(env.WHISPER_THREADS) || 4) } : null,
   };
@@ -201,8 +273,30 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (!Number.isSafeInteger(payoutFee) || payoutFee < 0 || payoutFee > 1_000_000) problems.push('PAYOUT_FEE_RWF must be a whole number from 0 to 1000000.');
   const payoutTestKey = env.FLW_PAYOUT_TEST_KEY?.trim() || null;
   if (payoutTestKey && !payoutTestKey.startsWith('FLWSECK_TEST-')) problems.push('FLW_PAYOUT_TEST_KEY must be a Flutterwave TEST key.');
+  // Rwanda prices by default (US cents at about RWF 1,450 a dollar): Premium RWF 6,000, Plus RWF 2,500, Family RWF 9,000.
+  const countryPrices = (k: string, d: string) => { const v = parseCountryPrices(env[k] ?? d); if (v === null) problems.push(`${k} must look like RW=300,KE=500 (country code = US cents).`); return v ?? {}; };
+  const premiumByCountry = countryPrices('PREMIUM_PRICE_BY_COUNTRY', 'RW=414');
+  const airtelKeys = ['AIRTEL_CLIENT_ID', 'AIRTEL_CLIENT_SECRET'];
+  const airtelSet = airtelKeys.filter((k) => env[k]?.trim());
+  if (airtelSet.length === 1) problems.push('Set both AIRTEL_CLIENT_ID and AIRTEL_CLIENT_SECRET for Airtel Money, or neither.');
+  const airtelCurrency = (env.AIRTEL_CURRENCY?.trim() || 'RWF').toUpperCase();
+  const airtelPerUsd = Number(env.AIRTEL_RATE_PER_USD || env.MOMO_RATE_PER_USD || 0);
+  if (airtelSet.length === 2 && airtelCurrency !== 'USD' && !(airtelPerUsd > 0)) problems.push(`AIRTEL_RATE_PER_USD (or MOMO_RATE_PER_USD) is required: how many ${airtelCurrency} make one US dollar.`);
+  const shareBps = Math.round(Number(env.SUBSCRIPTION_CREATOR_SHARE_PERCENT ?? 50) * 100);
+  if (!(shareBps >= 0 && shareBps <= 10_000)) problems.push('SUBSCRIPTION_CREATOR_SHARE_PERCENT must be from 0 to 100.');
   const billing: BillingConfig = {
-    premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
+    premiumByCountry,
+    creatorPassUsdCents: cents('CREATOR_PASS_PRICE_USD_CENTS', 200), creatorFreeVideos: count('CREATOR_FREE_VIDEOS', 3),
+    creatorPassVideosPerYear: count('CREATOR_PASS_VIDEOS_PER_YEAR', 50),
+    plusUsdCents: cents('PLUS_PRICE_USD_CENTS', 300), plusByCountry: countryPrices('PLUS_PRICE_BY_COUNTRY', 'RW=172'),
+    familyUsdCents: cents('FAMILY_PRICE_USD_CENTS', 1200), familyByCountry: countryPrices('FAMILY_PRICE_BY_COUNTRY', 'RW=621'),
+    familySeats: Math.max(2, Math.min(10, count('FAMILY_SEATS', 4))),
+    subscriptionCreatorShareBps: shareBps,
+    airtel: airtelSet.length === 2 ? {
+      baseUrl: (env.AIRTEL_BASE_URL?.trim() || 'https://openapiuat.airtel.africa').replace(/\/+$/, ''), clientId: env.AIRTEL_CLIENT_ID!.trim(), clientSecret: env.AIRTEL_CLIENT_SECRET!.trim(),
+      country: (env.AIRTEL_COUNTRY?.trim() || 'RW').toUpperCase(), currency: airtelCurrency, perUsd: airtelCurrency === 'USD' ? 1 : airtelPerUsd,
+    } : null,
+    premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), adCpmUsdCents: cents('AD_CPM_USD_CENTS', 100), adMinBudgetUsdCents: cents('AD_MIN_BUDGET_USD_CENTS', 700), verificationUsdCents: cents('VERIFICATION_PRICE_USD_CENTS', 1000), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
     payouts: payoutRate > 0 ? { rwfPerUsd: payoutRate, feeRwf: payoutFee } : null,
     payoutSandbox: payoutTestKey ? { secretKey: payoutTestKey } : null,
     momo: momoSet.length === momoKeys.length ? {
@@ -231,13 +325,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
     sessionTtlDays: Math.min(90, Math.max(1, Number(env.SESSION_TTL_DAYS || 30))),
     google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,
-    mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)),
+    mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)), feedCacheSeconds: nodeEnv === 'test' && !env.FEED_CACHE_SECONDS ? 0 : count('FEED_CACHE_SECONDS', 60), metricsToken, workerMetricsPort, workerMetricsHost: env.WORKER_METRICS_HOST?.trim() || '127.0.0.1',
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
     media, legal, billing, live,
     safety: {
       scanUrl: env.SAFETY_SCAN_URL?.trim() || null, scanToken: env.SAFETY_SCAN_TOKEN?.trim() || null,
       timeoutMs: Math.max(1000, Number(env.SAFETY_SCAN_TIMEOUT_MS) || 60_000), failClosed: env.SAFETY_SCAN_FAIL_CLOSED === 'true',
       newAccountDailyUploads: Math.max(1, Number(env.NEW_ACCOUNT_DAILY_UPLOADS) || 5),
+      reportHoldThreshold: count('REPORT_HOLD_THRESHOLD', 5),
     },
   };
 }

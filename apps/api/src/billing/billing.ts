@@ -1,8 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { Payment, Prisma, PrismaClient, User } from '@prisma/client';
+import { Prisma, type Campaign, type Payment, type PrismaClient, type User } from '@prisma/client';
 import { PROPOSED_SPLIT, allocatePool, splitRevenue } from '@free-me/shared';
-import type { AppConfig } from '../config/config';
+import type { AppConfig, BillingConfig } from '../config/config';
 import { createProviders, currencyDigits, ProviderError, type PaymentProvider, type ProviderName } from './providers';
 import { type MailService, noticeMail } from '../mail/mail.service';
 
@@ -32,6 +32,78 @@ export function msisdn(raw: string, currency: string): string | null {
 export const isPremium = (u: Pick<User, 'premiumUntil'>, now = new Date()) => !!u.premiumUntil && u.premiumUntil > now;
 /** Premium features (Live Studio, monetisation): members, and administrators, who can use everything. */
 export const hasPremiumAccess = (u: Pick<User, 'premiumUntil' | 'roles'>, now = new Date()) => isPremium(u, now) || u.roles.includes('ADMIN');
+/**
+ * Ad views a campaign priced per 1,000 views can get: in total (its budget) and per UTC day (spread evenly over the
+ * days bought, so one campaign cannot take every slot). Null for older campaigns priced per day (no limit).
+ */
+export function adViewLimits(c: Pick<Campaign, 'cpmRateCents' | 'budgetAmountCents' | 'days'>): { total: number; perDay: number } | null {
+  if (!c.cpmRateCents) return null;
+  const total = Number((c.budgetAmountCents * 1000n) / BigInt(c.cpmRateCents));
+  return { total, perDay: Math.max(1, Math.floor(total / Math.max(1, c.days))) };
+}
+/** Revenue (cents) of a campaign's first `views` views: whole cents only, so days add up exactly to the total. */
+export const cpmRevenue = (views: bigint, cpmRateCents: number) => (views * BigInt(cpmRateCents)) / 1000n;
+/** Redis counter of a campaign's ad views on one UTC day. */
+export const adDayKey = (campaignId: string, t = new Date()) => `ads:day:${campaignId}:${t.toISOString().slice(0, 10)}`;
+
+/** Uploading after the free videos: the Creator pass, Premium (which includes it), or an administrator account. */
+export const hasCreatorPass = (u: Pick<User, 'premiumUntil' | 'roles' | 'creatorPassUntil'>, now = new Date()) =>
+  hasPremiumAccess(u, now) || (!!u.creatorPassUntil && u.creatorPassUntil > now);
+
+/**
+ * Whether this account may start another upload. Every channel gets `creatorFreeVideos` uploads to try Free Me; then
+ * the Creator pass (a year at a time) allows `creatorPassVideosPerYear` uploads in any 365 days; Premium (Pro) has no
+ * limit. Videos already published stay online whether or not a plan is kept up. `uploadsLastYear` counts the
+ * channel's videos uploaded in the last 365 days (deleting one frees its storage, so it frees its place too).
+ */
+export function uploadAccess(u: Pick<User, 'premiumUntil' | 'roles' | 'creatorPassUntil'>, uploadCount: number, uploadsLastYear: number,
+  b: Pick<BillingConfig, 'creatorFreeVideos' | 'creatorPassVideosPerYear'>, now = new Date()) {
+  const pro = hasPremiumAccess(u, now);
+  const pass = pro || (!!u.creatorPassUntil && u.creatorPassUntil > now);
+  const freeLeft = Math.max(0, b.creatorFreeVideos - uploadCount);
+  const passLeft = pro ? null : pass ? Math.max(0, b.creatorPassVideosPerYear - uploadsLastYear) : 0;
+  const allowed = pro || freeLeft > 0 || (pass && (passLeft ?? 0) > 0);
+  const reason = allowed ? null : pass ? 'PASS_LIMIT' as const : 'PASS_REQUIRED' as const;
+  return { allowed, pro, pass, freeLeft, passLeft, reason };
+}
+
+/** A channel's uploads (not ads) of the last 365 days, for the Creator pass's yearly number. */
+export const uploadsLastYear = (prisma: Pick<PrismaClient, 'video'>, channelId: string, now = new Date()) =>
+  prisma.video.count({ where: { channelId, isAd: false, createdAt: { gt: new Date(now.getTime() - 365 * DAY) } } });
+
+/** The paid plans (Premium is the "Pro" plan for creators). */
+export type PlanKey = 'premium' | 'plus' | 'family' | 'creator_pass';
+export const PLAN_PURPOSE = { premium: 'PREMIUM', plus: 'PLUS', family: 'FAMILY', creator_pass: 'CREATOR_PASS' } as const;
+/** Lengths on sale: months for the monthly plans, years (as 12, 24 months) for the Creator pass. */
+export const PLAN_MONTHS: Record<PlanKey, readonly number[]> = { premium: [1, 3, 6, 12], plus: [1, 3, 6, 12], family: [1, 3, 6, 12], creator_pass: [12, 24] };
+
+/** A plan's price for one month (one year for the Creator pass) for someone in `country` (their profile's country). */
+export function planPrice(b: Pick<BillingConfig, 'premiumUsdCents' | 'premiumByCountry' | 'plusUsdCents' | 'plusByCountry' | 'familyUsdCents' | 'familyByCountry' | 'creatorPassUsdCents'>, plan: PlanKey, country: string | null | undefined): number {
+  const c = country?.toUpperCase();
+  if (plan === 'premium') return (c && b.premiumByCountry?.[c]) || b.premiumUsdCents;
+  if (plan === 'plus') return (c && b.plusByCountry?.[c]) || b.plusUsdCents;
+  if (plan === 'family') return (c && b.familyByCountry?.[c]) || b.familyUsdCents;
+  return b.creatorPassUsdCents;
+}
+/** What `months` of a plan costs: the Creator pass is priced per year. */
+export const planTotal = (unit: number, plan: PlanKey, months: number) => (plan === 'creator_pass' ? unit * (months / 12) : unit * months);
+
+type PlusFields = Pick<User, 'premiumUntil' | 'roles' | 'plusUntil' | 'familyUntil' | 'familyOwnerId'>;
+/**
+ * Plus perks (no ads, every quality): Plus, Family & TV (holder and members), and Premium, which includes them. A
+ * member's perks last while the holder's plan does. Pass the holder when already loaded; otherwise it is read.
+ */
+export async function hasPlus(prisma: Pick<PrismaClient, 'user'>, u: PlusFields, now = new Date(), owner?: Pick<User, 'familyUntil'> | null): Promise<boolean> {
+  if (hasPremiumAccess(u, now) || (u.plusUntil && u.plusUntil > now) || (u.familyUntil && u.familyUntil > now)) return true;
+  if (!u.familyOwnerId) return false;
+  const o = owner ?? await prisma.user.findUnique({ where: { id: u.familyOwnerId }, select: { familyUntil: true } });
+  return !!o?.familyUntil && o.familyUntil > now;
+}
+
+/** Premium per month for someone in `country` (their profile's country): the country's own price, else the standard one. */
+export const premiumPriceFor = (b: Pick<BillingConfig, 'premiumUsdCents' | 'premiumByCountry'>, country: string | null | undefined) =>
+  (country && b.premiumByCountry?.[country.toUpperCase()]) || b.premiumUsdCents;
+
 /** Manual payments wait this long for the payer's proof and an administrator's check. */
 const MANUAL_WAIT = 7 * DAY;
 
@@ -62,13 +134,13 @@ export class Billing {
   }
 
   /** Creates a payment and asks the provider to collect it. */
-  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN'; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }) {
+  async start(user: User, p: { purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_PASS' | 'PLUS' | 'FAMILY' | 'VERIFICATION'; method: ProviderName; usdCents: number; months?: number; campaignId?: string; phone?: string; description: string; returnPath: string }) {
     const provider = (await this.providers())[p.method];
-    if (!provider) throw new BillingError(p.method === 'mtn_momo' ? 'MTN MoMo payments are not set up on this server yet.' : p.method === 'flutterwave' ? 'Card payments are not set up on this server yet.' : 'This way of paying is not available.');
+    if (!provider) throw new BillingError(p.method === 'airtel_money' ? 'Airtel Money payments are not set up on this server yet.' : p.method === 'mtn_momo' ? 'MTN MoMo payments are not set up on this server yet.' : p.method === 'flutterwave' ? 'Card payments are not set up on this server yet.' : 'This way of paying is not available.');
     let phone: string | undefined;
-    if (p.method === 'mtn_momo') {
+    if (p.method === 'mtn_momo' || p.method === 'airtel_money') {
       phone = p.phone ? msisdn(p.phone, provider.currency) ?? undefined : undefined;
-      if (!phone) throw new BillingError('Enter your MTN Mobile Money number, e.g. 0788 123 456 or +250 788 123 456.');
+      if (!phone) throw new BillingError(p.method === 'airtel_money' ? 'Enter your Airtel Money number, e.g. 0731 234 567 or +250 731 234 567.' : 'Enter your MTN Mobile Money number, e.g. 0788 123 456 or +250 788 123 456.');
     }
     const amountMinor = provider.charge(p.usdCents);
     const payment = await this.prisma.payment.create({
@@ -122,6 +194,12 @@ export class Billing {
   private async fulfil(tx: Prisma.TransactionClient, p: Payment) {
     if (p.purpose === 'PREMIUM') {
       await this.extendPremium(tx, p.userId, p.months ?? 1);
+    } else if (p.purpose === 'CREATOR_PASS') {
+      await this.extendCreatorPass(tx, p.userId, p.months ?? 12);
+    } else if (p.purpose === 'VERIFICATION') {
+      await this.extendVerification(tx, p.userId, p.months ?? 12);
+    } else if (p.purpose === 'PLUS' || p.purpose === 'FAMILY') {
+      await this.extendPlan(tx, p.userId, p.purpose === 'PLUS' ? 'plusUntil' : 'familyUntil', p.months ?? 1);
     } else if (p.campaignId) {
       await tx.campaign.updateMany({ where: { id: p.campaignId, status: 'DRAFT' }, data: { status: 'PENDING_REVIEW' } });
     }
@@ -159,6 +237,42 @@ export class Billing {
     await this.prisma.$transaction((tx) => this.extendPremium(tx, userId, months));
   }
 
+  /** Gives the Creator pass without a payment (administrators: invited creators at launch, partners). */
+  async grantCreatorPass(userId: string, months: number) {
+    await this.prisma.$transaction((tx) => this.extendCreatorPass(tx, userId, months));
+  }
+
+  private extendCreatorPass(tx: Prisma.TransactionClient, userId: string, months: number) {
+    return this.extendPlan(tx, userId, 'creatorPassUntil', months);
+  }
+
+  /**
+   * A paid Verified business badge: the checked business (APPROVED, or ACTIVE when renewing) gets the badge until a
+   * year later (from its current end when renewing early). The badge then overrides a Premium badge on the channel.
+   */
+  private async extendVerification(tx: Prisma.TransactionClient, userId: string, months: number) {
+    const channel = await tx.channel.findUnique({ where: { userId }, include: { businessVerification: true } });
+    const v = channel?.businessVerification;
+    if (!channel || !v || (v.status !== 'APPROVED' && v.status !== 'ACTIVE')) { this.log.warn(`verification paid by ${userId} without an approved request`); return; }
+    const from = v.verifiedUntil && v.verifiedUntil > new Date() ? v.verifiedUntil.getTime() : Date.now();
+    await tx.businessVerification.update({ where: { id: v.id }, data: { status: 'ACTIVE', verifiedUntil: new Date(from + months * MONTH) } });
+    await tx.channel.update({ where: { id: channel.id }, data: { isVerified: true, verificationSource: 'BUSINESS' } });
+  }
+
+  /** Gives Plus or Family & TV without a payment (administrators: partners, prizes, support). */
+  async grantPlan(userId: string, field: 'plusUntil' | 'familyUntil', months: number) {
+    await this.prisma.$transaction((tx) => this.extendPlan(tx, userId, field, months));
+  }
+
+  /** Adds months to a plan, from its end when it is still running (paying early never loses days). */
+  private async extendPlan(tx: Prisma.TransactionClient, userId: string, field: 'creatorPassUntil' | 'plusUntil' | 'familyUntil', months: number) {
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    const until = user[field];
+    const from = until && until > new Date() ? until.getTime() : Date.now();
+    await tx.user.update({ where: { id: userId }, data: { [field]: new Date(from + months * MONTH) } });
+  }
+
   private async extendPremium(tx: Prisma.TransactionClient, userId: string, months: number) {
     // Serialize grants and purchases for the same account so both extensions are applied.
     await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
@@ -183,11 +297,13 @@ export class Billing {
         const digits = currencyDigits(payment.currency);
         const raw = payment.amountMinor.toString().padStart(digits + 1, '0');
         const amount = digits ? `${raw.slice(0, -digits)}.${raw.slice(-digits)}` : raw;
-        const item = payment.purpose === 'PREMIUM' ? `Premium (${payment.months ?? 1} month(s))` : 'Ad campaign';
+        const item = payment.purpose === 'PREMIUM' ? `Premium (${payment.months ?? 1} month(s))` : payment.purpose === 'CREATOR_PASS' ? `Creator pass (${Math.round((payment.months ?? 12) / 12)} year(s))`
+          : payment.purpose === 'PLUS' ? `Plus (${payment.months ?? 1} month(s))` : payment.purpose === 'FAMILY' ? `Family & TV (${payment.months ?? 1} month(s))`
+            : payment.purpose === 'VERIFICATION' ? 'Verified business badge (1 year)' : 'Ad funds';
         await mail.send(noticeMail(payment.user.email, 'Your Free Me payment receipt', [
           item, `Amount paid: ${payment.currency} ${amount}`, `Payment date (UTC): ${payment.paidAt!.toISOString().slice(0, 10)}`,
           `Receipt reference: ${payment.id}`,
-        ], { label: 'View payment history', url: `${this.config.appUrl}${payment.purpose === 'PREMIUM' ? '/premium' : '/studio/ads'}` }));
+        ], { label: 'View payment history', url: `${this.config.appUrl}${payment.purpose === 'PREMIUM' ? '/premium' : payment.purpose === 'CREATOR_PASS' ? '/hub/pass' : payment.purpose === 'AD_CAMPAIGN' || payment.purpose === 'VERIFICATION' ? '/studio/ads' : '/plans'}` }));
         await this.prisma.payment.updateMany({
           where: { id: payment.id, receiptDueAt: retryAt }, data: { receiptDueAt: null, receiptSentAt: new Date() },
         });
@@ -195,6 +311,45 @@ export class Billing {
         this.log.warn(`Receipt ${payment.id} could not be sent: ${(error as Error).message}`);
       }
     }
+  }
+
+  /**
+   * Worker: mobile money cannot renew by itself, so plans are paid ahead. Three days before a plan ends, its holder gets
+   * one email with a link to renew (`remember` makes sure the same ending is never announced twice, e.g. a Redis SET NX).
+   */
+  async sendRenewalReminders(mail: MailService, remember: (key: string) => Promise<boolean>, now = new Date()) {
+    const from = new Date(now.getTime() + 2 * DAY);
+    const to = new Date(now.getTime() + 3 * DAY);
+    const window = { gt: from, lte: to };
+    const users = await this.prisma.user.findMany({
+      where: { status: 'ACTIVE', OR: [{ premiumUntil: window }, { creatorPassUntil: window }, { plusUntil: window }, { familyUntil: window }] },
+      select: { id: true, email: true, premiumUntil: true, creatorPassUntil: true, plusUntil: true, familyUntil: true }, take: 500,
+    });
+    const plans = [
+      { field: 'premiumUntil', name: 'Premium', path: '/premium' },
+      { field: 'plusUntil', name: 'Plus', path: '/plans' },
+      { field: 'familyUntil', name: 'Family & TV', path: '/plans' },
+      { field: 'creatorPassUntil', name: 'Creator pass', path: '/hub/pass' },
+    ] as const;
+    let sent = 0;
+    for (const u of users) {
+      for (const p of plans) {
+        const until = u[p.field];
+        if (!until || until <= from || until > to) continue;
+        if (!(await remember(`fm:remind:${u.id}:${p.field}:${until.getTime()}`))) continue;
+        const day = until.toISOString().slice(0, 10);
+        try {
+          await mail.send(noticeMail(u.email, `Your Free Me ${p.name} ends on ${day}`, [
+            `Your ${p.name} ends on ${day} (UTC).`,
+            p.field === 'creatorPassUntil' ? 'Renew it to keep uploading. Your videos stay online either way.'
+              : p.field === 'familyUntil' ? 'Renew it so everyone in your plan keeps watching without ads.'
+                : 'Renew it to keep everything it includes. Paying early adds the time to the end, so you lose nothing.',
+          ], { label: `Renew ${p.name}`, url: `${this.config.appUrl}${p.path}` }));
+          sent++;
+        } catch (error) { this.log.warn(`Reminder to ${u.id} not sent: ${(error as Error).message}`); }
+      }
+    }
+    return sent;
   }
 
   /** Worker: checks pending payments (MoMo has no reliable callback; card payers may close the tab). */
@@ -208,18 +363,36 @@ export class Billing {
   /** Worker: memberships that ended lose the Premium badge (a badge given by administrators stays). */
   async expirePremium(now = new Date()) {
     const r = await this.prisma.channel.updateMany({ where: { verificationSource: 'PREMIUM', user: { OR: [{ premiumUntil: null }, { premiumUntil: { lte: now } }] } }, data: { isVerified: false, verificationSource: null } });
-    // Campaigns past their end are done.
-    await this.prisma.campaign.updateMany({ where: { status: 'ACTIVE', endDate: { lte: now } }, data: { status: 'COMPLETED' } });
+    // Verified business badges whose year ended: the badge goes (Premium's comes back), the check stays valid to renew.
+    const lapsed = await this.prisma.businessVerification.findMany({ where: { status: 'ACTIVE', verifiedUntil: { lte: now } }, select: { id: true, channelId: true, channel: { select: { user: { select: { premiumUntil: true } } } } } });
+    for (const v of lapsed) {
+      await this.prisma.businessVerification.update({ where: { id: v.id }, data: { status: 'APPROVED' } });
+      const premium = !!v.channel.user.premiumUntil && v.channel.user.premiumUntil > now;
+      await this.prisma.channel.updateMany({ where: { id: v.channelId, verificationSource: 'BUSINESS' }, data: premium ? { verificationSource: 'PREMIUM' } : { isVerified: false, verificationSource: null } });
+    }
+    // Campaigns past their end are done. One priced per 1,000 views may run on to its deliverUntil to deliver the
+    // views it paid for, and is done as soon as its budget cannot buy another view.
+    await this.prisma.$executeRaw`
+      UPDATE "Campaign" SET "status" = 'COMPLETED', "updatedAt" = now() WHERE "status" = 'ACTIVE'
+      AND (COALESCE("deliverUntil", "endDate") <= ${now} OR ("cpmRateCents" > 0 AND ("impressionsCount" + 1) * "cpmRateCents" > "budgetAmountCents" * 1000))`;
     return r.count;
   }
 
   /**
-   * Worker: shares each finished UTC day's ad revenue. Gross = what campaigns paid for the hours they ran that day.
+   * Worker: shares each finished UTC day's ad revenue. Campaigns priced per 1,000 views count the views they got that
+   * day, and on the day their delivery period ends, any budget they could not deliver. Older campaigns priced per
+   * day count what they paid for the hours they ran. Unpaid campaigns (approved without payment) count nothing.
    * The creator pool (60%) goes to monetised channels in proportion to the ads shown on their videos that day.
    */
   async settleAds(now = new Date()) {
-    const first = await this.prisma.campaign.findFirst({ where: { startDate: { lt: now }, status: { in: ['ACTIVE', 'COMPLETED', 'PAUSED'] }, reviewedAt: { not: null } }, orderBy: { startDate: 'asc' }, select: { startDate: true } });
-    if (!first) return 0;
+    // From the first day with ad or subscription money (Plus and Family share theirs with creators too).
+    const [campaign, member] = await Promise.all([
+      this.prisma.campaign.findFirst({ where: { startDate: { lt: now }, status: { in: ['ACTIVE', 'COMPLETED', 'PAUSED'] }, reviewedAt: { not: null } }, orderBy: { startDate: 'asc' }, select: { startDate: true } }),
+      this.prisma.payment.findFirst({ where: { status: 'SUCCEEDED', purpose: { in: ['PLUS', 'FAMILY'] }, paidAt: { lt: now } }, orderBy: { paidAt: 'asc' }, select: { paidAt: true } }),
+    ]);
+    const starts = [campaign?.startDate, member?.paidAt].filter((d): d is Date => !!d);
+    if (!starts.length) return 0;
+    const first = { startDate: new Date(Math.min(...starts.map((d) => d.getTime()))) };
     const done = new Set((await this.prisma.adDaySettlement.findMany({ where: { day: { gte: utcDay(first.startDate) } }, select: { day: true } })).map((d) => d.day.getTime()));
     let settled = 0;
     for (let day = utcDay(first.startDate); day.getTime() + DAY <= now.getTime(); day = new Date(day.getTime() + DAY)) {
@@ -232,9 +405,26 @@ export class Billing {
 
   async adDayShares(day: Date) {
     const end = new Date(day.getTime() + DAY);
-    const campaigns = await this.prisma.campaign.findMany({ where: { reviewedAt: { not: null }, status: { in: ['ACTIVE', 'COMPLETED', 'PAUSED'] }, startDate: { lt: end }, endDate: { gt: day } } });
+    const campaigns = await this.prisma.campaign.findMany({ where: { reviewedAt: { not: null }, status: { in: ['ACTIVE', 'COMPLETED', 'PAUSED'] }, startDate: { lt: end }, OR: [{ endDate: { gt: day } }, { deliverUntil: { gte: day } }] } });
+    const perView = campaigns.filter((c) => c.cpmRateCents > 0 && c.dailyRateCents > 0);
+    const counts = new Map((perView.length ? await this.prisma.$queryRaw<Array<{ campaignId: string; before: bigint; today: bigint }>>`
+      SELECT "campaignId", count(*) FILTER (WHERE "createdAt" < ${day.toISOString()}::timestamp)::bigint AS before,
+        count(*) FILTER (WHERE "createdAt" >= ${day.toISOString()}::timestamp)::bigint AS today
+      FROM "AdImpression" WHERE "campaignId" IN (${Prisma.join(perView.map((c) => c.id))}) AND "createdAt" < ${end.toISOString()}::timestamp
+      GROUP BY "campaignId"` : []).map((r) => [r.campaignId, r]));
     let gross = 0n;
     for (const c of campaigns) {
+      if (!c.dailyRateCents) continue;
+      if (c.cpmRateCents > 0) {
+        const n = counts.get(c.id) ?? { before: 0n, today: 0n };
+        const upTo = cpmRevenue(n.before + n.today, c.cpmRateCents);
+        gross += upTo - cpmRevenue(n.before, c.cpmRateCents);
+        // Budget the campaign could not deliver is counted when its delivery period ends (it was paid for).
+        const last = c.deliverUntil ?? c.endDate;
+        if (last >= day && last < end && c.budgetAmountCents > upTo) gross += c.budgetAmountCents - upTo;
+        continue;
+      }
+      if (c.endDate <= day) continue;
       const ran = Math.min(end.getTime(), c.endDate.getTime()) - Math.max(day.getTime(), c.startDate.getTime());
       if (ran > 0) gross += (BigInt(c.dailyRateCents) * BigInt(ran)) / BigInt(DAY);
     }
@@ -247,14 +437,59 @@ export class Billing {
     return { gross, split, rows, shares };
   }
 
+  /**
+   * Plus and Family & TV money of one day for creators: each payment counts over the days it pays for (its months of
+   * 30 days from when it was paid), and SUBSCRIPTION_CREATOR_SHARE_PERCENT of it (default 50%) is shared between
+   * monetised channels in proportion to the watch time members gave their videos that day. A day nobody with a
+   * plan watched a monetised video keeps the money with Free Me (recorded as not allocated).
+   */
+  async subscriptionDayShares(day: Date) {
+    const end = new Date(day.getTime() + DAY);
+    const b = await this.settings();
+    const paid = await this.prisma.payment.findMany({
+      where: { status: 'SUCCEEDED', purpose: { in: ['PLUS', 'FAMILY'] }, paidAt: { lt: end, gt: new Date(day.getTime() - 13 * MONTH) } },
+      select: { usdCents: true, months: true, paidAt: true },
+    });
+    let gross = 0n;
+    for (const p of paid) {
+      const span = (p.months ?? 1) * MONTH;
+      const from = p.paidAt!.getTime();
+      const covered = Math.min(end.getTime(), from + span) - Math.max(day.getTime(), from);
+      if (covered > 0) gross += (BigInt(p.usdCents) * BigInt(covered)) / BigInt(span);
+    }
+    const pool = (gross * BigInt(b.subscriptionCreatorShareBps)) / 10_000n;
+    const rows = await this.prisma.$queryRaw<Array<{ channelId: string; seconds: bigint }>>`
+      SELECT v."channelId", sum(s."plusWatchSeconds")::bigint AS seconds FROM "VideoDailyStat" s JOIN "Video" v ON v.id = s."videoId"
+      JOIN "CreatorEligibility" e ON e."channelId" = v."channelId" AND e."isEligible"
+      WHERE s."day" = ${day.toISOString().slice(0, 10)}::date AND s."plusWatchSeconds" > 0 GROUP BY v."channelId"`;
+    const shares = allocatePool(rows.length ? pool : 0n, Object.fromEntries(rows.map((r) => [r.channelId, r.seconds])));
+    return { gross, pool, rows, shares, shareBps: b.subscriptionCreatorShareBps };
+  }
+
   private async settleDay(day: Date) {
     const { gross, split, rows, shares } = await this.adDayShares(day);
+    const subs = await this.subscriptionDayShares(day);
     const label = day.toISOString().slice(0, 10);
     await this.prisma.$transaction(async (tx) => {
       await tx.adDaySettlement.create({ data: {
         day, currency: EARNINGS_CURRENCY, grossCents: gross, creatorPoolCents: split.creatorPool, allocatedCents: Object.values(shares).reduce((a, b) => a + b, 0n),
         platformCents: split.platform, reinvestCents: split.reinvestment, impressions: rows.reduce((a, r) => a + Number(r.n), 0), channels: rows.length,
+        subscriptionPoolCents: subs.pool, subscriptionAllocatedCents: Object.values(subs.shares).reduce((a, b) => a + b, 0n),
       } });
+      for (const r of subs.rows) {
+        const amount = subs.shares[r.channelId] ?? 0n;
+        if (amount <= 0n) continue;
+        const bal = await tx.creatorBalance.upsert({
+          where: { channelId: r.channelId }, create: { channelId: r.channelId, currency: EARNINGS_CURRENCY, confirmedBalanceCents: amount, lifetimeEarningsCents: amount },
+          update: { confirmedBalanceCents: { increment: amount }, lifetimeEarningsCents: { increment: amount } },
+        });
+        const minutes = Math.round(Number(r.seconds) / 60);
+        await tx.revenueLedger.create({ data: {
+          channelId: r.channelId, sourceType: 'SUBSCRIPTION_SHARE', referenceId: label, currency: EARNINGS_CURRENCY, grossAmountCents: amount, creatorShareCents: amount,
+          platformShareCents: 0n, reinvestShareCents: 0n, splitBps: `${subs.shareBps}/${10_000 - subs.shareBps}/0`,
+          balanceAfterCents: bal.confirmedBalanceCents, description: `Member viewing earnings for ${label} (${minutes} ${minutes === 1 ? 'minute' : 'minutes'} watched by members)`,
+        } });
+      }
       for (const r of rows) {
         const amount = shares[r.channelId] ?? 0n;
         if (amount <= 0n) continue;

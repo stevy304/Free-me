@@ -87,6 +87,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const [playingLevel, setPlayingLevel] = useState<number | null>(null);
   const [menu, setMenu] = useState<null | 'main' | 'quality' | 'speed' | 'captions'>(null);
   const { cc, chooseCc, cueText } = useCaptions(video, captions);
+  const [ccStyle, setCcStyle] = useCaptionStyle();
   const [idle, setIdle] = useState(false);
   const [full, setFull] = useState(false);
   const [hover, setHover] = useState<{ x: number; t: number; w: number } | null>(null);
@@ -383,7 +384,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     const delta = el.currentTime - lastT.current;
     if (!el.paused && delta > 0 && delta < 2) watched.current += delta;
     lastT.current = el.currentTime;
-    if (!el.paused && Date.now() - lastSaved.current > 10_000) save();
+    if (!el.paused && Date.now() - lastSaved.current > 30_000) save(); // every 30 s while playing (and on pause, leave and end)
     const need = Math.min(30, (el.duration || duration) * 0.5);
     if (videoId && !reported.current && need > 0 && watched.current >= need) {
       reported.current = true;
@@ -452,7 +453,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
       {/* Captions: drawn here (not by the browser) so they sit above the floating controls and match the design. */}
       {cueText && (
         <div className={`pointer-events-none absolute inset-x-0 flex justify-center px-3 transition-[bottom] duration-200 ${showUi ? 'bottom-[60px] sm:bottom-[84px]' : 'bottom-3 sm:bottom-8'}`}>
-          <span className="max-w-[88%] whitespace-pre-line rounded-lg bg-[rgb(5_10_10/0.8)] px-2.5 py-1 text-center text-[13px] font-semibold leading-snug text-white sm:max-w-[72%] sm:px-3.5 sm:py-1.5 sm:text-[19px]">{cueText}</span>
+          <span className={`max-w-[88%] whitespace-pre-line rounded-lg px-2.5 py-1 text-center font-semibold leading-snug sm:max-w-[72%] sm:px-3.5 sm:py-1.5 ${CC_SIZE[ccStyle.size]} ${CC_BG[ccStyle.bg]} ${CC_COLOR[ccStyle.color]}`}>{cueText}</span>
         </div>
       )}
       {soundOnly && (
@@ -513,6 +514,18 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
                 <button type="button" className="flex w-full items-center gap-2 rounded-xl px-2 py-2 font-semibold hover:bg-white/10" onClick={() => setMenu('main')}><Icon.ChevronLeft size={18} />Subtitles</button>
                 <button type="button" role="menuitemradio" aria-checked={!cc} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/10" onClick={() => { chooseCc(null); setMenu(null); }}><span className="w-4">{!cc && <Icon.Check size={16} />}</span>Off</button>
                 {captions.map((c) => <button key={c.language} type="button" role="menuitemradio" aria-checked={cc === c.language} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/10" onClick={() => { chooseCc(c.language); setMenu(null); }}><span className="w-4">{cc === c.language && <Icon.Check size={16} />}</span>{captionLabel(c)}</button>)}
+                <p className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/50">Caption style</p>
+                <div className="space-y-2 px-2 pb-1">
+                  <div role="radiogroup" aria-label="Text size" className="grid grid-cols-4 gap-1.5">
+                    {(['s', 'm', 'l', 'xl'] as const).map((v) => <button key={v} type="button" role="radio" aria-checked={ccStyle.size === v} onClick={() => setCcStyle({ size: v })} className={`rounded-xl py-2 font-semibold ${ccStyle.size === v ? 'bg-[#2bb5ab] text-[#04201e]' : 'bg-white/10 hover:bg-white/20'}`} style={{ fontSize: { s: 11, m: 13, l: 15, xl: 17 }[v] }}>{v === 'xl' ? 'XL' : v.toUpperCase()}</button>)}
+                  </div>
+                  <div role="radiogroup" aria-label="Background" className="grid grid-cols-3 gap-1.5 text-[12px]">
+                    {([['box', 'Box'], ['solid', 'Solid'], ['none', 'Outline']] as const).map(([v, l]) => <button key={v} type="button" role="radio" aria-checked={ccStyle.bg === v} onClick={() => setCcStyle({ bg: v })} className={`rounded-xl py-2 font-semibold ${ccStyle.bg === v ? 'bg-[#2bb5ab] text-[#04201e]' : 'bg-white/10 hover:bg-white/20'}`}>{l}</button>)}
+                  </div>
+                  <div role="radiogroup" aria-label="Text colour" className="grid grid-cols-3 gap-1.5 text-[12px]">
+                    {([['white', 'White'], ['yellow', 'Yellow'], ['cyan', 'Cyan']] as const).map(([v, l]) => <button key={v} type="button" role="radio" aria-checked={ccStyle.color === v} onClick={() => setCcStyle({ color: v })} className={`rounded-xl py-2 font-semibold ${ccStyle.color === v ? 'bg-[#2bb5ab] text-[#04201e]' : 'bg-white/10 hover:bg-white/20'}`}>{l}</button>)}
+                  </div>
+                </div>
               </>
             )}
             {menu === 'quality' && (
@@ -611,6 +624,19 @@ function SeekPreview({ hover, cue, label }: { hover: { x: number; w: number }; c
       <span className="block py-1 text-center text-[12px] font-semibold tabular-nums text-white">{label}</span>
     </span>
   );
+}
+
+/** How subtitles look, chosen by the viewer and remembered on this device. */
+interface CaptionStyle { size: 's' | 'm' | 'l' | 'xl'; bg: 'box' | 'solid' | 'none'; color: 'white' | 'yellow' | 'cyan' }
+const CC_DEFAULT: CaptionStyle = { size: 'm', bg: 'box', color: 'white' };
+const CC_SIZE: Record<CaptionStyle['size'], string> = { s: 'text-[11px] sm:text-[15px]', m: 'text-[13px] sm:text-[19px]', l: 'text-[16px] sm:text-[24px]', xl: 'text-[19px] sm:text-[30px]' };
+const CC_BG: Record<CaptionStyle['bg'], string> = { box: 'bg-[rgb(5_10_10/0.8)]', solid: 'bg-black', none: 'bg-transparent [text-shadow:0_0_3px_#000,0_0_3px_#000,0_1px_2px_#000]' };
+const CC_COLOR: Record<CaptionStyle['color'], string> = { white: 'text-white', yellow: 'text-[#ffe14d]', cyan: 'text-[#7ff3ff]' };
+function useCaptionStyle(): [CaptionStyle, (patch: Partial<CaptionStyle>) => void] {
+  const [style, setStyle] = useState<CaptionStyle>(CC_DEFAULT);
+  useEffect(() => { try { const saved = JSON.parse(store.get('fm_cc_style') ?? 'null'); if (saved) setStyle({ ...CC_DEFAULT, ...saved }); } catch { /* ignore a broken value */ } }, []);
+  const update = useCallback((patch: Partial<CaptionStyle>) => setStyle((cur) => { const next = { ...cur, ...patch }; store.set('fm_cc_style', JSON.stringify(next)); return next; }), []);
+  return [style, update];
 }
 
 const captionLabel = (c: CaptionTrack) => `${languageName(c.language)}${c.auto ? ' (automatic)' : ''}`;

@@ -4,7 +4,7 @@ import { Suspense } from 'react';
 import { getViewer } from '@/lib/server-api';
 import { PremiumView } from './PremiumView';
 
-export const metadata: Metadata = { title: 'Premium', description: 'Free Me Premium: a verified badge, earnings from your videos and Live Studio.' };
+export const metadata: Metadata = { title: 'Premium', description: 'Free Me Premium: a Premium badge, earnings from your videos and Live Studio.' };
 
 export default async function Premium() {
   const viewer = await getViewer();

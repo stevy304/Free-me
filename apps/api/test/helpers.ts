@@ -29,6 +29,8 @@ export async function makeApp(opts: { adminEmails?: string[]; google?: GoogleOAu
     NODE_ENV: 'test', DATABASE_URL: process.env.DATABASE_URL, REDIS_URL: opts.redis === false ? undefined : process.env.REDIS_URL, APP_URL: WEB, MAIL_TRANSPORT: 'memory',
     STORAGE_DRIVER: 'local', LOCAL_STORAGE_DIR: opts.storageDir ?? `${require('node:os').tmpdir()}/freeme-test-storage`, SCRATCH_DIR: `${require('node:os').tmpdir()}/freeme-test-scratch`, QUEUE_PREFIX: 'fmtest', UPLOAD_PART_MB: '5',
     SESSION_SECRET: 'test-session-secret-0123456789-abcdefghijklmnop', ADMIN_EMAILS: (opts.adminEmails ?? []).join(','),
+    // Uploads are not limited by the Creator pass unless a test asks (creator-pass tests set it lower).
+    CREATOR_FREE_VIDEOS: '1000',
     ...opts.env,
   });
   const google = opts.google ?? Object.assign(new FakeGoogle(), { enabled: false });

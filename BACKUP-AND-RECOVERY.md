@@ -27,3 +27,16 @@ pg_restore --no-owner --dbname=postgresql://freeme:…@10.0.1.20:5432/freeme_res
 ## Drills
 
 A restore into a scratch database is performed and recorded before launch and every quarter after: dump date, restore duration, row counts compared with production. A backup that has never been restored is not counted as a backup.
+
+`deploy/ubuntu/restore-drill.sh` does the drill in one step. It downloads the newest backup (or takes a dump file), restores it into a scratch database `freeme_restore_drill`, and compares row counts of the main tables with the live database, which it only reads. It then drops the scratch database and prints one line to paste below. The database role needs `CREATEDB`.
+
+```bash
+sudo -u freeme env $(cat /etc/freeme/backup.env | xargs) /opt/freeme/app/deploy/ubuntu/restore-drill.sh
+```
+
+Monitoring: after each successful upload, `backup.sh` writes `freeme_backup_last_success_timestamp_seconds` for the node exporter's textfile collector (`/var/lib/prometheus/node-exporter`). The user that runs the backup must be able to write there (`sudo chgrp freeme /var/lib/prometheus/node-exporter && sudo chmod g+w /var/lib/prometheus/node-exporter`). The `BackupTooOld` alert fires when no backup succeeded in 30 hours.
+
+| Date | Backup | Restore time | Result | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-12 | Test sandbox dump (script check only, not production) | under 1 s | Row counts match | Claude Code |
+

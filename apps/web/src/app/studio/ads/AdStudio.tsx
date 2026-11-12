@@ -13,11 +13,14 @@ import { VideoUpload, type UploadSnapshot } from '@/lib/uploader';
 import type { HubVideo } from '@/components/hub/types';
 import type { Payment, Plans, Viewer } from '@/lib/types';
 import { useShell } from '@/components/shell/ShellContext';
+import { VerifyBusiness } from './VerifyBusiness';
 
 interface Campaign {
   id: string; status: 'DRAFT' | 'PENDING_REVIEW' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'REJECTED'; businessName: string; headline: string; destinationUrl: string; days: number;
   dailyRateCents: number; totalCents: number; targetCountries: string[]; startDate: string | null; endDate: string | null; reviewNote: string | null;
   impressions: number; clicks: number; video: { id: string; title: string; durationSeconds: number } | null; createdAt: string;
+  /** Priced per 1,000 views (null: an older campaign priced per day). */
+  cpmCents?: number | null; viewsBought?: number | null; viewsPerDay?: number | null; spentCents?: number; deliverUntil?: string | null;
 }
 const STATUS: Record<Campaign['status'], [string, string]> = {
   DRAFT: ['Not paid yet', 'bg-surface'], PENDING_REVIEW: ['Paid · in review', 'bg-accent-soft text-on-accent-soft'], ACTIVE: ['Running', 'bg-brand-soft text-brand'],
@@ -36,13 +39,12 @@ const busyVideo = (v: HubVideo) => v.status === 'UPLOADING' || v.status === 'PRO
 export function AdStudio({ viewer }: { viewer: Viewer }) {
   const { locale } = useShell();
   const params = useSearchParams();
-  const premium = viewer.premium.active;
   const [plans, setPlans] = useState<Plans | null>(null);
   const [list, setList] = useState<{ business: { name: string; country: string } | null; campaigns: Campaign[] } | null>(null);
   const [adVideos, setAdVideos] = useState<HubVideo[]>([]);
   const [spaceVideos, setSpaceVideos] = useState<HubVideo[]>([]);
   const [uploads, setUploads] = useState<Array<{ key: number; upload: VideoUpload; snap: UploadSnapshot }>>([]);
-  const [form, setForm] = useState({ businessName: '', country: viewer.profile?.country ?? null as string | null, headline: '', destinationUrl: 'https://', videoId: '', days: 7, placements: '', channels: '', target: null as string | null });
+  const [form, setForm] = useState({ businessName: '', country: viewer.profile?.country ?? null as string | null, headline: '', destinationUrl: 'https://', videoId: '', funds: '', days: 7, placements: '', channels: '', target: null as string | null });
   const [creating, setCreating] = useState(false);
   const [paying, setPaying] = useState<Campaign | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,13 +60,12 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
     setAdVideos(ads.videos); setSpaceVideos(space.videos.filter(usableVideo));
   }, [viewer.channel]);
   const load = useCallback(async () => {
-    if (!premium) return;
     try {
       const [p, l] = await Promise.all([api<Plans>('/billing/plans'), api<typeof list>('/ads/campaigns'), loadVideos()]);
       setPlans(p); setList(l);
       if (l?.business) setForm((f) => ({ ...f, businessName: f.businessName || l.business!.name, country: f.country ?? l.business!.country }));
     } catch (e) { setError((e as Error).message); }
-  }, [premium, loadVideos]);
+  }, [loadVideos]);
   useEffect(() => { void load(); }, [load]);
 
   // While an ad video is uploading or processing, check on it every few seconds.
@@ -102,7 +103,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
   const create = async () => {
     setBusy(true); setError(null);
     try {
-      const r = await api<{ campaign: Campaign }>('/ads/campaigns', { body: { businessName: form.businessName, country: form.country, headline: form.headline, destinationUrl: form.destinationUrl, videoId: form.videoId, days: form.days, targetCountries: form.target ? [form.target] : [], targetVideoIds: form.placements.split(/[,\s]+/).filter(Boolean).map((value) => value.match(/\/watch\/([^/?#]+)/)?.[1] ?? value), targetChannelHandles: form.channels.split(/[,\s]+/).filter(Boolean) } });
+      const r = await api<{ campaign: Campaign }>('/ads/campaigns', { body: { businessName: form.businessName, country: form.country, headline: form.headline, destinationUrl: form.destinationUrl, videoId: form.videoId, budgetUsdCents: Math.round(Number(form.funds) * 100), days: form.days, targetCountries: form.target ? [form.target] : [], targetVideoIds: form.placements.split(/[,\s]+/).filter(Boolean).map((value) => value.match(/\/watch\/([^/?#]+)/)?.[1] ?? value), targetChannelHandles: form.channels.split(/[,\s]+/).filter(Boolean) } });
       setCreating(false); setPaying(r.campaign); await load();
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
@@ -118,20 +119,10 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
     try { await api(`/ads/campaigns/${c.id}${what === 'pause' ? '/pause' : ''}`, { method: what === 'pause' ? 'POST' : 'DELETE', body: what === 'pause' ? {} : undefined }); await load(); } catch (e) { setError((e as Error).message); }
   };
 
-  if (!premium) {
-    return (
-      <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-        <section className="flex flex-col items-center gap-4 rounded-[28px] bg-[#071312] px-6 py-10 text-center text-white">
-          <span className="grid h-16 w-16 place-items-center rounded-full bg-[#f5b95c] text-[#2a1a02]"><Icon.Megaphone size={32} /></span>
-          <h1 className="font-display text-[30px] font-extrabold">Ad Studio is part of Premium</h1>
-          <p className="max-w-md text-[15px] text-[#c9d6d4]">Upload short video ads, choose the countries, and run them before videos on Free Me by the day. You see how many people saw your ad and visited your site.</p>
-          <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />Upgrade</Link>
-        </section>
-      </div>
-    );
-  }
   if (!plans || !list) return error ? <p role="alert" className="mx-auto mt-10 max-w-xl rounded-xl bg-danger/10 px-4 py-3 text-danger">{error}</p> : <Icon.Spinner className="mx-auto mt-16 animate-spin text-muted" />;
-  const rate = plans.ads.usdCentsPerDay;
+  const cpm = plans.ads.usdCentsPer1000Views ?? 100;
+  const minimum = plans.ads.minBudgetUsdCents ?? 700;
+  const fundsCents = Math.round(Number(form.funds || 0) * 100);
   const readyAds = adVideos.filter(usableVideo);
   const running = list.campaigns.filter((c) => c.status === 'ACTIVE').length;
   const shown = list.campaigns.reduce((n, c) => n + c.impressions, 0);
@@ -142,7 +133,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex-1">
           <h1 className="flex items-center gap-2 font-display text-[28px] font-extrabold"><Icon.Megaphone size={28} />Ad Studio</h1>
-          <p className="mt-1 max-w-2xl text-[15px] text-muted">Upload a short video ad, then run it before videos. <b className="text-ink">{usd(rate, locale)} a day</b>, paid up front. Never more than {plans.ads.maxAdsPerVideo} ads on a video, and viewers can skip after 5 seconds.</p>
+          <p className="mt-1 max-w-2xl text-[15px] text-muted">Upload a short video ad, add funds (from <b className="text-ink">{usd(minimum, locale)}</b>) and pay only for views: <b className="text-ink">{usd(cpm, locale)} per 1,000 views</b>. Never more than {plans.ads.maxAdsPerVideo} ads on a video, and viewers can skip after 5 seconds.</p>
         </div>
         {viewer.channel && <button type="button" onClick={() => fileInput.current?.click()} className="flex h-11 items-center gap-2 rounded-2xl bg-surface px-4 text-[14px] font-bold hover:bg-surface-hover"><Icon.Upload size={20} />Upload ad video</button>}
         {viewer.channel && !creating && <button type="button" onClick={() => setCreating(true)} className="flex h-11 items-center gap-2 rounded-2xl bg-brand px-4 text-[14px] font-bold text-on-brand hover:bg-brand-strong"><Icon.Plus size={20} />New ad</button>}
@@ -154,7 +145,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
       {!viewer.channel ? (
         <section className="mt-6 rounded-3xl border border-line bg-elevated p-6">
           <h2 className="font-display text-[20px] font-bold">First, create your Space</h2>
-          <p className="mt-2 text-[15px] text-muted">Ads are shown under your Space’s name and verified badge. <Link href="/channel/create" className="font-semibold text-brand underline">Create your Space</Link>, then come back to upload your first ad.</p>
+          <p className="mt-2 text-[15px] text-muted">Ads are shown under your Space’s name and badge. <Link href="/channel/create" className="font-semibold text-brand underline">Create your Space</Link>, then come back to upload your first ad.</p>
         </section>
       ) : (
         <>
@@ -228,14 +219,18 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                 <label className="block"><span className="text-[13px] font-semibold">Channel placements</span><input className={`mt-1 ${inputClass}`} value={form.channels} onChange={(e) => setForm({ ...form, channels: e.target.value })} placeholder="@channel, @another-channel" maxLength={1200} /></label>
                 <p className="text-sm text-muted sm:col-span-2">Separate placements with commas. Ads can appear on any selected video or channel, subject to the country filter. Leave both blank to reach all eligible content.</p>
                 <label className="block"><span className="text-[13px] font-semibold">Show it in</span><span className="mt-1 block"><CountrySelect value={form.target} onChange={(target) => setForm({ ...form, target })} emptyLabel="Every country" /></span></label>
-                <label className="block"><span className="text-[13px] font-semibold">Days: {form.days}</span>
+                <label className="block"><span className="text-[13px] font-semibold">Funds (US dollars, at least {usd(minimum, locale)})</span>
+                  <input type="number" min={minimum / 100} step={1} inputMode="decimal" className={`mt-1 ${inputClass}`} value={form.funds} onChange={(e) => setForm({ ...form, funds: e.target.value })} placeholder={String(minimum / 100)} />
+                </label>
+                <label className="block"><span className="text-[13px] font-semibold">Spread over {form.days} {form.days === 1 ? 'day' : 'days'}</span>
                   <input type="range" min={1} max={90} value={form.days} onChange={(e) => setForm({ ...form, days: Number(e.target.value) })} className="mt-3 w-full accent-[var(--brand)]" />
                 </label>
                 <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-surface px-4 py-3 sm:col-span-2">
-                  <span className="text-[15px]">{form.days} {form.days === 1 ? 'day' : 'days'} × {usd(rate, locale)} = <b className="font-display text-[20px]">{usd(rate * form.days, locale)}</b></span>
+                  <span className="text-[15px]"><b className="font-display text-[20px]">{usd(fundsCents, locale)}</b> = about <b>{Math.floor((fundsCents * 1000) / cpm).toLocaleString(locale)} views</b>
+                    <span className="block text-[13px] text-muted">About {Math.floor((fundsCents * 1000) / cpm / form.days).toLocaleString(locale)} views a day for {form.days} {form.days === 1 ? 'day' : 'days'}; funds not spent by then keep running until they are.</span></span>
                   <span className="ml-auto flex gap-2">
                     <button type="button" onClick={() => setCreating(false)} className="h-11 rounded-2xl px-4 text-[14px] font-semibold text-muted hover:bg-surface-hover">Cancel</button>
-                    <button type="button" disabled={busy || !form.videoId || !form.country || form.headline.trim().length < 3 || form.businessName.trim().length < 2} onClick={() => void create()} className="h-11 rounded-2xl bg-brand px-5 text-[14px] font-bold text-on-brand disabled:opacity-50">Continue to payment</button>
+                    <button type="button" disabled={busy || !form.videoId || !form.country || form.headline.trim().length < 3 || form.businessName.trim().length < 2 || fundsCents < minimum} onClick={() => void create()} className="h-11 rounded-2xl bg-brand px-5 text-[14px] font-bold text-on-brand disabled:opacity-50">Continue to payment</button>
                   </span>
                 </div>
               </div>
@@ -244,7 +239,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
 
           {paying && (
             <section className="mt-6 rounded-3xl border-2 border-brand bg-elevated p-5 sm:p-6">
-              <div className="flex items-start gap-3"><div className="flex-1"><h2 className="font-display text-[20px] font-bold">Pay for “{paying.headline}”</h2><p className="text-[14px] text-muted">{paying.days} {paying.days === 1 ? 'day' : 'days'}. It starts when our team approves it, usually within a day.</p></div><button type="button" onClick={() => setPaying(null)} aria-label="Close" className="rounded-full p-2 hover:bg-surface"><Icon.Close size={20} /></button></div>
+              <div className="flex items-start gap-3"><div className="flex-1"><h2 className="font-display text-[20px] font-bold">Pay for “{paying.headline}”</h2><p className="text-[14px] text-muted">{usd(paying.totalCents, locale)} of funds. It starts when our team approves it, usually within a day.</p></div><button type="button" onClick={() => setPaying(null)} aria-label="Close" className="rounded-full p-2 hover:bg-surface"><Icon.Close size={20} /></button></div>
               <div className="mt-4 max-w-lg"><PayPanel usdCents={paying.totalCents} plans={plans} label="Pay for ad" onPaid={paid} start={async (method, phone) => (await api<{ payment: Payment }>(`/ads/campaigns/${paying.id}/pay`, { body: { method, phone } })).payment} /></div>
             </section>
           )}
@@ -261,8 +256,9 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                     <div className="flex flex-wrap items-start gap-3">
                       <div className="min-w-0 flex-1">
                         <p className="flex flex-wrap items-center gap-2"><span className="font-display text-[18px] font-bold">{c.headline}</span><span className={`rounded-full px-2.5 py-0.5 text-[12px] font-semibold ${cls}`}>{label}</span></p>
-                        <p className="mt-0.5 truncate text-[13px] text-muted">{c.businessName} · {c.video?.title ?? 'video removed'} · {c.targetCountries.length ? c.targetCountries.join(', ') : 'every country'} · {c.days} {c.days === 1 ? 'day' : 'days'} ({usd(c.totalCents, locale)})</p>
+                        <p className="mt-0.5 truncate text-[13px] text-muted">{c.businessName} · {c.video?.title ?? 'video removed'} · {c.targetCountries.length ? c.targetCountries.join(', ') : 'every country'} · {usd(c.totalCents, locale)} of funds{c.spentCents !== undefined ? `, ${usd(c.spentCents, locale)} spent` : ''}</p>
                         {c.startDate && c.endDate && <p className="text-[13px] text-muted">{new Date(c.startDate).toLocaleDateString(locale)} – {new Date(c.endDate).toLocaleDateString(locale)}</p>}
+                        {c.viewsBought && <p className="text-[13px] text-muted">{c.impressions.toLocaleString(locale)} of {c.viewsBought.toLocaleString(locale)} views delivered (up to {c.viewsPerDay?.toLocaleString(locale)} a day){c.deliverUntil && c.impressions < c.viewsBought ? `; the rest by ${new Date(c.deliverUntil).toLocaleDateString(locale)}` : ''}</p>}
                         {c.reviewNote && <p className={`mt-1 text-[13px] ${c.status === 'REJECTED' ? 'text-danger' : 'text-muted'}`}>Review note: {c.reviewNote}</p>}
                       </div>
                       <dl className="grid grid-cols-3 gap-4 text-center">
@@ -283,6 +279,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
           </section>
         </>
       )}
+      {viewer.channel && <VerifyBusiness plans={plans} />}
     </div>
   );
 }

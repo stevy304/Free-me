@@ -4,6 +4,28 @@ Everything Free Me needs before real people use it, in order. Tick each box; the
 [DEPLOYMENT.md](DEPLOYMENT.md) and [ENVIRONMENT.md](ENVIRONMENT.md). Items marked **(you)** need an account, a
 payment or a decision only the operator can make.
 
+## Launching on a small budget
+
+Start on **one server** and grow only when the monitoring says so (MONITORING.md, `deploy/loadtest/RESULTS.md`). Prices change: check them before buying. Roughly, at the time of writing:
+
+| Item | Choice | About |
+| --- | --- | --- |
+| Server | One Hetzner cloud or dedicated server, 4–8 cores, 16–32 GB RAM, running every role (`ROLE=db`, `app`, `edge`, `media`) and `API_PROCESSES=auto` | €15–50 a month |
+| Video storage | Hetzner Object Storage (S3-compatible) | about €5 a month for the first TB |
+| Video delivery | A CDN with low prices for Africa (compare Bunny CDN's regions, or use its cheaper volume network), in front of `pub/` | a few dollars per TB delivered |
+| Email for sign-in codes | A transactional email provider's free tier (a few thousand emails a month) | €0 |
+| Domain | Any registrar; `.rw` or `.com` | €10–30 a year |
+| Monitoring and alerts | Prometheus, Alertmanager to Telegram, a free outside uptime check (MONITORING.md) | €0 |
+| Backups | A second bucket (another location) for `backup.sh` | about €5 a month |
+
+Total at launch: **about €30–90 a month** plus video delivery. The settings that keep delivery cheap are on by default: `HD_MIN_VIEWS=100` (1080p only for videos people watch), `FREE_MAX_QUALITY=720`, and data saver in the player.
+
+**Upgrade when, not before:**
+
+- `SlowApi` alerts or the database server's CPU stays above 70%: move PostgreSQL and Redis to their own server.
+- `MediaQueueBacklog` alerts: add a media server (`ROLE=media`).
+- Video delivery is the biggest bill: talk to your CDN about volume prices, and to local internet exchanges (RINEX) about peering.
+
 ## 1. Accounts and names (you)
 
 - [ ] **Domain** registered, e.g. `freeme.example`, with DNS you can edit.

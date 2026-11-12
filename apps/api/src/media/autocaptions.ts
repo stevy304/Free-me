@@ -33,10 +33,25 @@ function whisper(bin: string, args: string[], signal?: AbortSignal): Promise<{ l
   });
 }
 
+/** Stores one automatic caption file and its row (an upload that landed meanwhile wins). */
+async function saveAuto(prisma: PrismaClient, storage: Storage, videoId: string, language: string, raw: string) {
+  const { vtt, cues } = toWebVtt(raw);
+  // Its own file name, so it can never overwrite captions the creator uploads at the same moment.
+  const key = `captions/${language}.auto.vtt`;
+  await putMediaFile(prisma, storage, videoId, key, Buffer.from(vtt), { contentType: 'text/vtt; charset=utf-8', cacheControl: 'public, max-age=300' });
+  await prisma.$transaction(async (tx) => {
+    await tx.caption.createMany({ data: [{ videoId, language, source: 'AUTO', key, cueCount: cues }], skipDuplicates: true });
+    await tx.caption.updateMany({ where: { videoId, language, source: 'AUTO' }, data: { key, cueCount: cues } });
+  });
+  return cues;
+}
+
 /**
  * Automatic captions for one video from its extracted speech, with whisper.cpp on the media server (no outside
- * service). The video's language is used when the creator set one; otherwise Whisper detects it. Captions the
- * creator uploaded are never replaced. Failures are logged and never affect the video itself.
+ * service). The video's language is used when the creator set one; otherwise Whisper detects it. When the video is
+ * not in English, Whisper also translates the speech into English captions (AUTO_CAPTIONS_ENGLISH, on by default),
+ * so every video can be followed in English. Captions the creator uploaded are never replaced. Failures are logged
+ * and never affect the video itself.
  */
 export async function autoCaptions(prisma: PrismaClient, storage: Storage, config: AppConfig, videoId: string, speech: string, signal?: AbortSignal) {
   const log = new Logger('Captions');
@@ -61,22 +76,26 @@ export async function autoCaptions(prisma: PrismaClient, storage: Storage, confi
     }
     if (!language || !CODE.test(language)) { log.warn(`${videoId}: language not recognised; no automatic captions`); return null; }
     if (video.captions.some((c) => c.language === language && c.source === 'UPLOADED')) return null;
-    const { vtt, cues } = toWebVtt(await readFile(`${outBase}.vtt`, 'utf8'));
-    // Its own file name, so it can never overwrite captions the creator uploads at the same moment.
-    const key = `captions/${language}.auto.vtt`;
-    await putMediaFile(prisma, storage, videoId, key, Buffer.from(vtt), { contentType: 'text/vtt; charset=utf-8', cacheControl: 'public, max-age=300' });
-    // Upload and automatic run can race: an upload that landed meanwhile wins.
-    await prisma.$transaction(async (tx) => {
-      await tx.caption.createMany({ data: [{ videoId, language, source: 'AUTO', key, cueCount: cues }], skipDuplicates: true });
-      await tx.caption.updateMany({ where: { videoId, language, source: 'AUTO' }, data: { key, cueCount: cues } });
-    });
-    publish(room.video(videoId), 'captions');
+    const cues = await saveAuto(prisma, storage, videoId, language, await readFile(`${outBase}.vtt`, 'utf8'));
     log.log(`${videoId}: automatic captions (${language}, ${cues} cues)`);
-    return { language, cues };
+    // English for everyone: Whisper's translation of the same speech, unless the creator uploaded English captions.
+    let english: number | null = null;
+    if (config.media.englishCaptions && language !== 'en' && !video.captions.some((c) => c.language === 'en' && c.source === 'UPLOADED')) {
+      try {
+        await whisper(w.bin, ['-m', w.model, '-f', speech, '-l', language, '-tr', '-t', String(w.threads), '-ovtt', '-of', `${outBase}.en`], signal);
+        english = await saveAuto(prisma, storage, videoId, 'en', await readFile(`${outBase}.en.vtt`, 'utf8'));
+        log.log(`${videoId}: automatic English captions (${english} cues)`);
+      } catch (e) {
+        if (signal?.aborted) throw e;
+        log.warn(`${videoId}: no English captions: ${(e as Error).message.slice(0, 300)}`);
+      }
+    }
+    publish(room.video(videoId), 'captions');
+    return { language, cues, english };
   } catch (e) {
     log.warn(`${videoId}: automatic captions failed: ${(e as Error).message.slice(0, 300)}`);
     return null;
   } finally {
-    await Promise.all([rm(speech, { force: true }), rm(`${outBase}.vtt`, { force: true })]).catch(() => undefined);
+    await Promise.all([rm(speech, { force: true }), rm(`${outBase}.vtt`, { force: true }), rm(`${outBase}.en.vtt`, { force: true })]).catch(() => undefined);
   }
 }

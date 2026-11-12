@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { BillingConfig } from '../config/config';
 import type { EffectiveBilling, ManualConfig } from './settings';
 
-export type ProviderName = 'mtn_momo' | 'flutterwave' | 'manual';
+export type ProviderName = 'mtn_momo' | 'airtel_money' | 'flutterwave' | 'manual';
 export type ProviderStatus = { status: 'PENDING' } | { status: 'SUCCEEDED' } | { status: 'FAILED'; reason: string };
 
 export interface StartPayment {
@@ -37,6 +37,16 @@ const major = (minor: bigint, currency: string) => {
   const unit = 10n ** BigInt(d);
   return `${minor / unit}.${(minor % unit).toString().padStart(d, '0')}`;
 };
+/**
+ * A dollar price in a local currency, as people expect to pay it: whole units, and amounts of 1,000 or more rounded
+ * to the nearest 100 (RWF 2,494 → 2,500, 6,003 → 6,000). Returned in minor units. The web app rounds the same way.
+ */
+export function localCharge(usdCents: number, perUsd: number, currency: string): bigint {
+  const d = currencyDigits(currency);
+  const exact = (usdCents / 100) * perUsd;
+  const units = d === 0 && exact >= 1000 ? Math.round(exact / 100) * 100 : Math.ceil(exact);
+  return BigInt(units) * 10n ** BigInt(d);
+}
 const toMinor = (amount: number | string, currency: string) => BigInt(Math.round(Number(amount) * 10 ** currencyDigits(currency)));
 
 async function call(url: string, init: RequestInit, what: string) {
@@ -53,11 +63,7 @@ export class MomoProvider implements PaymentProvider {
   constructor(private readonly c: NonNullable<BillingConfig['momo']>) {}
   get currency() { return this.c.currency; }
 
-  charge(usdCents: number) {
-    // Rounded up to a whole unit, so the charge never falls below the dollar price.
-    const d = currencyDigits(this.c.currency);
-    return BigInt(Math.ceil((usdCents / 100) * this.c.perUsd)) * 10n ** BigInt(d);
-  }
+  charge(usdCents: number) { return localCharge(usdCents, this.c.perUsd, this.c.currency); }
 
   private async bearer() {
     if (this.token && this.token.until > Date.now()) return this.token.value;
@@ -98,6 +104,69 @@ export class MomoProvider implements PaymentProvider {
       const r = typeof j.reason === 'string' ? j.reason : j.reason?.message;
       return { status: 'FAILED', reason: r === 'APPROVAL_REJECTED' ? 'The payment was declined on the phone.' : r === 'NOT_ENOUGH_FUNDS' ? 'Not enough money on the mobile money account.' : 'The mobile money payment did not go through.' };
     }
+    return { status: 'PENDING' };
+  }
+}
+
+/**
+ * Airtel Money Collections (Airtel Africa Open API, openapi.airtel.africa; sandbox openapiuat.airtel.africa): the
+ * payer approves a USSD prompt on their phone, then the status is asked for. Numbers are sent without the country
+ * code (Rwanda: 9 digits, e.g. 73xxxxxxx). Check the request against Airtel's current documentation and sandbox
+ * before going live: Airtel's field names differ between products and countries.
+ */
+export class AirtelProvider implements PaymentProvider {
+  readonly name = 'airtel_money' as const;
+  private token: { value: string; until: number } | null = null;
+  constructor(private readonly c: NonNullable<BillingConfig['airtel']>) {}
+  get currency() { return this.c.currency; }
+
+  charge(usdCents: number) { return localCharge(usdCents, this.c.perUsd, this.c.currency); }
+
+  private async bearer() {
+    if (this.token && this.token.until > Date.now()) return this.token.value;
+    const res = await call(`${this.c.baseUrl}/auth/oauth2/token`, {
+      method: 'POST', headers: { 'content-type': 'application/json', accept: '*/*' },
+      body: JSON.stringify({ client_id: this.c.clientId, client_secret: this.c.clientSecret, grant_type: 'client_credentials' }),
+    }, 'Airtel token');
+    if (!res.ok) throw new ProviderError(`Airtel token: answered ${res.status}`);
+    const j = (await res.json()) as { access_token: string; expires_in?: number | string };
+    this.token = { value: j.access_token, until: Date.now() + Math.max(60, Number(j.expires_in ?? 3600) - 60) * 1000 };
+    return j.access_token;
+  }
+
+  private async headers() {
+    return { authorization: `Bearer ${await this.bearer()}`, 'X-Country': this.c.country, 'X-Currency': this.c.currency, 'content-type': 'application/json', accept: '*/*' };
+  }
+
+  /** "250731234567" → "731234567": Airtel wants the national number. */
+  private national(msisdn: string) { return msisdn.startsWith('250') && this.c.country === 'RW' ? msisdn.slice(3) : msisdn; }
+
+  async start(p: StartPayment) {
+    if (!p.phone) throw new ProviderError('An Airtel Money number is needed.');
+    // Airtel's transaction id: short, unique, letters and digits only.
+    const ref = p.paymentId.replace(/-/g, '').slice(0, 20).toUpperCase();
+    const res = await call(`${this.c.baseUrl}/merchant/v1/payments/`, {
+      method: 'POST', headers: await this.headers(),
+      body: JSON.stringify({
+        reference: p.description.replace(/[^\w ]/g, '').slice(0, 64) || 'Free Me',
+        subscriber: { country: this.c.country, currency: this.c.currency, msisdn: this.national(p.phone) },
+        transaction: { amount: Number(major(p.amountMinor, p.currency)), country: this.c.country, currency: this.c.currency, id: ref },
+      }),
+    }, 'Airtel collection');
+    const j = (await res.json().catch(() => ({}))) as { status?: { success?: boolean; message?: string } };
+    if (!res.ok || j.status?.success === false) throw new ProviderError(`Airtel collection: ${j.status?.message ?? `answered ${res.status}`}`);
+    return { providerRef: ref, checkoutUrl: null };
+  }
+
+  async check(ref: string): Promise<ProviderStatus> {
+    const res = await call(`${this.c.baseUrl}/standard/v1/payments/${encodeURIComponent(ref)}`, { headers: await this.headers() }, 'Airtel status');
+    if (res.status === 404) return { status: 'PENDING' };
+    if (!res.ok) throw new ProviderError(`Airtel status: answered ${res.status}`);
+    const j = (await res.json()) as { data?: { transaction?: { status?: string; message?: string } } };
+    const status = j.data?.transaction?.status;
+    // TS: successful, TF: failed, TA/TIP: still in progress (ambiguous or waiting for the payer).
+    if (status === 'TS') return { status: 'SUCCEEDED' };
+    if (status === 'TF') return { status: 'FAILED', reason: 'The Airtel Money payment did not go through.' };
     return { status: 'PENDING' };
   }
 }
@@ -145,10 +214,7 @@ export class ManualProvider implements PaymentProvider {
   readonly name = 'manual' as const;
   constructor(readonly c: ManualConfig) {}
   get currency() { return this.c.currency; }
-  charge(usdCents: number) {
-    const d = currencyDigits(this.c.currency);
-    return this.c.currency === 'USD' ? BigInt(usdCents) : BigInt(Math.ceil((usdCents / 100) * this.c.perUsd)) * 10n ** BigInt(d);
-  }
+  charge(usdCents: number) { return this.c.currency === 'USD' ? BigInt(usdCents) : localCharge(usdCents, this.c.perUsd, this.c.currency); }
   async start() {
     // A short code people can type in a MoMo or bank transfer message.
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -163,6 +229,7 @@ export function createProviders(c: EffectiveBilling | BillingConfig): Partial<Re
   const manual = 'manual' in c ? c.manual : null;
   return {
     ...(c.momo ? { mtn_momo: new MomoProvider(c.momo) } : {}),
+    ...('airtel' in c && c.airtel ? { airtel_money: new AirtelProvider(c.airtel) } : {}),
     ...(c.flutterwave ? { flutterwave: new FlutterwaveProvider(c.flutterwave) } : {}),
     ...(manual ? { manual: new ManualProvider(manual) } : {}),
   };

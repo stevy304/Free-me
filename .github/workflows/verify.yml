@@ -41,8 +41,17 @@ jobs:
           node-version: 22
           cache: npm
       - name: FFmpeg and an S3-compatible test server
+        # When Ubuntu's package mirror is unreachable, apt waits ~20 s per package and the job used to sit until its
+        # 25-minute limit and show as "cancelled". Short timeouts with retries, and a step limit, make such an outage
+        # fail within minutes with a clear message instead; re-run the job once the mirror is back.
+        timeout-minutes: 10
         run: |
-          sudo apt-get update -q && sudo apt-get install -yq ffmpeg
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15"
+          for attempt in 1 2 3; do
+            if sudo apt-get update -q $APT && sudo apt-get install -yq $APT ffmpeg; then break; fi
+            if [ "$attempt" = 3 ]; then echo "::error::Could not install FFmpeg: Ubuntu's package mirror did not answer. Re-run this job later."; exit 1; fi
+            echo "apt attempt $attempt failed; trying again in 20 s"; sleep 20
+          done
           # Own virtualenv: installing into the system Python upgrades cryptography and breaks its pyOpenSSL.
           python3 -m venv /tmp/moto-venv
           /tmp/moto-venv/bin/pip install --quiet "moto[server]"
@@ -60,6 +69,8 @@ jobs:
         run: npx prisma migrate deploy && npm run db:seed
       - name: Typecheck
         run: npm run lint
+      - name: Capacity calculator checks
+        run: npm run test:capacity
       - name: Unit and API tests (PostgreSQL, Redis, FFmpeg, S3 driver)
         run: npm test
         env:

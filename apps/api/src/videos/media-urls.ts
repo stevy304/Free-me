@@ -29,9 +29,18 @@ export class MediaUrls {
     return v.mediaLocation === 'PUBLIC' ? this.publicUrl(v.id, rel) : this.storage.signedGetUrl(mediaPrefix(v.id, v.mediaLocation) + rel, 4 * 3600);
   }
 
-  /** Where the player loads the master playlist. Private media goes through the API, which checks access. */
-  playback(v: Pick<Video, 'id' | 'hlsMasterKey' | 'mediaLocation' | 'status'>): string | null {
+  /**
+   * Where the player loads the master playlist. Private media goes through the API, which checks access. With `full`
+   * (Premium viewers, the owner) every quality; otherwise up to FREE_MAX_QUALITY when the video has a limited playlist.
+   */
+  playback(v: Pick<Video, 'id' | 'hlsMasterKey' | 'mediaLocation' | 'status'> & Partial<Pick<Video, 'hlsFullMasterKey'>>, full = false): string | null {
     if (v.status !== 'READY' || !v.hlsMasterKey) return null;
-    return v.mediaLocation === 'PUBLIC' ? this.publicUrl(v.id, v.hlsMasterKey) : `/api/videos/${v.id}/hls/master.m3u8`;
+    const key = full && v.hlsFullMasterKey ? v.hlsFullMasterKey : v.hlsMasterKey;
+    return v.mediaLocation === 'PUBLIC' ? this.publicUrl(v.id, key) : `/api/videos/${v.id}/${key}`;
+  }
+
+  /** The highest quality free viewers get for this video (e.g. 720), or null when they get every quality. */
+  qualityLimit(v: Partial<Pick<Video, 'hlsFullMasterKey'>>): number | null {
+    return v.hlsFullMasterKey && this.config.media.freeMaxShort ? this.config.media.freeMaxShort : null;
   }
 }

@@ -1,0 +1,14 @@
+{
+  "monthlyUsers": 1000,
+  "watchHoursPerUser": 10,
+  "averageMbps": 2,
+  "peakMultiplier": 4,
+  "deliveryUsdPerGB": 0.005,
+  "storedTB": 5,
+  "storageUsdPerTB": 10,
+  "gpuHours": 100,
+  "gpuUsdPerHour": 0.59,
+  "serversUsd": 200,
+  "operationsUsd": 100,
+  "contingencyPercent": 25
+}

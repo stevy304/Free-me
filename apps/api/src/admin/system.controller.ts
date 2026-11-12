@@ -43,19 +43,25 @@ export class SystemController {
   @ApiOperation({ summary: 'Launch readiness checklist (administrators only)' })
   async launch() {
     const c = this.config;
-    const [billing, google, admins, official, workers, pushKey] = await Promise.all([
+    const [billing, google, admins, official, workers, upgradeWorkers, database, redis, pushKey] = await Promise.all([
       loadStored(this.prisma, c).then((s) => effective(c, s)).catch(() => null),
       loadGoogleSettings(this.prisma, c).catch(() => undefined),
-      this.prisma.user.count({ where: { roles: { has: 'ADMIN' } } }),
-      this.prisma.channel.findFirst({ where: { isVerified: true, user: { roles: { has: 'ADMIN' } } }, select: { name: true, handle: true } }),
+      this.prisma.user.count({ where: { roles: { has: 'ADMIN' } } }).catch(() => 0),
+      this.prisma.channel.findFirst({ where: { isVerified: true, user: { roles: { has: 'ADMIN' } } }, select: { name: true, handle: true } }).catch(() => null),
       this.media.queue ? this.media.queue.getWorkers().then((w) => w.length).catch(() => 0) : Promise.resolve(-1),
-      this.prisma.appSetting.findUnique({ where: { key: 'push' }, select: { key: true } }),
+      this.media.upgradeQueue ? this.media.upgradeQueue.getWorkers().then((w) => w.length).catch(() => 0) : Promise.resolve(-1),
+      this.prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false),
+      this.redis.ping(),
+      this.prisma.appSetting.findUnique({ where: { key: 'push' }, select: { key: true } }).catch(() => null),
     ]);
     const googleOn = google === undefined ? !!c.google : !!(google?.enabled && google.clientId && google.clientSecret);
     const pay = billing ? [billing.momo && 'MTN MoMo', billing.flutterwave && 'cards (Flutterwave)', billing.manual && 'manual payments'].filter(Boolean) as string[] : [];
     const checks = [
+      { id: 'database', required: true, ok: database, label: 'Database connection', detail: database ? 'Responding' : 'Not responding', fix: 'Check DATABASE_URL and restore the PostgreSQL connection before opening the pilot.' },
+      { id: 'redis', required: true, ok: redis === 'ok', label: 'Shared queue and rate limits', detail: redis, fix: 'Configure REDIS_URL and start Redis before opening the pilot.' },
       { id: 'https', required: true, ok: c.appUrl.startsWith('https://'), label: 'Secure address (https)', detail: c.appUrl, fix: 'Point your domain at the server, set APP_URL=https://your-domain in /etc/freeme/freeme.env and run the install again: Caddy gets the certificate by itself.' },
-      { id: 'workers', required: true, ok: workers !== 0, label: 'Video workers running', detail: workers < 0 ? 'Videos are processed inside the API (no Redis): fine for one small server.' : `${workers} connected`, fix: 'Start the media worker: sudo systemctl enable --now freeme-worker@1 (see DEPLOYMENT.md).' },
+      { id: 'workers', required: true, ok: workers > 0, label: 'First-playable video workers', detail: workers < 0 ? 'Development mode: processing runs inside the API.' : `${workers} connected`, fix: 'Start the media worker: sudo systemctl enable --now freeme-worker@1 (see DEPLOYMENT.md).' },
+      { id: 'upgrade-workers', required: true, ok: upgradeWorkers > 0, label: 'HD and 4K processing workers', detail: upgradeWorkers < 0 ? 'No background queue configured.' : `${upgradeWorkers} connected`, fix: 'Start a current media worker connected to the same Redis and QUEUE_PREFIX so higher qualities can finish.' },
       { id: 'storage', required: false, ok: c.media.driver === 's3', label: 'Object storage for videos', detail: c.media.driver === 's3' ? 'S3-compatible storage' : 'Files on this server’s disk', fix: 'For growth, use object storage (Hetzner, Wasabi, R2…): deploy/ubuntu/storage-setup.sh and the S3_* settings.' },
       { id: 'cdn', required: false, ok: c.media.driver === 's3' && !!process.env.MEDIA_PUBLIC_BASE_URL, label: 'CDN in front of videos', detail: c.media.publicBaseUrl || 'none', fix: 'Set MEDIA_PUBLIC_BASE_URL to your CDN address (e.g. https://media.your-domain) so videos load fast everywhere.' },
       { id: 'email', required: true, ok: c.mail.transport === 'smtp', label: 'Email delivery (sign-in codes)', detail: c.mail.transport === 'smtp' ? c.mail.from : 'Emails are only written to the log', fix: 'Set SMTP_HOST, SMTP_USER, SMTP_PASS and MAIL_FROM (any SMTP service: Brevo, Mailgun, Gmail Workspace…).' },
@@ -75,7 +81,7 @@ export class SystemController {
     const db = await this.prisma.$queryRaw`SELECT 1`.then(() => 'ok' as const).catch(() => 'down' as const);
     const [redis, queue, upgradeQueue, byStatus, stuck, failed24h, sizes, renditionBytes, users, newUsers24h, channels, openReports] = await Promise.all([
       this.redis.ping(),
-      this.media.queue ? this.media.queue.getJobCounts('waiting', 'active', 'delayed', 'failed').catch(() => null) : Promise.resolve(null),
+      this.media.queue ? this.media.queue.getJobCounts('waiting', 'prioritized', 'active', 'delayed', 'failed').catch(() => null) : Promise.resolve(null),
       this.media.upgradeQueue?.getJobCounts('waiting', 'prioritized', 'active', 'delayed', 'failed').catch(() => null) ?? Promise.resolve(null),
       this.prisma.video.groupBy({ by: ['status'], _count: { _all: true } }),
       this.prisma.video.count({ where: { OR: [{ status: 'PROCESSING' }, { status: 'READY', processingStage: { not: 'Ready' } }], updatedAt: { lt: new Date(now - 2 * HOUR) } } }),
@@ -93,6 +99,7 @@ export class SystemController {
     if (redis === 'down') warnings.push('Redis is not answering: rate limits and video jobs are affected.');
     if (this.config.nodeEnv === 'production' && redis === 'not configured') warnings.push('REDIS_URL is not set.');
     if (queue && (queue.waiting ?? 0) > 20) warnings.push(`${queue.waiting} videos are waiting to be processed: add worker capacity.`);
+    if (queue && (queue.prioritized ?? 0) > 20) warnings.push(`${queue.prioritized} prioritized video jobs are waiting to be processed: check worker capacity.`);
     if (stuck) warnings.push(`${stuck} video(s) have been processing for more than 2 hours.`);
     if (failed24h) warnings.push(`${failed24h} video(s) failed to process in the last 24 hours.`);
     if (this.config.mail.transport === 'console' && this.config.nodeEnv === 'production') warnings.push('Email is printed to the log instead of sent: set up SMTP.');

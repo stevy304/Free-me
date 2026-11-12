@@ -12,7 +12,7 @@ import { useShell } from '@/components/shell/ShellContext';
 export interface ChatLine { id: string; text: string; at: string; author: { name: string; handle: string | null; avatarUrl: string | null; verified: boolean; host: boolean } }
 
 /** Live chat: lines arrive over the socket; signed-in viewers write (one line, up to 200 characters). */
-export function LiveChat({ streamId, initial, live, className = '' }: { streamId: string; initial: ChatLine[]; live: boolean; className?: string }) {
+export function LiveChat({ streamId, initial, live, rules, className = '' }: { streamId: string; initial: ChatLine[]; live: boolean; rules?: { mode: 'everyone' | 'followers' | 'off'; slowModeSeconds: number }; className?: string }) {
   const { viewer } = useShell();
   const [lines, setLines] = useState<ChatLine[]>(initial);
   const [text, setText] = useState('');
@@ -31,7 +31,10 @@ export function LiveChat({ streamId, initial, live, className = '' }: { streamId
 
   return (
     <section aria-label="Live chat" className={`flex min-h-0 flex-col rounded-3xl border border-line bg-elevated ${className}`}>
-      <h2 className="border-b border-line px-4 py-3 font-display text-[16px] font-bold">Live chat</h2>
+      <h2 className="flex items-center gap-2 border-b border-line px-4 py-3 font-display text-[16px] font-bold">Live chat
+        {rules && rules.mode !== 'everyone' && <span className="rounded-full bg-surface px-2 py-0.5 font-sans text-[11px] font-semibold text-muted">{rules.mode === 'off' ? 'Off' : 'Followers only'}</span>}
+        {rules && rules.mode !== 'off' && rules.slowModeSeconds > 0 && <span className="rounded-full bg-surface px-2 py-0.5 font-sans text-[11px] font-semibold text-muted">Slow mode · {rules.slowModeSeconds < 60 ? `${rules.slowModeSeconds}s` : `${rules.slowModeSeconds / 60} min`}</span>}
+      </h2>
       <ol ref={list} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 py-3 text-[14px]" aria-live="polite">
         {lines.map((l) => (
           <li key={l.id} className="flex gap-2.5">

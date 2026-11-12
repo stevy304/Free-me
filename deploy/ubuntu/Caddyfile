@@ -16,6 +16,11 @@
 		-Server
 	}
 
+	# Metrics are read by Prometheus over the private network only, never through the public address.
+	handle /api/metrics* {
+		respond 404
+	}
+
 	# The API (NestJS, port 4000). Health checks take a node out of rotation when it fails.
 	handle /api/* {
 		reverse_proxy {$APP_NODE_A}:4000 {$APP_NODE_B}:4000 {
