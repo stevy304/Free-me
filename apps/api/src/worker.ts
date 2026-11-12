@@ -16,6 +16,9 @@ import { setRealtimeSink } from './realtime/publish';
 import { createPushSender, setPushSender } from './push/push';
 import { finishLive, LiveSync } from './live/sync';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
+import { Counter, Histogram } from 'prom-client';
+import { createRegistry, tokenMatches } from './metrics/metrics';
 
 /**
  * The media worker (server 4): transcodes uploads, moves media on visibility changes, deletes removed videos and
@@ -50,12 +53,24 @@ async function main() {
     { connection: connection(), prefix: config.media.queuePrefix, concurrency: config.media.chunkConcurrency, lockDuration: 60_000 });
   chunkWorker.on('failed', (j, e) => log.warn(`piece ${j?.data.index} of ${j?.data.videoId} attempt ${j?.attemptsMade}: ${e.message.slice(0, 300)}`));
 
+  // Metrics (see MONITORING.md): jobs by result and how long they take; served on WORKER_METRICS_PORT.
+  const registry = createRegistry('worker');
+  const jobsDone = new Counter({ name: 'freeme_worker_jobs_total', help: 'Media jobs finished', labelNames: ['job', 'result'] as const, registers: [registry] });
+  const jobTime = new Histogram({ name: 'freeme_worker_job_duration_seconds', help: 'Media job duration', labelNames: ['job'] as const,
+    buckets: [1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600], registers: [registry] });
+  const metricsServer = config.workerMetricsPort ? createServer(async (req, res) => {
+    if (req.url !== '/metrics' || !tokenMatches(req.headers.authorization, config.metricsToken)) { res.writeHead(404).end(); return; }
+    res.writeHead(200, { 'Content-Type': registry.contentType }).end(await registry.metrics());
+  }).listen(config.workerMetricsPort, config.workerMetricsHost) : null;
+
   const processMedia: Processor<MediaJob> = async (job, _token, signal) => {
     if (job.data.name === 'transcode' || job.data.name === 'upgrade') {
       log.log({ event: job.data.name === 'upgrade' ? 'upgrade_started' : 'transcode_started', videoId: job.data.videoId, attempt: job.attemptsMade + 1, queueWaitMs: Math.max(0, (job.processedOn ?? Date.now()) - job.timestamp) });
     }
-    try { await jobs.run(job.data, job.attemptsMade + 1 >= (job.opts.attempts ?? 1), signal); }
+    const end = jobTime.startTimer({ job: job.data.name });
+    try { await jobs.run(job.data, job.attemptsMade + 1 >= (job.opts.attempts ?? 1), signal); end(); jobsDone.inc({ job: job.data.name, result: 'done' }); }
     catch (e) {
+      jobsDone.inc({ job: job.data.name, result: e instanceof VideoBusy ? 'busy' : 'failed' });
       if (e instanceof MediaError) throw new UnrecoverableError(e.message); // a bad file: retrying will not help
       if (e instanceof VideoBusy) throw e; // retried with backoff
       throw e;
@@ -134,7 +149,7 @@ async function main() {
   }, 1500) : null;
 
   log.log(`Media worker running (concurrency ${config.media.workerConcurrency} foreground / ${config.media.upgradeConcurrency} background, storage ${config.media.driver}, preset ${config.media.preset})`);
-  const stop = async () => { log.log('Stopping…'); if (liveTimer) clearInterval(liveTimer); await Promise.allSettled([worker.close(), upgradeWorker.close(), maint.close(), maintenance.close(), media.close(), upgrades.close(), chunkWorker.close(), chunkQueue.close(), chunkEvents.close()]); await prisma.$disconnect(); process.exit(0); };
+  const stop = async () => { log.log('Stopping…'); if (liveTimer) clearInterval(liveTimer); metricsServer?.close(); await Promise.allSettled([worker.close(), upgradeWorker.close(), maint.close(), maintenance.close(), media.close(), upgrades.close(), chunkWorker.close(), chunkQueue.close(), chunkEvents.close()]); await prisma.$disconnect(); process.exit(0); };
   process.on('SIGTERM', stop); process.on('SIGINT', stop);
 }
 

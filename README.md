@@ -83,6 +83,7 @@ CI runs all of these on every pull request ([.github/workflows/verify.yml](.gith
 | [ENVIRONMENT.md](ENVIRONMENT.md) | Every environment variable |
 | [LAUNCH.md](LAUNCH.md) | Go-live checklist: accounts, email DNS, Google, checks, monitoring, legal |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Hetzner servers, firewall rules, release steps |
+| [MONITORING.md](MONITORING.md) | Metrics, alerts to your phone, dashboards, all free |
 | [BACKUP-AND-RECOVERY.md](BACKUP-AND-RECOVERY.md) | Backups, restore drill, recovery targets |
 | [ROADMAP.md](ROADMAP.md) | Phases and their exit criteria |
 

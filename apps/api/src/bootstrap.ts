@@ -8,6 +8,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import type { AppConfig } from './config/config';
 import { requestLog } from './common/request-log';
+import { METRICS, httpMetrics } from './metrics/metrics';
 
 /** Builds the HTTP application (used by main.ts and by the API tests). Every route lives under /api. */
 export async function createApp(config: AppConfig): Promise<INestApplication> {
@@ -20,6 +21,7 @@ export function configureApp(app: NestExpressApplication, config: AppConfig): Ne
   app.set('trust proxy', config.trustProxy);
   app.disable('x-powered-by');
   app.use(requestLog({ json: config.logFormat === 'json' }));
+  app.use(httpMetrics(app.get(METRICS)));
   app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'same-site' } }));
   app.use(cookieParser());
   app.setGlobalPrefix('api');

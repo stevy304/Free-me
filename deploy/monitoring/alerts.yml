@@ -1,0 +1,77 @@
+# Alerts for Free Me. Each one names what users notice and where to look first (MONITORING.md → Alerts).
+groups:
+  - name: freeme
+    rules:
+      - alert: SiteDown
+        expr: probe_success{job="freeme-public"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.instance }} is not answering"
+          description: "People cannot open Free Me. Check Caddy on the edge server, then the API (systemctl status freeme-api)."
+
+      - alert: ApiTargetDown
+        expr: up{job=~"freeme-api|freeme-worker"} == 0
+        for: 3m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.job }} on {{ $labels.instance }} is not reporting"
+          description: "The process stopped or its metrics port is blocked. journalctl -u freeme-api (or freeme-worker@1) -n 200"
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(freeme_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(freeme_http_requests_total[5m])), 1) > 0.02
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "More than 2% of API requests fail"
+          description: "Search the API's JSON logs for level=error; each line has a requestId users can quote."
+
+      - alert: SlowApi
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(freeme_http_request_duration_seconds_bucket[10m]))) > 1
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: "95% of API requests take more than 1 s"
+          description: "Usually the database: check CPU and disk on the database server and slow queries (pg_stat_statements)."
+
+      - alert: UploadsWaiting
+        expr: freeme_videos_processing{measure="oldest_seconds"} > 1800
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: "An upload has waited more than 30 minutes to become playable"
+          description: "Check the media worker (freeme-worker@*) and freeme_media_queue_jobs; add a worker if the queue keeps growing."
+
+      - alert: MediaQueueBacklog
+        expr: max(freeme_media_queue_jobs{queue="media",state=~"waiting|prioritized"}) > 50
+        for: 15m
+        labels: { severity: warn }
+        annotations:
+          summary: "More than 50 uploads are waiting for the media worker"
+          description: "Uploads arrive faster than they are processed: add a media server or raise WORKER_CONCURRENCY."
+
+      - alert: WorkerJobsFailing
+        expr: sum(rate(freeme_worker_jobs_total{result="failed"}[30m])) > 0.01
+        for: 30m
+        labels: { severity: warn }
+        annotations:
+          summary: "Media jobs keep failing"
+          description: "journalctl -u 'freeme-worker@*' | grep -i error"
+
+      - alert: DiskFilling
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) < 0.15
+        for: 15m
+        labels: { severity: warn }
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }} has less than 15% free"
+          description: "On the media node: the scratch directory (SCRATCH_DIR). On the database node: PostgreSQL data or backups."
+
+      - alert: MemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: "{{ $labels.instance }} has less than 10% memory available"
+          description: "FFmpeg on the media node uses the most: lower WORKER_CONCURRENCY or CHUNK_CONCURRENCY."

@@ -1,0 +1,53 @@
+# Prometheus for Free Me (free, open source). Runs on the database server (10.0.1.20 in DEPLOYMENT.md) or on the
+# single server of a one-machine launch. Install: sudo apt install prometheus prometheus-node-exporter prometheus-alertmanager
+# Then copy this file to /etc/prometheus/prometheus.yml and alerts.yml beside it, put METRICS_TOKEN in
+# /etc/prometheus/freeme.token (chmod 640, group prometheus) and run: sudo systemctl restart prometheus
+# Adjust the addresses below to your servers (one-machine launch: all of them are localhost).
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['localhost:9093']
+
+scrape_configs:
+  # Every API instance (each app node). /api/metrics needs the token; it answers 404 without it.
+  - job_name: freeme-api
+    metrics_path: /api/metrics
+    authorization:
+      credentials_file: /etc/prometheus/freeme.token
+    static_configs:
+      - targets: ['10.0.1.10:4000', '10.0.1.11:4000']
+
+  # Media workers (WORKER_METRICS_PORT=9464, WORKER_METRICS_HOST=<the media node's private address>).
+  - job_name: freeme-worker
+    metrics_path: /metrics
+    authorization:
+      credentials_file: /etc/prometheus/freeme.token
+    static_configs:
+      - targets: ['10.0.1.30:9464']
+
+  # Machines: CPU, memory, disk, network (prometheus-node-exporter on every server, port 9100, private network only).
+  - job_name: node
+    static_configs:
+      - targets: ['10.0.1.10:9100', '10.0.1.11:9100', '10.0.1.20:9100', '10.0.1.30:9100']
+
+  # The public site as users see it, through the blackbox exporter (optional: sudo apt install prometheus-blackbox-exporter).
+  - job_name: freeme-public
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ['https://freeme.example/api/health', 'https://freeme.example/']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: localhost:9115

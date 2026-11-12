@@ -64,6 +64,12 @@ export interface AppConfig {
   /** Number of proxies in front of the API (Caddy = 1), so client IPs come from X-Forwarded-For. */
   trustProxy: number;
   docsEnabled: boolean;
+  /** Bearer token for /api/metrics and the worker's metrics port (Prometheus); null turns /api/metrics off. */
+  metricsToken: string | null;
+  /** Port where the worker serves its metrics (bind it to the private network); null: none. */
+  workerMetricsPort: number | null;
+  /** Address the worker's metrics port listens on: its private network address (default: this machine only). */
+  workerMetricsHost: string;
   media: MediaConfig;
   safety: SafetyConfig;
   /** Who runs the service, shown on the legal pages and in notices (see ENVIRONMENT.md). */
@@ -142,6 +148,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   else if (prod && !appUrl.startsWith('https://')) problems.push('APP_URL must use https in production.');
 
   const databaseUrl = need('DATABASE_URL');
+  const metricsToken = env.METRICS_TOKEN?.trim() || null;
+  if (metricsToken && metricsToken.length < 24) problems.push('METRICS_TOKEN must have at least 24 characters.');
+  const workerMetricsPort = env.WORKER_METRICS_PORT?.trim() ? Number(env.WORKER_METRICS_PORT) : null;
+  if (workerMetricsPort !== null && !(Number.isInteger(workerMetricsPort) && workerMetricsPort > 0 && workerMetricsPort < 65536)) problems.push('WORKER_METRICS_PORT must be a port number.');
+  if (workerMetricsPort !== null && !metricsToken) problems.push('WORKER_METRICS_PORT needs METRICS_TOKEN.');
   const sessionSecret = env.SESSION_SECRET?.trim() || (prod ? '' : 'development-only-session-secret-change-me-0000');
   if (sessionSecret.length < 32) problems.push('SESSION_SECRET must have at least 32 characters.');
   if (prod && /development-only/.test(sessionSecret)) problems.push('SESSION_SECRET must be set in production.');
@@ -246,7 +257,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
     sessionTtlDays: Math.min(90, Math.max(1, Number(env.SESSION_TTL_DAYS || 30))),
     google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,
-    mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)),
+    mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)), metricsToken, workerMetricsPort, workerMetricsHost: env.WORKER_METRICS_HOST?.trim() || '127.0.0.1',
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
     media, legal, billing, live,
     safety: {

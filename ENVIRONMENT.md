@@ -40,6 +40,9 @@ Values for local development are in [.env.example](.env.example). In production 
 | `MAX_UPLOAD_MB` | | `20480` (20 GB) | Largest upload |
 | `UPLOAD_PART_MB` | | `16` | Base upload part size in MiB (5 or more). New S3 uploads of at least 4 GiB use at least 64 MiB per part. |
 | `SCRATCH_DIR` | | `/tmp/freeme-scratch` | Worker's working folder (source and renditions while processing): put it on a fast local disk with room for the largest uploads |
+| `METRICS_TOKEN` | | none | 24+ random characters (`openssl rand -hex 24`). Turns on `/api/metrics` and the worker's metrics port for Prometheus, which sends it as `Authorization: Bearer …`. Without it both are off. See [MONITORING.md](MONITORING.md) |
+| `WORKER_METRICS_PORT` | | none | Port where each worker serves `/metrics` (e.g. `9464`; one port per worker process). Needs `METRICS_TOKEN` |
+| `WORKER_METRICS_HOST` | | `127.0.0.1` | Address that port listens on: the media node's private address when Prometheus runs on another server |
 | `WORKER_CONCURRENCY` | | `2` | Foreground jobs, including first-playable video processing, per worker instance |
 | `WORKER_UPGRADE_CONCURRENCY` | | `1` | Background quality upgrades and caption backfills per worker instance |
 | `TRANSCODE_PRESET` | | `veryfast` | x264 preset: faster = quicker processing, slightly larger files |
