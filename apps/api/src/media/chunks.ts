@@ -12,6 +12,16 @@ import type { Storage } from './storage';
  * a long video's qualities arrive sooner. The pieces are joined without re-encoding and cut into HLS segments.
  */
 export const CHUNK_QUEUE = 'media-chunks';
+export type ChunkEncoder = 'libx264' | 'nvenc' | 'qsv';
+export const chunkQueueName = (encoder: ChunkEncoder) => encoder === 'libx264' ? CHUNK_QUEUE : `${CHUNK_QUEUE}-${encoder}`;
+/** Route from the actual command, including CPU fallback passes. */
+export function chunkEncoder(task: ChunkTask): ChunkEncoder {
+  if (task.args.includes('h264_nvenc')) return 'nvenc';
+  if (task.args.includes('h264_qsv')) return 'qsv';
+  return 'libx264';
+}
+export interface ChunkDestination { queue: Queue; events: QueueEvents }
+
 
 /** First piece: keyframes at 0, 1, 2, 4, 6 … s (1 s first segment). Later pieces start on an even second: every 2 s. */
 export const FIRST_KEYFRAMES = 'expr:if(lt(t,2),gte(t,n_forced),gte(t,(n_forced-1)*2))';
@@ -92,13 +102,17 @@ export class LocalChunks implements ChunkRunner {
 /** Through the chunk queue: every worker server (CHUNK_CONCURRENCY pieces each) takes pieces as it frees up. */
 export class QueueChunks implements ChunkRunner {
   private readonly log = new Logger('Chunks');
-  constructor(private readonly queue: Queue, private readonly events: QueueEvents) {}
+  constructor(private readonly queue: Queue, private readonly events: QueueEvents, private readonly destinations?: Record<ChunkEncoder, ChunkDestination>) {}
 
   async runAll(tasks: ChunkTask[], onDone: (finished: number) => void, signal?: AbortSignal) {
     signal?.throwIfAborted();
-    await this.events.waitUntilReady();
+    if (!tasks.length) return [];
+    const encoder = chunkEncoder(tasks[0]);
+    if (tasks.some((task) => chunkEncoder(task) !== encoder)) throw new Error('An encoding pass must use one encoder');
+    const { queue, events } = this.destinations?.[encoder] ?? { queue: this.queue, events: this.events };
+    await events.waitUntilReady();
     signal?.throwIfAborted();
-    const jobs: Job[] = await this.queue.addBulk(tasks.map((t) => ({
+    const jobs: Job[] = await queue.addBulk(tasks.map((t) => ({
       name: 'chunk', data: t,
       opts: {
         jobId: `${t.videoId}-${t.run}-${t.index}`, attempts: 3, backoff: { type: 'exponential' as const, delay: 5_000 },
@@ -116,7 +130,7 @@ export class QueueChunks implements ChunkRunner {
       signal?.throwIfAborted();
       signal?.addEventListener('abort', onAbort, { once: true });
       const all = Promise.all(jobs.map(async (job) => {
-        const result = (await job.waitUntilFinished(this.events)) as ChunkResult;
+        const result = (await job.waitUntilFinished(events)) as ChunkResult;
         if (!signal?.aborted) onDone(++finished);
         return result;
       }));

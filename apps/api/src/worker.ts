@@ -3,7 +3,7 @@ import 'reflect-metadata';
 import { ConsoleLogger, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { Queue, QueueEvents, UnrecoverableError, Worker, type Processor } from 'bullmq';
-import { CHUNK_QUEUE, QueueChunks, runChunk, type ChunkResult, type ChunkTask } from './media/chunks';
+import { chunkQueueName, QueueChunks, runChunk, type ChunkResult, type ChunkTask } from './media/chunks';
 import Redis from 'ioredis';
 import { ConfigError, loadConfig } from './config/config';
 import { MediaJobs, VideoBusy, type MediaJob } from './media/jobs';
@@ -16,6 +16,7 @@ import { setRealtimeSink } from './realtime/publish';
 import { createPushSender, setPushSender } from './push/push';
 import { finishLive, LiveSync } from './live/sync';
 import { join } from 'node:path';
+import { verifyEncoder } from './media/encoder-health';
 import { createServer } from 'node:http';
 import { Counter, Histogram } from 'prom-client';
 import { createRegistry, tokenMatches } from './metrics/metrics';
@@ -29,6 +30,7 @@ async function main() {
   let config;
   try { config = loadConfig(); } catch (e) { if (e instanceof ConfigError) { console.error(e.message); process.exit(1); } throw e; }
   if (!config.redisUrl) { console.error('The worker needs REDIS_URL.'); process.exit(1); }
+  await verifyEncoder(config.media.ffmpegPath, config.media.encoder);
   if (config.logFormat === 'json') Logger.overrideLogger(new ConsoleLogger({ json: true }));
   const log = new Logger('Worker');
   const prisma = new PrismaClient();
@@ -44,18 +46,26 @@ async function main() {
   // Higher qualities and caption backfill use separate worker slots so they cannot occupy the first-playable queue.
   // Long videos are encoded in pieces: every worker (this one included) takes pieces from the chunk queue.
   const storage = createStorage(config);
-  const chunkQueue = new Queue<ChunkTask>(CHUNK_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
-  const chunkEvents = new QueueEvents(CHUNK_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
+  const chunkDestinations = Object.fromEntries((['libx264', 'nvenc', 'qsv'] as const).map((encoder) => [encoder, {
+    queue: new Queue<ChunkTask>(chunkQueueName(encoder), { connection: connection(), prefix: config.media.queuePrefix }),
+    events: new QueueEvents(chunkQueueName(encoder), { connection: connection(), prefix: config.media.queuePrefix }),
+  }])) as Record<'libx264' | 'nvenc' | 'qsv', { queue: Queue<ChunkTask>; events: QueueEvents }>;
+  const { queue: chunkQueue, events: chunkEvents } = chunkDestinations.libx264;
   const media = new Queue<MediaJob>(MEDIA_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
   const upgrades = new Queue<MediaJob>(MEDIA_UPGRADE_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
   const enqueue = async (job: MediaJob) => {
     const queue = job.name === 'upgrade' || job.name === 'caption' ? upgrades : media;
     await queue.add(job.name, job, jobOptions(job));
   };
-  const jobs = new MediaJobs(prisma, storage, config, new Redis(config.redisUrl), enqueue, new QueueChunks(chunkQueue, chunkEvents));
-  const chunkWorker = new Worker<ChunkTask, ChunkResult>(CHUNK_QUEUE, (job, _token, signal) => runChunk(job.data, { ffmpegPath: config.media.ffmpegPath, storage, scratchDir: config.media.scratchDir }, signal),
-    { connection: connection(), prefix: config.media.queuePrefix, concurrency: config.media.chunkConcurrency, lockDuration: 60_000 });
-  chunkWorker.on('failed', (j, e) => log.warn(`piece ${j?.data.index} of ${j?.data.videoId} attempt ${j?.attemptsMade}: ${e.message.slice(0, 300)}`));
+  const jobs = new MediaJobs(prisma, storage, config, new Redis(config.redisUrl), enqueue, new QueueChunks(chunkQueue, chunkEvents, chunkDestinations));
+  // Every node handles CPU fallback. Hardware queues are consumed only by a verified compatible node.
+  const encoders = config.media.encoder === 'libx264' ? ['libx264'] as const : ['libx264', config.media.encoder] as const;
+  const chunkWorkers = encoders.map((encoder) => {
+    const worker = new Worker<ChunkTask, ChunkResult>(chunkQueueName(encoder), (job, _token, signal) => runChunk(job.data, { ffmpegPath: config.media.ffmpegPath, storage, scratchDir: config.media.scratchDir }, signal),
+      { connection: connection(), prefix: config.media.queuePrefix, concurrency: config.media.chunkConcurrency, lockDuration: 60_000 });
+    worker.on('failed', (j, e) => log.warn(`piece ${j?.data.index} of ${j?.data.videoId} (${encoder}) attempt ${j?.attemptsMade}: ${e.message.slice(0, 300)}`));
+    return worker;
+  });
 
   // Metrics (see MONITORING.md): jobs by result and how long they take; served on WORKER_METRICS_PORT.
   const registry = createRegistry('worker');
@@ -163,7 +173,7 @@ async function main() {
   }, 1500) : null;
 
   log.log(`Media worker running (concurrency ${config.media.workerConcurrency} foreground / ${config.media.upgradeConcurrency} background, storage ${config.media.driver}, preset ${config.media.preset})`);
-  const stop = async () => { log.log('Stopping…'); if (liveTimer) clearInterval(liveTimer); metricsServer?.close(); await Promise.allSettled([worker.close(), upgradeWorker.close(), maint.close(), maintenance.close(), media.close(), upgrades.close(), chunkWorker.close(), chunkQueue.close(), chunkEvents.close()]); await prisma.$disconnect(); process.exit(0); };
+  const stop = async () => { log.log('Stopping…'); if (liveTimer) clearInterval(liveTimer); metricsServer?.close(); await Promise.allSettled([worker.close(), upgradeWorker.close(), maint.close(), maintenance.close(), media.close(), upgrades.close(), ...chunkWorkers.map((w) => w.close()), ...Object.values(chunkDestinations).flatMap((d) => [d.queue.close(), d.events.close()])]); await prisma.$disconnect(); process.exit(0); };
   process.on('SIGTERM', stop); process.on('SIGINT', stop);
 }
 
