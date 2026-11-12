@@ -10,8 +10,9 @@ export function viewsLabel(n: number | string, locale?: string): string {
   return `${compactNumber(v, locale)} ${v === 1 ? 'view' : 'views'}`;
 }
 
-/** "4.8K tuned in": how many people tune in to a Space. */
+/** "4.8K tuned in": how many people tune in to a Space. A Space nobody has tuned in to yet says "New Space", not "0". */
 export function followersLabel(n: number, locale?: string): string {
+  if (!n) return 'New Space';
   return `${compactNumber(n, locale)} tuned in`;
 }
 

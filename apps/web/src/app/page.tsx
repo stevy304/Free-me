@@ -39,7 +39,6 @@ export default async function Current() {
     <div className="mx-auto max-w-[1600px] px-4 pt-3 sm:px-6">
       <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div><h1 className="font-display text-[32px] font-extrabold">Current</h1><p className="text-sm text-muted">Pick up a story. Find your next one.</p></div>
-        <Link href="/following" className="rounded-full border border-line px-4 py-2 text-sm font-semibold hover:bg-surface">Following</Link>
       </header>
       <LiveStrip streams={liveNow} />
       {unfinished.length > 0 && (
@@ -74,17 +73,14 @@ export default async function Current() {
             </div>
           </Link>
         ) : <div />}
-        <InterestsPanel interests={feed.interests} />
+        {/* On phones the panel comes after Trending, so the first screens are videos. */}
+        <div className="hidden lg:block"><InterestsPanel interests={feed.interests} /></div>
       </div>
 
       {feed.fromCreators.length > 0 && (
         <section aria-labelledby="following-heading" className="mt-9">
-          <div className="flex items-baseline justify-between gap-3">
-            <h2 id="following-heading" className="text-[22px] font-bold">From your creators</h2>
-            <Link href="/following" className="text-sm font-semibold text-brand">See all</Link>
-          </div>
-          <p className="mt-1 text-sm text-muted">The Spaces you follow, newest first.</p>
-          <div className="mt-3 grid gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+          <SectionHead id="following-heading" title="From your creators" note="the Spaces you follow, newest first" href="/following" link="See all" />
+          <div className="mt-3 grid gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-4">
             {feed.fromCreators.slice(0, 4).map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}
           </div>
         </section>
@@ -92,19 +88,17 @@ export default async function Current() {
 
       {(feed.trending?.videos.length ?? 0) >= 4 && (
         <section aria-labelledby="trending-heading" className="mt-9">
-          <h2 id="trending-heading" className="flex items-baseline gap-2.5 text-[22px] font-bold">{feed.trending!.country ? `Trending in ${regionName(feed.trending!.country, locale)}` : 'Trending now'}
-            <span className="font-sans text-[13px] font-medium text-muted">most watched in the last two days</span>
-            <Link href="/explore" className="ml-auto font-sans text-[13px] font-semibold text-brand">Explore</Link></h2>
-          <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+          <SectionHead id="trending-heading" title={feed.trending!.country ? `Trending in ${regionName(feed.trending!.country, locale)}` : 'Trending now'} note="most watched in the last two days" href="/explore" link="Explore" />
+          <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-4">
             {feed.trending!.videos.slice(0, 4).map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}
           </div>
         </section>
       )}
+      <div className="mt-9 lg:hidden"><InterestsPanel interests={feed.interests} /></div>
 
       {feed.moments.length > 0 && (
         <section className="mt-10">
-          <h2 className="flex items-baseline gap-2.5 text-[22px] font-bold">Moments <span className="font-sans text-[13px] font-medium text-muted">short and vertical</span>
-            <Link href="/moments" className="ml-auto font-sans text-[13px] font-semibold text-brand">Open Moments</Link></h2>
+          <SectionHead title="Moments" note="short and vertical" href="/moments" link="Open Moments" />
           <div className="no-scrollbar -mx-4 mt-3 flex gap-4 overflow-x-auto px-4 pb-4 pt-1 sm:-mx-6 sm:px-6">
             {feed.moments.map((v, i) => <MomentCard key={v.id} v={v} index={i} />)}
           </div>
@@ -113,10 +107,8 @@ export default async function Current() {
 
       {feed.shelves.map((shelf) => (
         <section key={shelf.category.slug} className="mt-9">
-          <h2 className="flex items-baseline gap-2.5 text-[22px] font-bold">{shelf.category.name}
-            <span className="font-sans text-[13px] font-medium text-muted">{shelf.reason === 'picked' ? 'because you picked it' : 'popular this month'}</span>
-            <Link href={`/explore?topic=${shelf.category.slug}`} className="ml-auto font-sans text-[13px] font-semibold text-brand">See all</Link></h2>
-          <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+          <SectionHead title={shelf.category.name} note={shelf.reason === 'picked' ? 'because you picked it' : 'popular this month'} href={`/explore?topic=${shelf.category.slug}`} link="See all" />
+          <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-4">
             {shelf.videos.slice(0, 4).map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}
           </div>
         </section>
@@ -124,13 +116,25 @@ export default async function Current() {
 
       {feed.latest.length > 0 && (
         <section className="mt-9">
-          <h2 className="flex items-baseline gap-2.5 text-[22px] font-bold">Just published <span className="font-sans text-[13px] font-medium text-muted">newest first</span>
-            <Link href="/explore" className="ml-auto font-sans text-[13px] font-semibold text-brand">Explore</Link></h2>
-          <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+          <SectionHead title="Just published" note="newest first" href="/explore" link="Explore" />
+          <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-4">
             {feed.latest.slice(0, 8).map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+/** A shelf heading: title and link on one line; the note beside the title, or under it on narrow screens. */
+function SectionHead({ id, title, note, href, link }: { id?: string; title: string; note: string; href: string; link: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0 sm:flex sm:items-baseline sm:gap-2.5">
+        <h2 id={id} className="text-[22px] font-bold leading-tight">{title}</h2>
+        <p className="text-[13px] font-medium text-muted">{note}</p>
+      </div>
+      <Link href={href} className="mt-1 flex shrink-0 items-center gap-0.5 text-[13px] font-semibold text-brand hover:underline">{link}<Icon.ChevronRight size={15} /></Link>
     </div>
   );
 }
