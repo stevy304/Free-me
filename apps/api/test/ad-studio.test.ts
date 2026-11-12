@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import request from 'supertest';
 import { makeApp, resetDb, signIn, WEB } from './helpers';
 import { Billing } from '../src/billing/billing';
 
@@ -60,8 +61,10 @@ test('before payments are switched on, an administrator approves an ad without p
   const row = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: camp.id } });
   expect(row).toMatchObject({ status: 'ACTIVE', dailyRateCents: 0, days: 3, reviewNote: 'Approved without payment by Free Me' });
 
-  const slots = (await maker.agent.get(`/api/videos/${v.id}/ads`).expect(200)).body.slots;
+  // A viewer without a plan sees it; the Premium creator (Premium includes Plus: no ads) does not.
+  const slots = (await request(ctx.http).get(`/api/videos/${v.id}/ads`).expect(200)).body.slots;
   expect(slots).toEqual([expect.objectContaining({ at: 0, ad: expect.objectContaining({ campaignId: camp.id, headline: 'Summer sale' }) })]);
+  expect((await maker.agent.get(`/api/videos/${v.id}/ads`).expect(200)).body.slots).toEqual([]);
   await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true, free: true }).expect(400); // already running
 
   // The day it ran is settled with $0: creators are not paid for money that never came in.

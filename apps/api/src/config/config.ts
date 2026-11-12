@@ -20,8 +20,21 @@ export interface SafetyConfig {
 /** Prices and payment providers (see ENVIRONMENT.md → Payments). Money is in US cents unless named otherwise. */
 export interface BillingConfig {
   premiumUsdCents: number;
-  /** Creator pass per month: needed to upload after a channel's free videos (Premium includes it). */
+  /** Creator pass per YEAR: needed to upload after a channel's free videos (Premium includes it). */
   creatorPassUsdCents: number;
+  /** Uploads a Creator pass allows in any 365 days (Premium: no limit). */
+  creatorPassVideosPerYear: number;
+  /** Plus (no ads, every quality) per month, and in some countries. */
+  plusUsdCents: number;
+  plusByCountry: Record<string, number>;
+  /** Family & TV (Plus for the holder and up to `familySeats - 1` members) per month, and in some countries. */
+  familyUsdCents: number;
+  familyByCountry: Record<string, number>;
+  familySeats: number;
+  /** Share of Plus and Family money paid to creators by members' watch time, in basis points (5000 = 50%). */
+  subscriptionCreatorShareBps: number;
+  /** Airtel Money Collections (Airtel Africa Open API). The charge is in `currency`, at `perUsd` units of it for one US dollar. */
+  airtel: { baseUrl: string; clientId: string; clientSecret: string; country: string; currency: string; perUsd: number } | null;
   /** Videos every channel can upload without the pass; 0 = the pass is needed from the first upload. */
   creatorFreeVideos: number;
   /** Premium per month in some countries (ISO 3166-1 alpha-2 → US cents), e.g. lower where incomes are lower. */
@@ -253,11 +266,29 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (!Number.isSafeInteger(payoutFee) || payoutFee < 0 || payoutFee > 1_000_000) problems.push('PAYOUT_FEE_RWF must be a whole number from 0 to 1000000.');
   const payoutTestKey = env.FLW_PAYOUT_TEST_KEY?.trim() || null;
   if (payoutTestKey && !payoutTestKey.startsWith('FLWSECK_TEST-')) problems.push('FLW_PAYOUT_TEST_KEY must be a Flutterwave TEST key.');
-  const premiumByCountry = parseCountryPrices(env.PREMIUM_PRICE_BY_COUNTRY ?? '');
-  if (premiumByCountry === null) problems.push('PREMIUM_PRICE_BY_COUNTRY must look like RW=300,KE=500 (country code = US cents a month).');
+  // Rwanda prices by default (US cents at about RWF 1,450 a dollar): Premium RWF 6,000, Plus RWF 2,500, Family RWF 9,000.
+  const countryPrices = (k: string, d: string) => { const v = parseCountryPrices(env[k] ?? d); if (v === null) problems.push(`${k} must look like RW=300,KE=500 (country code = US cents).`); return v ?? {}; };
+  const premiumByCountry = countryPrices('PREMIUM_PRICE_BY_COUNTRY', 'RW=414');
+  const airtelKeys = ['AIRTEL_CLIENT_ID', 'AIRTEL_CLIENT_SECRET'];
+  const airtelSet = airtelKeys.filter((k) => env[k]?.trim());
+  if (airtelSet.length === 1) problems.push('Set both AIRTEL_CLIENT_ID and AIRTEL_CLIENT_SECRET for Airtel Money, or neither.');
+  const airtelCurrency = (env.AIRTEL_CURRENCY?.trim() || 'RWF').toUpperCase();
+  const airtelPerUsd = Number(env.AIRTEL_RATE_PER_USD || env.MOMO_RATE_PER_USD || 0);
+  if (airtelSet.length === 2 && airtelCurrency !== 'USD' && !(airtelPerUsd > 0)) problems.push(`AIRTEL_RATE_PER_USD (or MOMO_RATE_PER_USD) is required: how many ${airtelCurrency} make one US dollar.`);
+  const shareBps = Math.round(Number(env.SUBSCRIPTION_CREATOR_SHARE_PERCENT ?? 50) * 100);
+  if (!(shareBps >= 0 && shareBps <= 10_000)) problems.push('SUBSCRIPTION_CREATOR_SHARE_PERCENT must be from 0 to 100.');
   const billing: BillingConfig = {
-    premiumByCountry: premiumByCountry ?? {},
+    premiumByCountry,
     creatorPassUsdCents: cents('CREATOR_PASS_PRICE_USD_CENTS', 200), creatorFreeVideos: count('CREATOR_FREE_VIDEOS', 3),
+    creatorPassVideosPerYear: count('CREATOR_PASS_VIDEOS_PER_YEAR', 50),
+    plusUsdCents: cents('PLUS_PRICE_USD_CENTS', 300), plusByCountry: countryPrices('PLUS_PRICE_BY_COUNTRY', 'RW=172'),
+    familyUsdCents: cents('FAMILY_PRICE_USD_CENTS', 1200), familyByCountry: countryPrices('FAMILY_PRICE_BY_COUNTRY', 'RW=621'),
+    familySeats: Math.max(2, Math.min(10, count('FAMILY_SEATS', 4))),
+    subscriptionCreatorShareBps: shareBps,
+    airtel: airtelSet.length === 2 ? {
+      baseUrl: (env.AIRTEL_BASE_URL?.trim() || 'https://openapiuat.airtel.africa').replace(/\/+$/, ''), clientId: env.AIRTEL_CLIENT_ID!.trim(), clientSecret: env.AIRTEL_CLIENT_SECRET!.trim(),
+      country: (env.AIRTEL_COUNTRY?.trim() || 'RW').toUpperCase(), currency: airtelCurrency, perUsd: airtelCurrency === 'USD' ? 1 : airtelPerUsd,
+    } : null,
     premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), adCpmUsdCents: cents('AD_CPM_USD_CENTS', 100), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
     payouts: payoutRate > 0 ? { rwfPerUsd: payoutRate, feeRwf: payoutFee } : null,
     payoutSandbox: payoutTestKey ? { secretKey: payoutTestKey } : null,

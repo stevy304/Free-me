@@ -326,8 +326,8 @@ test('Premium priced per country: the viewer\'s profile country sets the price s
   await ctx.prisma.profile.update({ where: { userId: (await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'price-rw@example.com' } })).id }, data: { country: 'RW' } });
   const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
   ctx.app.get(BillingService).invalidate(); // prices saved by an earlier test are cached for 15 s
-  // No country prices yet: everyone pays the standard price.
-  expect((await rw.get('/api/billing/plans').expect(200)).body.premium).toMatchObject({ usdCents: 1000, country: null });
+  // By default Rwanda pays about RWF 6,000 (414 US cents); elsewhere the standard $10.
+  expect((await rw.get('/api/billing/plans').expect(200)).body.premium).toMatchObject({ usdCents: 414, standardUsdCents: 1000, country: 'RW' });
   await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ prices: { premiumByCountry: 'RW=bad' } }).expect(400);
   await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ prices: { premiumByCountry: 'rw=300, KE=500' } }).expect(200);
   expect((await admin.get('/api/admin/billing/settings').expect(200)).body.prices.premiumByCountry).toEqual({ RW: 300, KE: 500 });
@@ -354,17 +354,18 @@ test('Creator pass: free uploads, then the pass (paid, given or with Premium); v
   // Deleting a draft does not give a free upload back.
   await maker.delete(`/api/uploads/${first}`).set('Origin', WEB).send({}).expect(200);
   const refused = (await start().expect(402)).body;
-  expect(refused).toMatchObject({ code: 'CREATOR_PASS_REQUIRED', message: expect.stringContaining('Creator pass ($2 a month)') });
+  expect(refused).toMatchObject({ code: 'CREATOR_PASS_REQUIRED', message: expect.stringContaining('Creator pass ($2 a year)') });
   expect((await maker.get('/api/billing/creator-pass').expect(200)).body).toMatchObject({ canUpload: false, freeLeft: 0, uploads: 2 });
 
-  // Paid by MoMo: 3 months × $2.
-  const pay = (await maker.post('/api/billing/creator-pass').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000333', months: 3 }).expect(201)).body.payment;
-  expect(pay).toMatchObject({ usdCents: 600, amount: String(6 * 1450) });
+  // Paid by MoMo, a year at a time: $2 (RWF 2,900).
+  await maker.post('/api/billing/creator-pass').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000333', months: 3 }).expect(400);
+  const pay = (await maker.post('/api/billing/creator-pass').set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000333', months: 12 }).expect(201)).body.payment;
+  expect(pay).toMatchObject({ usdCents: 200, amount: String(2 * 1450), months: 12 });
   [...momo.values()].at(-1)!.status = 'SUCCESSFUL';
   await maker.get(`/api/billing/payments/${pay.id}`).expect(200);
   const status = (await maker.get('/api/billing/creator-pass').expect(200)).body;
   expect(status).toMatchObject({ canUpload: true, pass: { active: true, includedWithPremium: false } });
-  expect(new Date(status.pass.until).getTime()).toBeGreaterThan(Date.now() + 89 * 86_400_000);
+  expect(new Date(status.pass.until).getTime()).toBeGreaterThan(Date.now() + 359 * 86_400_000);
   await start().expect(201);
 
   // When the pass ends, new uploads stop; an administrator can give it (creators invited at launch).

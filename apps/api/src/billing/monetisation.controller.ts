@@ -173,6 +173,19 @@ export class AdminBillingController {
     return { premium: premiumView(await this.prisma.user.findUniqueOrThrow({ where: { id: u.id } })) };
   }
 
+  @Post('plans/:plan')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Give someone Plus or Family & TV without payment (partners, prizes, support)' })
+  async grantPlan(@CurrentAuth() auth: AuthContext, @Param('plan') plan: string, @Body() body: GrantDto, @Req() req: AppRequest) {
+    if (plan !== 'plus' && plan !== 'family') throw new NotFoundException('No such plan.');
+    const u = await this.prisma.user.findUnique({ where: { email: body.email.trim().toLowerCase() } });
+    if (!u) throw new NotFoundException('No account uses this email. They need to sign in once first.');
+    const field = plan === 'plus' ? 'plusUntil' : 'familyUntil';
+    await this.billing.grantPlan(u.id, field, body.months);
+    await this.audit.record({ userId: auth.user.id, action: plan === 'plus' ? 'PLUS_GRANTED' : 'FAMILY_GRANTED', entityType: 'User', entityId: u.id, req, details: { months: body.months } });
+    return { until: (await this.prisma.user.findUniqueOrThrow({ where: { id: u.id } }))[field] };
+  }
+
   @Post('creator-pass')
   @HttpCode(200)
   @ApiOperation({ summary: 'Give someone the Creator pass without payment (creators invited at launch, partners)' })

@@ -48,7 +48,7 @@ export class AdminPaymentSettingsController {
     const source = (k: 'momo' | 'flutterwave') => (stored[k] !== undefined ? 'app' : env[k] ? 'environment' : 'none');
     const m = stored.momo ?? null;
     return {
-      prices: { creatorPassUsdCents: eff.creatorPassUsdCents, creatorFreeVideos: eff.creatorFreeVideos, premiumUsdCents: eff.premiumUsdCents, premiumByCountry: eff.premiumByCountry, adDayUsdCents: eff.adDayUsdCents, adCpmUsdCents: eff.adCpmUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
+      prices: { plusUsdCents: eff.plusUsdCents, plusByCountry: eff.plusByCountry, familyUsdCents: eff.familyUsdCents, familyByCountry: eff.familyByCountry, creatorPassUsdCents: eff.creatorPassUsdCents, creatorFreeVideos: eff.creatorFreeVideos, premiumUsdCents: eff.premiumUsdCents, premiumByCountry: eff.premiumByCountry, adDayUsdCents: eff.adDayUsdCents, adCpmUsdCents: eff.adCpmUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
       momo: {
         source: source('momo'), active: !!eff.momo,
         enabled: m ? m.enabled : !!env.momo, sandbox: (m?.baseUrl ?? env.momo?.baseUrl ?? SANDBOX).includes('sandbox'),
@@ -83,10 +83,13 @@ export class AdminPaymentSettingsController {
         if (!Number.isInteger(n) || n < 0 || n > 1000) throw new BadRequestException('Free videos per channel: a whole number from 0 to 1000.');
         next.creatorFreeVideos = n;
       }
-      if (prices.premiumByCountry !== undefined) {
-        const byCountry = typeof prices.premiumByCountry === 'string' ? parseCountryPrices(prices.premiumByCountry) : null;
-        if (byCountry === null || Object.values(byCountry).some((v) => v > 10_000_000)) throw new BadRequestException('Premium by country: write it like RW=300, KE=500 (country code = US cents a month).');
-        next.premiumByCountry = byCountry;
+      next.plusUsdCents = cents(prices.plusUsdCents, 'Plus price') ?? next.plusUsdCents;
+      next.familyUsdCents = cents(prices.familyUsdCents, 'Family & TV price') ?? next.familyUsdCents;
+      for (const [key, label] of [['premiumByCountry', 'Premium'], ['plusByCountry', 'Plus'], ['familyByCountry', 'Family & TV']] as const) {
+        if (prices[key] === undefined) continue;
+        const byCountry = typeof prices[key] === 'string' ? parseCountryPrices(prices[key] as string) : null;
+        if (byCountry === null || Object.values(byCountry).some((v) => v > 10_000_000)) throw new BadRequestException(`${label} by country: write it like RW=300, KE=500 (country code = US cents a month).`);
+        next[key] = byCountry;
       }
       next.adDayUsdCents = cents(prices.adDayUsdCents, 'Ad price per day') ?? next.adDayUsdCents;
       next.adCpmUsdCents = cents(prices.adCpmUsdCents, 'Price per 1,000 ad views') ?? next.adCpmUsdCents;

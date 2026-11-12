@@ -110,8 +110,16 @@ model User {
   lastLoginAt           DateTime?
   /// Premium membership runs until this moment (null or past: not a member).
   premiumUntil          DateTime?
-  /// Creator pass (uploading after the free videos) runs until this moment; Premium includes it.
+  /// Creator pass (uploading after the free videos, up to a yearly number) runs until this moment; Premium includes it.
   creatorPassUntil      DateTime?
+  /// Plus (no ads, every quality) runs until this moment
+  plusUntil             DateTime?
+  /// Family & TV (Plus for the holder and up to 3 members) runs until this moment
+  familyUntil           DateTime?
+  /// Member of this account's Family & TV plan
+  familyOwnerId         String?
+  familyOwner           User?             @relation("FamilyMembers", fields: [familyOwnerId], references: [id], onDelete: SetNull)
+  familyMembers         User[]            @relation("FamilyMembers")
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
@@ -136,6 +144,8 @@ model User {
   auditLogs             AuditLog[]
 
   @@index([status])
+
+  @@index([familyOwnerId])
 }
 
 model OAuthAccount {
@@ -873,6 +883,8 @@ model VideoDailyStat {
   day                   DateTime          @db.Date
   views                 Int               @default(0)
   watchSeconds          BigInt            @default(0)
+  /// Watched by Plus, Family and Premium members: shares their subscription money with creators
+  plusWatchSeconds      BigInt            @default(0)
 
   @@id([videoId, day])
   @@index([day])
@@ -892,6 +904,8 @@ enum PaymentPurpose {
   PREMIUM
   AD_CAMPAIGN
   CREATOR_PASS
+  PLUS
+  FAMILY
 }
 
 model Payment {
@@ -939,6 +953,9 @@ model AdDaySettlement {
   reinvestCents         BigInt
   impressions           Int
   channels              Int
+  /// Plus and Family money of the day set aside for creators, and what was shared out (by members' watch time)
+  subscriptionPoolCents BigInt            @default(0)
+  subscriptionAllocatedCents BigInt       @default(0)
   createdAt             DateTime          @default(now())
 }
 

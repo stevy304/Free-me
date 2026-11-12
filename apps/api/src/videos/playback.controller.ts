@@ -13,7 +13,7 @@ import { STORAGE } from '../media/queue';
 import type { Storage } from '../media/storage';
 import { ViewCounter } from '../media/views';
 import { MediaUrls } from './media-urls';
-import { hasPremiumAccess } from '../billing/billing';
+import { hasPlus } from '../billing/billing';
 
 class ViewDto { @ApiProperty({ description: 'Seconds actually watched' }) @IsNumber() @Min(0) @Max(86_400) watchedSeconds!: number }
 
@@ -48,7 +48,7 @@ export class PlaybackController {
     if (!/^(master(-full)?\.m3u8|(\d{3,4}p|audio)\/index\.m3u8)$/.test(path)) throw new NotFoundException();
     const v = await this.viewable(id, auth);
     // Every quality is for Premium members and the owner; everyone else gets the limited master playlist.
-    if (path === 'master-full.m3u8' && v.channel.userId !== auth?.user.id && !(auth && hasPremiumAccess(auth.user))) throw new NotFoundException();
+    if (path === 'master-full.m3u8' && v.channel.userId !== auth?.user.id && !(auth && await hasPlus(this.prisma, auth.user))) throw new NotFoundException();
     const prefix = mediaPrefix(id, v.mediaLocation);
     const text = await this.storage.getText(`${prefix}hls/${path}`);
     if (text === null) throw new NotFoundException('This video is not available.');
@@ -113,6 +113,8 @@ export class PlaybackController {
     const minimum = Math.min(30, v.durationSeconds * 0.5);
     if (body.watchedSeconds + 0.5 < minimum) throw new BadRequestException('Not watched long enough to count.');
     const viewer = auth ? `u:${auth.user.id}` : `a:${createHash('sha256').update(`${ip}|${userAgent(req) ?? ''}`).digest('hex').slice(0, 32)}`;
-    return { counted: await this.views.record(id, viewer, Math.min(body.watchedSeconds, v.durationSeconds + 5)) };
+    // Watch time of Plus, Family and Premium members shares their subscription money with creators.
+    const plus = !!auth && await hasPlus(this.prisma, auth.user);
+    return { counted: await this.views.record(id, viewer, Math.min(body.watchedSeconds, v.durationSeconds + 5), plus) };
   }
 }

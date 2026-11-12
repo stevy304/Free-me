@@ -99,6 +99,9 @@ async function main() {
   await maintenance.upsertJobScheduler('billing-receipts', { every: 60_000 }, { name: 'billing-receipts' });
   await maintenance.upsertJobScheduler('billing-payments', { every: 60_000 }, { name: 'billing-payments' });
   await maintenance.upsertJobScheduler('billing-daily', { every: 15 * 60_000 }, { name: 'billing-daily' });
+  // Plans are paid ahead (mobile money does not renew by itself): a reminder three days before one ends.
+  await maintenance.upsertJobScheduler('renewal-reminders', { every: 3600_000 }, { name: 'renewal-reminders' });
+  const reminders = new Redis(config.redisUrl);
   if (config.media.whisper) await maintenance.upsertJobScheduler('caption-backfill', { every: 5 * 60_000 }, { name: 'caption-backfill' });
   const maint = new Worker('maintenance', async (job) => {
     if (job.name === 'stale-uploads') await jobs.cleanupStaleUploads();
@@ -108,6 +111,10 @@ async function main() {
       }
     }
     else if (job.name === 'billing-receipts') await billing.sendReceipts(mail);
+    else if (job.name === 'renewal-reminders') {
+      const n = await billing.sendRenewalReminders(mail, async (key) => (await reminders.set(key, '1', 'EX', 10 * 86_400, 'NX')) === 'OK');
+      if (n) log.log({ event: 'renewal_reminders_sent', count: n });
+    }
     else if (job.name === 'billing-payments') await billing.reconcile();
     else if (job.name === 'billing-daily') { await billing.expirePremium(); const n = await billing.settleAds(); if (n) log.log(`Settled ${n} day(s) of ad revenue`); }
     else if (job.name === 'expire-sources') await jobs.expireSources();

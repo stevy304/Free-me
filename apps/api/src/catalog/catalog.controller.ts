@@ -7,7 +7,7 @@ import type { AuthContext } from '../common/request';
 import { publicChannel } from '../users/serialize';
 import { PUBLIC_VIDEO, videoCard } from './serialize';
 import { MediaUrls } from '../videos/media-urls';
-import { hasPremiumAccess } from '../billing/billing';
+import { hasPlus } from '../billing/billing';
 
 /** Keyset pagination cursor: "<publishedAt ISO>_<id>", stable while new videos arrive. */
 function parseCursor(cursor?: string) {
@@ -66,7 +66,7 @@ export class CatalogController {
     if (!v || (!owner && (v.status !== 'READY' || v.visibility === 'PRIVATE'))) throw new NotFoundException('This video is not available.');
     if (v.reviewHoldAt && !owner) throw new NotFoundException('This video is being reviewed by our moderators.');
     const card = videoCard(v, this.urls);
-    const fullQuality = owner || (!!auth && hasPremiumAccess(auth.user));
+    const fullQuality = owner || (!!auth && await hasPlus(this.prisma, auth.user));
     const [reaction, history, following, saved] = auth ? await Promise.all([
       this.prisma.like.findUnique({ where: { userId_videoId: { userId: auth.user.id, videoId: id } }, select: { isLike: true } }),
       this.prisma.watchHistory.findUnique({ where: { userId_videoId: { userId: auth.user.id, videoId: id } }, select: { progressSeconds: true, completed: true } }),

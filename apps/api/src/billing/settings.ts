@@ -12,7 +12,8 @@ export interface EffectiveBilling extends BillingConfig { manual: ManualConfig |
 
 /** What administrators save in the app (Administration → Money → Payment settings). Secrets are stored encrypted. */
 export interface StoredBilling {
-  premiumUsdCents?: number; premiumByCountry?: Record<string, number>; creatorPassUsdCents?: number; creatorFreeVideos?: number; adDayUsdCents?: number; adCpmUsdCents?: number; payoutMinUsdCents?: number;
+  premiumUsdCents?: number; premiumByCountry?: Record<string, number>; creatorPassUsdCents?: number; creatorFreeVideos?: number;
+  plusUsdCents?: number; plusByCountry?: Record<string, number>; familyUsdCents?: number; familyByCountry?: Record<string, number>; adDayUsdCents?: number; adCpmUsdCents?: number; payoutMinUsdCents?: number;
   momo?: { enabled: boolean; baseUrl: string; subscriptionKey: string; apiUser: string; apiKey: string; targetEnvironment: string; currency: string; perUsd: number } | null;
   flutterwave?: { enabled: boolean; secretKey: string; webhookHash: string | null } | null;
   manual?: ManualConfig & { enabled: boolean } | null;
@@ -69,6 +70,14 @@ export function effective(config: AppConfig, s: StoredBilling): EffectiveBilling
     premiumByCountry: s.premiumByCountry ?? e.premiumByCountry,
     creatorPassUsdCents: s.creatorPassUsdCents ?? e.creatorPassUsdCents,
     creatorFreeVideos: s.creatorFreeVideos ?? e.creatorFreeVideos,
+    creatorPassVideosPerYear: e.creatorPassVideosPerYear,
+    plusUsdCents: s.plusUsdCents ?? e.plusUsdCents,
+    plusByCountry: s.plusByCountry ?? e.plusByCountry,
+    familyUsdCents: s.familyUsdCents ?? e.familyUsdCents,
+    familyByCountry: s.familyByCountry ?? e.familyByCountry,
+    familySeats: e.familySeats,
+    subscriptionCreatorShareBps: e.subscriptionCreatorShareBps,
+    airtel: e.airtel,
     adDayUsdCents: s.adDayUsdCents ?? e.adDayUsdCents,
     adCpmUsdCents: s.adCpmUsdCents ?? e.adCpmUsdCents,
     payoutMinUsdCents: s.payoutMinUsdCents ?? e.payoutMinUsdCents,

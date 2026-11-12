@@ -2,7 +2,7 @@ import { BadRequestException, Body, ConflictException, Controller, Delete, Forbi
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
-import { hasPremiumAccess, uploadAccess } from '../billing/billing';
+import { hasPremiumAccess, uploadAccess, uploadsLastYear } from '../billing/billing';
 import { effective, loadStored } from '../billing/settings';
 
 /** 200 → "$2", 250 → "$2.50". */
@@ -77,8 +77,12 @@ export class UploadsController {
     if (!body.ad) {
       // The prices in force: the environment, overridden by what administrators saved (as BillingService reads them).
       const prices = effective(this.config, await loadStored(this.prisma, this.config));
-      if (!uploadAccess(auth.user, channel.uploadCount, prices).allowed) {
-        throw new HttpException({ statusCode: 402, code: 'CREATOR_PASS_REQUIRED', message: `Your ${prices.creatorFreeVideos} free ${prices.creatorFreeVideos === 1 ? 'video is' : 'videos are'} used. Get the Creator pass (${usdText(prices.creatorPassUsdCents)} a month) to keep uploading. Your videos stay online either way.` }, 402);
+      const access = uploadAccess(auth.user, channel.uploadCount, await uploadsLastYear(this.prisma, channel.id), prices);
+      if (access.reason === 'PASS_REQUIRED') {
+        throw new HttpException({ statusCode: 402, code: 'CREATOR_PASS_REQUIRED', message: `Your ${prices.creatorFreeVideos} free ${prices.creatorFreeVideos === 1 ? 'video is' : 'videos are'} used. Get the Creator pass (${usdText(prices.creatorPassUsdCents)} a year) to keep uploading. Your videos stay online either way.` }, 402);
+      }
+      if (access.reason === 'PASS_LIMIT') {
+        throw new HttpException({ statusCode: 402, code: 'CREATOR_PASS_LIMIT', message: `The Creator pass includes ${prices.creatorPassVideosPerYear} uploads a year, and you have used them. Premium has no limit; or delete old videos you no longer need. Your videos stay online either way.` }, 402);
       }
     }
     // Daily limits count only uploads that can actually start (not refused ones).

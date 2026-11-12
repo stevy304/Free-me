@@ -3,17 +3,19 @@ import type Redis from 'ioredis';
 
 const PENDING_VIEWS = 'fm:views:pending';
 const PENDING_WATCH = 'fm:watch:pending';
+const PENDING_PLUS = 'fm:pluswatch:pending';
 /** The same viewer counts once per video in this window. */
 const DEDUPE_SECONDS = 6 * 3600;
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** Adds views and watch time to one video's row for one day (UTC). */
-async function addDaily(prisma: PrismaClient, videoId: string, day: string, views: number, seconds: number) {
-  if (!views && !seconds) return;
+async function addDaily(prisma: PrismaClient, videoId: string, day: string, views: number, seconds: number, plusSeconds = 0) {
+  if (!views && !seconds && !plusSeconds) return;
   await prisma.$executeRaw`
-    INSERT INTO "VideoDailyStat" ("videoId", "day", "views", "watchSeconds") SELECT ${videoId}, ${day}::date, ${views}, ${seconds}
+    INSERT INTO "VideoDailyStat" ("videoId", "day", "views", "watchSeconds", "plusWatchSeconds") SELECT ${videoId}, ${day}::date, ${views}, ${seconds}, ${plusSeconds}
     WHERE EXISTS (SELECT 1 FROM "Video" WHERE "id" = ${videoId})
-    ON CONFLICT ("videoId", "day") DO UPDATE SET "views" = "VideoDailyStat"."views" + EXCLUDED."views", "watchSeconds" = "VideoDailyStat"."watchSeconds" + EXCLUDED."watchSeconds"`;
+    ON CONFLICT ("videoId", "day") DO UPDATE SET "views" = "VideoDailyStat"."views" + EXCLUDED."views", "watchSeconds" = "VideoDailyStat"."watchSeconds" + EXCLUDED."watchSeconds",
+      "plusWatchSeconds" = "VideoDailyStat"."plusWatchSeconds" + EXCLUDED."plusWatchSeconds"`;
 }
 
 /**
@@ -24,11 +26,12 @@ export class ViewCounter {
   constructor(private readonly prisma: PrismaClient, private readonly redis: Redis | null) {}
 
   /** Returns true when this counted as a new view. */
-  async record(videoId: string, viewerKey: string, watchedSeconds: number): Promise<boolean> {
+  /** `plus`: the viewer has Plus perks; their watch time also counts for sharing subscription money with creators. */
+  async record(videoId: string, viewerKey: string, watchedSeconds: number, plus = false): Promise<boolean> {
     const seconds = Math.max(0, Math.min(6 * 3600, Math.round(watchedSeconds)));
     if (!this.redis) {
       await this.prisma.video.update({ where: { id: videoId }, data: { viewCount: { increment: 1 }, watchTimeSeconds: { increment: seconds } } });
-      await addDaily(this.prisma, videoId, today(), 1, seconds);
+      await addDaily(this.prisma, videoId, today(), 1, seconds, plus ? seconds : 0);
       return true;
     }
     const fresh = await this.redis.set(`fm:view:${videoId}:${viewerKey}`, '1', 'EX', DEDUPE_SECONDS, 'NX');
@@ -37,6 +40,7 @@ export class ViewCounter {
     const field = `${videoId}|${today()}`;
     if (fresh) m.hincrby(PENDING_VIEWS, field, 1);
     if (seconds) m.hincrby(PENDING_WATCH, field, seconds);
+    if (seconds && plus) m.hincrby(PENDING_PLUS, field, seconds);
     await m.exec();
     return fresh === 'OK';
   }
@@ -53,13 +57,14 @@ export class ViewCounter {
     };
     const views = await take(PENDING_VIEWS);
     const watch = await take(PENDING_WATCH);
-    const fields = new Set([...Object.keys(views), ...Object.keys(watch)].filter((k) => k !== '__tmp'));
+    const plusWatch = await take(PENDING_PLUS);
+    const fields = new Set([...Object.keys(views), ...Object.keys(watch), ...Object.keys(plusWatch)].filter((k) => k !== '__tmp'));
     // Per day for the charts; per video for the totals. (Fields from before days were recorded count as today.)
     const totals = new Map<string, { v: number; w: number }>();
     for (const f of fields) {
       const [id, day = today()] = f.split('|');
       const v = Number(views[f] ?? 0); const w = Number(watch[f] ?? 0);
-      await addDaily(this.prisma, id, day, v, w);
+      await addDaily(this.prisma, id, day, v, w, Number(plusWatch[f] ?? 0));
       const t = totals.get(id) ?? { v: 0, w: 0 };
       totals.set(id, { v: t.v + v, w: t.w + w });
     }
@@ -72,7 +77,7 @@ export class ViewCounter {
         if (row) await this.prisma.channel.update({ where: { id: row.channelId }, data: { totalViews: { increment: v } } });
       }
     }
-    for (const t of [views.__tmp, watch.__tmp]) if (t) await this.redis.del(t);
+    for (const t of [views.__tmp, watch.__tmp, plusWatch.__tmp]) if (t) await this.redis.del(t);
     return ids.size;
   }
 }
