@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { Counter, Histogram } from 'prom-client';
 import { createRegistry, tokenMatches } from './metrics/metrics';
+import { forgetFeedKeys, setFeedCacheSink } from './catalog/feed-cache';
 
 /**
  * The media worker (server 4): transcodes uploads, moves media on visibility changes, deletes removed videos and
@@ -35,6 +36,9 @@ async function main() {
   // Instant updates from the worker (processing progress, notifications, payments) reach browsers through Redis.
   const emitter = new Emitter(new Redis(config.redisUrl));
   setRealtimeSink((r, event, data) => emitter.to(r).emit(event, data));
+  // A video the worker publishes shows on the home page at once (the API's cached feeds are forgotten).
+  const feedRedis = new Redis(config.redisUrl);
+  setFeedCacheSink(() => forgetFeedKeys(feedRedis));
   // Phone notifications for videos the worker finishes (followers hear about a new video when it is ready).
   setPushSender(createPushSender(prisma, config));
   // Higher qualities and caption backfill use separate worker slots so they cannot occupy the first-playable queue.

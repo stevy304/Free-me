@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
 import { APP_CONFIG, type AppConfig } from '../config/config';
+import { forgetFeedKeys, setFeedCacheSink } from '../catalog/feed-cache';
 
 /**
  * Redis for counters shared by every API instance (rate limits). Without REDIS_URL (local development, tests)
@@ -15,6 +16,11 @@ export class RedisService implements OnModuleDestroy {
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
     this.client = config.redisUrl ? new Redis(config.redisUrl, { maxRetriesPerRequest: 2, enableOfflineQueue: false, lazyConnect: false }) : null;
     this.client?.on('error', (e) => this.log.warn(`Redis: ${e.message}`));
+    // A video appearing or disappearing for the public forgets the shared feeds (here and in Redis).
+    setFeedCacheSink(async () => {
+      for (const k of [...this.memo.keys()]) if (k.startsWith('fm:cache:home:') || k.startsWith('fm:cache:rising:')) this.memo.delete(k);
+      if (this.client) await forgetFeedKeys(this.client);
+    });
   }
 
   /** Adds one to a counter that resets after `windowSec`; returns the new count and seconds until reset. */

@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
+import { feedsChanged } from '../catalog/feed-cache';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { Equals, IsEmail, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { REPORT_DETAILS_MAX, REPORT_REASONS, reportReasonLabel, signatureMatches } from '@free-me/shared';
@@ -75,6 +76,7 @@ export class ReportsController {
     ]);
     if (all.length < threshold && child.length < Math.min(2, threshold)) return;
     const held = await this.prisma.video.updateMany({ where: { id: videoId, reviewHoldAt: null, takenDownAt: null }, data: { reviewHoldAt: new Date() } });
+    if (held.count) await feedsChanged();
     if (held.count) await this.audit.record({ userId: null, action: 'VIDEO_HELD_BY_REPORTS', entityType: 'Video', entityId: videoId, details: { reporters: all.length, childSafety: child.length } });
   }
 

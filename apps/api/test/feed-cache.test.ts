@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { makeApp, resetDb, signIn, WEB } from './helpers';
 import { RedisService } from '../src/database/redis.service';
+import { feedsChanged } from '../src/catalog/feed-cache';
 
 // The home page's shared parts are computed once per FEED_CACHE_SECONDS for everyone; the viewer's own parts never are.
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -29,6 +30,9 @@ test('home: newest videos are reused for a minute, continue watching is always t
   await mk('Second');
   const again = (await request(ctx.http).get('/api/feed/home').expect(200)).body;
   expect(again.spotlight.title).toBe('First'); // shared answer, reused
+  // Publishing (or removing) a video forgets the shared answers at once.
+  await feedsChanged();
+  expect((await request(ctx.http).get('/api/feed/home').expect(200)).body.spotlight.title).toBe('Second');
   await ctx.prisma.watchHistory.create({ data: { userId: (await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'maker@example.com' } })).id, videoId: first.id, progressSeconds: 60 } });
   expect((await s.agent.get('/api/feed/home').expect(200)).body.continueWatching.map((c: any) => c.video.id)).toEqual([first.id]);
 });

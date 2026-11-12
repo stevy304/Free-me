@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
+import { feedsChanged } from '../catalog/feed-cache';
 import { AUTOMATED_MATCH } from '../media/screening';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { Equals, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
@@ -81,6 +82,10 @@ export class ModerationController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Remove the video, dismiss the report, or restore a removed video (e.g. after a counter-notice)' })
   async decide(@Param('id', ParseUUIDPipe) id: string, @Body() body: DecisionDto, @CurrentAuth() auth: AuthContext, @Req() req: AppRequest) {
+    try { return await this.decision(id, body, auth, req); } finally { await feedsChanged(); }
+  }
+
+  private async decision(id: string, body: DecisionDto, auth: AuthContext, req: AppRequest) {
     const r = await this.prisma.report.findUnique({ where: { id }, include: { video: { include: { channel: { include: { user: { select: { email: true } } } } } }, reporter: { select: { email: true } } } });
     if (!r) throw new NotFoundException('Report not found.');
     const v = r.video;
