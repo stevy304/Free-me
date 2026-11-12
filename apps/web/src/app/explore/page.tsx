@@ -30,7 +30,7 @@ export default async function Explore({ searchParams }: { searchParams: Promise<
       {rising && rising.videos.length > 0 && (
         <section className="mt-8">
           <h2 className="flex items-baseline gap-2.5 text-[22px] font-bold"><Icon.Spark size={20} filled className="self-center text-accent" />Rising <span className="font-sans text-[13px] font-medium text-muted">most watched this week</span></h2>
-          <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">{rising.videos.slice(0, 4).map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}</div>
+          <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-4">{rising.videos.slice(0, 4).map((v) => <VideoCard key={v.id} v={v} locale={locale} />)}</div>
         </section>
       )}
       <section className="mt-9">

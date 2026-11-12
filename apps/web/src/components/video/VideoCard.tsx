@@ -5,6 +5,7 @@ import { Avatar } from '../Avatar';
 import { duration, timeAgo, viewsLabel } from '@/lib/format';
 import type { VideoCardData } from '@/lib/types';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
+import { HoverPreview } from './HoverPreview';
 
 /** How much of a video was watched, as a small saffron ring (Free Me's progress mark). */
 function ProgressRing({ progress }: { progress: number }) {
@@ -24,6 +25,7 @@ export function Thumbnail({ v, className = '', progress, title = false, rounded 
       {v.thumbnailUrl
         ? <img src={v.thumbnailUrl} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
         : <div className="grid h-full w-full place-items-center text-faint"><Icon.Videos size={36} strokeWidth={1.2} /></div>}
+      {v.preview && <HoverPreview preview={v.preview} />}
       {v.durationSeconds > 0 && <span className="absolute left-2.5 top-2.5 rounded-full bg-white/90 px-2 py-0.5 text-[12px] font-semibold text-[#10201f] backdrop-blur">{duration(v.durationSeconds)}</span>}
       {progress !== undefined && progress > 0 && <ProgressRing progress={progress} />}
       {title && (

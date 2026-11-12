@@ -12,8 +12,19 @@ export const badgeOf = (c: Pick<Channel, 'isVerified' | 'verificationSource'>): 
 export const videoCard = (v: Video & { channel: Channel }, urls: MediaUrls) => ({
   id: v.id, title: v.title, thumbnailUrl: urls.publicThumb(v), durationSeconds: v.durationSeconds, isShort: v.isShort,
   viewCount: v.viewCount.toString(), publishedAt: v.publishedAt, playbackUrl: urls.playback(v), width: v.width, height: v.height,
+  preview: storyboardPreview(v, urls),
   channel: { handle: v.channel.handle, name: v.channel.name, avatarUrl: v.channel.avatarUrl, isVerified: v.channel.isVerified, badge: badgeOf(v.channel) },
 });
+
+/**
+ * The seek-bar sprite sheet (one small image of up to 100 frames), so a card can flick through the video on hover
+ * without loading any video. Only for public media: listed cards never carry signed links.
+ */
+function storyboardPreview(v: Video, urls: MediaUrls) {
+  const sb = v.storyboard as { key?: string; count?: number; cols?: number; width?: number; height?: number } | null;
+  if (!sb?.key || !sb.count || !sb.cols || !sb.width || !sb.height || v.mediaLocation !== 'PUBLIC') return null;
+  return { url: urls.publicUrl(v.id, sb.key), count: sb.count, cols: sb.cols, width: sb.width, height: sb.height };
+}
 
 export const PUBLIC_VIDEO = { status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', publishedAt: { not: null }, takenDownAt: null, reviewHoldAt: null, isAd: false } as const;
 

@@ -3,7 +3,7 @@ import Link from 'next/link';
 import * as Icon from '@/components/icons';
 import { Avatar } from '@/components/Avatar';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
-import { apiGet, getLocale } from '@/lib/server-api';
+import { apiGet, getLocale, getViewer } from '@/lib/server-api';
 import type { LiveInfo } from './types';
 
 export const metadata: Metadata = { title: 'Live now' };
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 
 /** Spaces live right now, and streams planned for the coming week. */
 export default async function LiveNow() {
-  const [r, locale] = await Promise.all([apiGet<{ streams: LiveInfo[]; upcoming?: LiveInfo[] }>('/live'), getLocale()]);
+  const [r, locale, viewer] = await Promise.all([apiGet<{ streams: LiveInfo[]; upcoming?: LiveInfo[] }>('/live'), getLocale(), getViewer()]);
   const streams = r?.streams ?? [];
   const upcoming = r?.upcoming ?? [];
   return (
@@ -32,7 +32,17 @@ export default async function LiveNow() {
             </li>
           ))}
         </ul>
-      ) : <p className="mt-10 text-center text-[15px] text-muted">Nobody is live right now. Spaces you follow tell you when they go live.</p>}
+      ) : (
+        <div className="mt-6 flex flex-col items-center rounded-3xl border border-dashed border-line px-6 py-14 text-center">
+          <span className="grid h-16 w-16 place-items-center rounded-full bg-[#e5484d]/10 text-[#e5484d]"><Icon.Live size={30} /></span>
+          <h2 className="mt-4 font-display text-[20px] font-bold">Nobody is live right now</h2>
+          <p className="mt-1 max-w-[440px] text-[15px] leading-relaxed text-muted">Spaces you tune in to let you know the moment they go live.{upcoming.length ? ' See what is planned below.' : ''}</p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <Link href={viewer?.channel ? '/go-live' : viewer ? '/channel/create' : '/login?returnTo=/go-live'} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#e5484d] px-5 text-[14px] font-bold text-white hover:bg-[#d13d42]"><Icon.Live size={18} />Go live</Link>
+            <Link href="/explore" className="inline-flex h-10 items-center rounded-xl border border-line px-5 text-[14px] font-semibold hover:bg-surface">Explore videos</Link>
+          </div>
+        </div>
+      )}
       {upcoming.length > 0 && (
         <section aria-labelledby="upcoming" className="mt-10">
           <h2 id="upcoming" className="font-display text-[22px] font-bold">Upcoming</h2>

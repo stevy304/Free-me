@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as Icon from '@/components/icons';
 import { Avatar } from '@/components/Avatar';
 import { FollowButton } from '@/components/FollowButton';
@@ -16,6 +16,7 @@ import { api } from '@/lib/client-api';
 import { compactNumber, duration, followersLabel, fullDate, timeAgo, viewsLabel } from '@/lib/format';
 import type { VideoCardData } from '@/lib/types';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
+import { handOffToDock } from '@/components/player/MiniDock';
 import { useRealtime } from '@/lib/realtime';
 import { mediaOrigin, warmUp } from '@/lib/warmup';
 
@@ -83,9 +84,19 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
     return () => clearTimeout(t);
   }, [countdown, next, router]);
 
+  // Leaving the page while the video plays: it keeps playing in the mini-player (MiniDock) at the same moment.
+  // A layout-effect cleanup runs before React removes the page, while the video still has its real time and state.
+  const stage = useRef<HTMLDivElement>(null);
+  const handOff = useRef<() => void>(() => undefined);
+  handOff.current = () => {
+    const vids = Array.from(stage.current?.querySelectorAll('video') ?? []);
+    const main = vids.find((x) => !x.paused && !x.ended && x.currentTime > 0 && (!v.durationSeconds || Math.abs((x.duration || 0) - v.durationSeconds) < 3));
+    handOffToDock(main && v.playbackUrl ? { id: v.id, title: v.title, channelName: v.channel.name, src: v.playbackUrl, poster: v.thumbnailUrl, time: main.currentTime, signedIn: initialViewer.signedIn } : null);
+  };
+  useLayoutEffect(() => () => handOff.current(), [v.id]);
+
   // Mini-player (tablets and up): while the video plays and the stage scrolls out of view, it keeps playing in a corner.
   // Phones keep the video pinned to the top instead.
-  const stage = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [offscreen, setOffscreen] = useState(false);
   const [dismissed, setDismissed] = useState(false);

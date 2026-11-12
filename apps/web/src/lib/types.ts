@@ -27,6 +27,8 @@ export interface Payment {
 export interface VideoCardData {
   id: string; title: string; thumbnailUrl: string | null; durationSeconds: number; isShort: boolean; viewCount: string; publishedAt: string | null;
   playbackUrl?: string | null; width?: number | null; height?: number | null;
+  /** Seek-bar sprite sheet, for the hover preview on cards. */
+  preview?: { url: string; count: number; cols: number; width: number; height: number } | null;
   channel: { handle: string; name: string; avatarUrl: string | null; isVerified: boolean; badge?: 'verified' | 'premium' | null };
 }
 export interface VideoPage { videos: VideoCardData[]; nextCursor: string | null }

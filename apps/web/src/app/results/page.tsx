@@ -19,15 +19,37 @@ export default async function Results({ searchParams }: { searchParams: Promise<
   if (!data || (!data.videos.length && !data.channels.length)) {
     return <EmptyState icon={<Icon.SearchEmpty size={36} strokeWidth={1.4} />} title={q ? 'No results found' : 'Search Free Me'}>{q ? 'Try different words, or check the spelling.' : 'Type in the search box above to find videos and channels.'}</EmptyState>;
   }
+  const total = data.videos.length + data.channels.length;
   return (
-    <div className="mx-auto max-w-[1100px] space-y-4 px-4 py-4 sm:px-6">
-      {data.channels.map((c) => (
-        <Link key={c.id} href={`/@${c.handle}`} className="flex items-center gap-6 rounded-xl py-3 sm:px-10">
-          <div className="hidden sm:block"><Avatar name={c.name} src={c.avatarUrl} size={120} /></div><div className="sm:hidden"><Avatar name={c.name} src={c.avatarUrl} size={64} /></div>
-          <div className="min-w-0"><p className="text-[18px] font-medium">{c.name}</p><p className="text-[12px] text-muted">@{c.handle} · {followersLabel(c.followerCount, locale)}</p>{c.description && <p className="mt-1 line-clamp-1 text-[12px] text-muted">{c.description}</p>}</div>
-        </Link>
-      ))}
-      {data.videos.map((v) => <VideoRow key={v.id} v={v} locale={locale} large />)}
+    <div className="mx-auto max-w-[1100px] px-4 pb-16 pt-5 sm:px-6">
+      <h1 className="font-display text-[26px] font-extrabold leading-tight">Results for <span className="text-brand">“{q}”</span></h1>
+      <p className="mt-1 text-[14px] text-muted">{total === 1 ? '1 result' : `${total} results`}{data.channels.length ? ` · ${data.channels.length === 1 ? '1 Space' : `${data.channels.length} Spaces`}` : ''}</p>
+      {data.channels.length > 0 && (
+        <section aria-labelledby="spaces-heading" className="mt-6">
+          <h2 id="spaces-heading" className="text-[13px] font-semibold uppercase tracking-[0.08em] text-muted">Spaces</h2>
+          <ul className="mt-2 grid gap-3 sm:grid-cols-2">
+            {data.channels.map((c) => (
+              <li key={c.id}>
+                <Link href={`/@${c.handle}`} className="group flex items-center gap-4 rounded-2xl border border-line bg-elevated p-3 transition-colors hover:border-brand">
+                  <Avatar name={c.name} src={c.avatarUrl} size={56} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[16px] font-semibold">{c.name}</p>
+                    <p className="truncate text-[13px] text-muted" suppressHydrationWarning>@{c.handle} · {followersLabel(c.followerCount, locale)}</p>
+                    {c.description && <p className="mt-0.5 line-clamp-1 text-[13px] text-muted">{c.description}</p>}
+                  </div>
+                  <Icon.ChevronRight size={18} className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5 group-hover:text-brand" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {data.videos.length > 0 && (
+        <section aria-labelledby="videos-heading" className="mt-8">
+          <h2 id="videos-heading" className="text-[13px] font-semibold uppercase tracking-[0.08em] text-muted">Videos</h2>
+          <div className="mt-3 space-y-5">{data.videos.map((v) => <VideoRow key={v.id} v={v} locale={locale} large />)}</div>
+        </section>
+      )}
     </div>
   );
 }

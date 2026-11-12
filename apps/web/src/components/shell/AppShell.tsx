@@ -5,6 +5,7 @@ import { currentTheme, setTheme } from './theme';
 import { setupPwa } from '@/lib/pwa';
 import type { Viewer } from '@/lib/types';
 import { ShellProvider } from './ShellContext';
+import { MiniDock } from '@/components/player/MiniDock';
 import { Header } from './Header';
 import { MobileDock } from './MobileDock';
 import { UploadsProvider } from '../hub/UploadsContext';
@@ -32,6 +33,7 @@ export function AppShell({ viewer, locale, children }: { viewer: Viewer | null; 
       <UploadsProvider>
         <Header />
         <main className="min-h-[calc(100dvh-4rem)] pb-28 md:pb-10">{children}</main>
+        <MiniDock />
         <MobileDock />
         {viewer?.channel && <UploadDialog />}
       </UploadsProvider>
