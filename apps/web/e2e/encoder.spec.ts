@@ -15,12 +15,13 @@ test('Streamlabs setup protects keys and follows external broadcast state on des
   await page.waitForURL((url) => url.pathname === '/');
   const post = (path: string, data: object = {}) => page.request.post(`${BASE}/api${path}`, { data, headers: { origin: BASE } });
   expect((await post('/channels', { handle: email.split('@')[0], name: 'Encoder QA' })).status()).toBe(201);
-  // The test deployment grants this creator Premium in its administrator allowlist via the API.
+  // An administrator (in ADMIN_EMAILS) grants this creator Premium. Its own account: sign-in codes are limited to one a
+  // minute per address, so sharing live-admin with live.spec.ts, which signs in right after, left that test without a code.
   const admin = await page.context().browser()!.newContext();
   const adminPage = await admin.newPage();
   await adminPage.goto('/login?returnTo=/');
-  await adminPage.getByLabel('Email address').fill('live-admin@example.com');
-  const adminCode = expectCode('live-admin@example.com');
+  await adminPage.getByLabel('Email address').fill('encoder-admin@example.com');
+  const adminCode = expectCode('encoder-admin@example.com');
   await adminPage.getByRole('button', { name: 'Email me a sign-in code' }).click();
   await adminPage.getByLabel('Sign-in code').fill(await adminCode());
   await adminPage.waitForURL((url) => url.pathname === '/');

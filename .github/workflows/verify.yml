@@ -80,7 +80,7 @@ jobs:
       - name: End-to-end tests in a browser
         run: |
           export LIVE_RTMP_URL=rtmps://live.freeme.test:443/live LIVE_RTMP_SECRET=ci-live-rtmp-secret-0123456789
-          export APP_URL=http://localhost:3000 MAIL_TRANSPORT=console SESSION_SECRET=ci-session-secret-0123456789abcdefghij STORAGE_DRIVER=local LOCAL_STORAGE_DIR=/tmp/fm-storage SCRATCH_DIR=/tmp/fm-scratch ADMIN_EMAILS=admin@example.com,live-admin@example.com
+          export APP_URL=http://localhost:3000 MAIL_TRANSPORT=console SESSION_SECRET=ci-session-secret-0123456789abcdefghij STORAGE_DRIVER=local LOCAL_STORAGE_DIR=/tmp/fm-storage SCRATCH_DIR=/tmp/fm-scratch ADMIN_EMAILS=admin@example.com,live-admin@example.com,encoder-admin@example.com
           (cd apps/api && node dist/main.js > /tmp/api.log 2>&1 &)
           (cd apps/api && node dist/worker.js > /tmp/worker.log 2>&1 &)
           (cd apps/web && API_INTERNAL_URL=http://127.0.0.1:4000 PORT=3000 HOSTNAME=127.0.0.1 node .next/standalone/apps/web/server.js > /tmp/web.log 2>&1 &)
