@@ -21,6 +21,8 @@ import { mediaOrigin, warmUp } from '@/lib/warmup';
 
 export interface WatchVideo extends VideoCardData {
   description: string | null; status: string; visibility: string; likeCount: number; commentCount: number; commentsOpen: boolean; playbackUrl: string | null; processingStage: string | null;
+  /** Set when this viewer gets qualities up to this height only (higher ones come with Premium). */
+  qualityLimit?: number | null;
   takenDownAt: string | null; storyboardUrl?: string | null; captions?: CaptionTrack[]; category: { name: string; slug: string } | null; channel: VideoCardData['channel'] & { followerCount: number };
 }
 export interface WatchViewer { signedIn: boolean; isOwner: boolean; following: boolean; saved: boolean; reaction: 'like' | 'dislike' | 'none'; resumeAt: number }
@@ -187,6 +189,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
           {/* Tablets and computers: title, numbers and actions under the video, on the stage. */}
           <div className="hidden pt-5 text-white sm:block">
             <h1 className="text-[24px] font-extrabold leading-[1.15] lg:text-[30px]">{v.title}</h1>
+            {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#9fb0ad]">Up to {v.qualityLimit}p · <Link href="/premium" className="font-semibold text-[#2bb5ab] hover:underline">higher qualities with Premium</Link></p> : null}
             <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
               <p className="text-[14px] text-[#9fb0ad]" suppressHydrationWarning>
                 {viewsLabel(v.viewCount, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : 'Not published'}
@@ -256,6 +259,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
               {viewsLabel(v.viewCount, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : 'Not published'}{v.category ? <> · <span className="text-[#2bb5ab]">#{v.category.name.replace(/\s+/g, '')}</span></> : null} <span className="font-semibold text-white">…more</span>
             </p>
           </button>
+          {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#9fb0ad]">Up to {v.qualityLimit}p · <Link href="/premium" className="font-semibold text-[#2bb5ab] hover:underline">higher qualities with Premium</Link></p> : null}
         </div>
         <div className="no-scrollbar mt-3.5 flex gap-2 overflow-x-auto px-4">
           <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Spark (${likes})`}

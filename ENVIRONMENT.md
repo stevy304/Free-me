@@ -49,6 +49,8 @@ Values for local development are in [.env.example](.env.example). In production 
 | `CHUNK_SECONDS` | | `30` | Length of one piece (rounded to an even number, so keyframes stay on the 2-second grid) |
 | `CHUNK_CONCURRENCY` | | `1` | Pieces one worker instance encodes at once (x264 already uses every core, so 1 is right for most servers) |
 | `NODE_NAME` | | the host name | Name of this media server. Pieces encoded on the server that planned the work skip object storage; set it only if two servers share a host name |
+| `HD_MIN_VIEWS` | | `100` | Popularity-based encoding: 1080p and above are made only once a video has this many views (checked every minute by the worker). Premium creators' uploads get them at once. `0` makes every quality straight away |
+| `FREE_MAX_QUALITY` | | `720` | Highest quality free viewers get (`144`, `240`, `360`, `480`, `720`, `1080`, `1440` or `2160`); Premium members and the video's owner get every quality. `0` = no limit. Applies to videos processed after it is set. It saves delivery cost, it is not protection: the higher-quality files of public videos are still on the CDN |
 | `COPY_TOP_RUNG` | | `true` | Use the upload's own H.264 as the top quality when it is suitable (exact size, 8-bit, normal colour, keyframe at least every 4.5 s, bitrate viewers can stream): the most expensive encode is skipped. `false` always re-encodes |
 | `VIDEO_ENCODER` | | `libx264` | `nvenc` (NVIDIA GPU) or `qsv` (Intel Quick Sync) for a media server with a GPU: several times faster. Falls back to `libx264` by itself if the GPU encoder fails |
 | `FFMPEG_PATH`, `FFPROBE_PATH` | | `ffmpeg`, `ffprobe` | Binaries |
@@ -86,6 +88,7 @@ To make someone an administrator (everything, including every Premium feature su
 | --- | --- | --- | --- |
 | `PREMIUM_PRICE_USD_CENTS` | | `1000` ($10) | Premium, per month |
 | `AD_PRICE_PER_DAY_USD_CENTS` | | `300` ($3) | One day of an ad campaign |
+| `AD_CPM_USD_CENTS` | | `100` ($1) | Price of 1,000 ad views. A paid day buys `AD_PRICE_PER_DAY_USD_CENTS × 1000 / AD_CPM_USD_CENTS` views at most (3,000 by default); views not delivered in the days bought keep running for as many days again. Administrators can change it in the app |
 | `PAYOUT_MINIMUM_USD_CENTS` | | `1000` ($10) | Smallest withdrawal a creator can ask for |
 | `MOMO_SUBSCRIPTION_KEY`, `MOMO_API_USER`, `MOMO_API_KEY` | for MTN MoMo | off | MTN MoMo **Collections** product: the primary subscription key and the API user and key from momodeveloper.mtn.com (sandbox) or the MTN partner portal (live). Set all three or none |
 | `MOMO_BASE_URL` | | `https://sandbox.momodeveloper.mtn.com` | Live: the address MTN gives you (e.g. `https://proxy.momoapi.mtn.com`) |

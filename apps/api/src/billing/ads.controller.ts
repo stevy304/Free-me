@@ -11,7 +11,7 @@ import { clientIp, type AppRequest, type AuthContext } from '../common/request';
 import { LINKED_VIDEO } from '../catalog/serialize';
 import { MediaUrls } from '../videos/media-urls';
 import { BillingService, PayDto, paymentView } from './billing.controller';
-import { EARNINGS_CURRENCY, hasPremiumAccess } from './billing';
+import { adDayKey, adViewLimits, EARNINGS_CURRENCY, hasPremiumAccess } from './billing';
 
 /** Ads show only on monetised channels: at most two per video (one before it, one halfway through long videos). */
 export const MAX_ADS_PER_VIDEO = 2;
@@ -35,12 +35,22 @@ class CampaignDto {
 class ImpressionDto { @ApiProperty() @IsUUID() campaignId!: string; @ApiProperty() @IsUUID() videoId!: string }
 class AdEventDto { @ApiProperty({ enum: ['COMPLETE', 'SKIP', 'CLICK'] }) @IsIn(['COMPLETE', 'SKIP', 'CLICK']) type!: string; @ApiProperty() @IsInt() @Min(0) @Max(3_600_000) ms!: number }
 
-const campaignView = (c: Campaign & { advertiser: Advertiser; video?: Pick<Video, 'id' | 'title' | 'durationSeconds'> | null }) => ({
+/** A campaign can show: running, inside its period (or its make-good period), with views left in its budget. */
+const running = (c: Campaign, now: Date) => c.status === 'ACTIVE' && c.startDate <= now && (c.endDate > now || (!!c.deliverUntil && c.deliverUntil > now))
+  && (!c.cpmRateCents || (c.impressionsCount + 1n) * BigInt(c.cpmRateCents) <= c.budgetAmountCents * 1000n);
+
+const campaignView = (c: Campaign & { advertiser: Advertiser; video?: Pick<Video, 'id' | 'title' | 'durationSeconds'> | null }) => {
+  const limits = adViewLimits(c);
+  return {
   id: c.id, status: c.status, businessName: c.advertiser.businessName, headline: c.headline, destinationUrl: c.destinationUrl, days: c.days,
-  dailyRateCents: c.dailyRateCents, totalCents: c.days * c.dailyRateCents, currency: c.currency, targetCountries: c.targetCountries, targetVideoIds: c.targetVideoIds, targetChannelIds: c.targetChannelIds,
+  dailyRateCents: c.dailyRateCents, totalCents: c.days * c.dailyRateCents, currency: c.currency,
+  // Priced per 1,000 views (null for older campaigns priced per day): views bought, per day, and spent so far.
+  cpmCents: c.cpmRateCents || null, viewsBought: limits?.total ?? null, viewsPerDay: limits?.perDay ?? null, spentCents: Number(c.spentAmountCents),
+  deliverUntil: c.reviewedAt ? c.deliverUntil : null, targetCountries: c.targetCountries, targetVideoIds: c.targetVideoIds, targetChannelIds: c.targetChannelIds,
   startDate: c.reviewedAt ? c.startDate : null, endDate: c.reviewedAt ? c.endDate : null, reviewNote: c.reviewNote,
   impressions: Number(c.impressionsCount), clicks: Number(c.clicksCount), video: c.video ? { id: c.video.id, title: c.video.title, durationSeconds: c.video.durationSeconds } : null, createdAt: c.createdAt,
-});
+  };
+};
 
 @ApiTags('ads')
 @Controller()
@@ -85,7 +95,7 @@ export class AdsController {
     if (videoCount !== targetVideoIds.length || channels.length !== handles.length) {
       throw new BadRequestException('Choose existing public videos and valid channel handles for ad placements.');
     }
-    const rate = (await this.billing.settings()).adDayUsdCents;
+    const { adDayUsdCents: rate, adCpmUsdCents: cpm } = await this.billing.settings();
     const c = await this.prisma.$transaction(async (tx) => {
       const adv = await tx.advertiser.upsert({
         where: { userId: auth.user.id }, update: { businessName: body.businessName.trim(), country: body.country.toUpperCase() },
@@ -94,7 +104,7 @@ export class AdsController {
       if (!auth.user.roles.includes('ADVERTISER')) await tx.user.update({ where: { id: auth.user.id }, data: { roles: { set: [...auth.user.roles, 'ADVERTISER'] } } });
       const now = new Date();
       return tx.campaign.create({ data: {
-        advertiserId: adv.id, name: body.headline.trim(), headline: body.headline.trim(), destinationUrl: body.destinationUrl, videoId: v.id, days: body.days, dailyRateCents: rate,
+        advertiserId: adv.id, name: body.headline.trim(), headline: body.headline.trim(), destinationUrl: body.destinationUrl, videoId: v.id, days: body.days, dailyRateCents: rate, cpmRateCents: cpm,
         currency: EARNINGS_CURRENCY, budgetAmountCents: BigInt(rate * body.days), targetCountries: targets, targetVideoIds, targetChannelIds: channels.map((ch) => ch.id), startDate: now, endDate: now,
       }, include: { advertiser: true } });
     });
@@ -155,7 +165,8 @@ export class AdsController {
     if (!v || v.isShort || v.isAd || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now)) return { slots: [] };
     const country = await this.viewerCountry(auth, req);
     const candidates = await this.prisma.campaign.findMany({
-      where: { status: 'ACTIVE', startDate: { lte: now }, endDate: { gt: now }, videoId: { not: id }, AND: [
+      where: { status: 'ACTIVE', startDate: { lte: now }, videoId: { not: id }, AND: [
+        { OR: [{ endDate: { gt: now } }, { deliverUntil: { gt: now } }] },
         country ? { OR: [{ targetCountries: { isEmpty: true } }, { targetCountries: { has: country } }] } : { targetCountries: { isEmpty: true } },
         { OR: [{ targetVideoIds: { isEmpty: true }, targetChannelIds: { isEmpty: true } },
           ...(v.visibility === 'PUBLIC' ? [{ targetVideoIds: { has: id } }, { targetChannelIds: { has: v.channelId } }] : [])] },
@@ -164,7 +175,10 @@ export class AdsController {
     });
     const ads = await this.prisma.video.findMany({ where: { id: { in: candidates.map((c) => c.videoId!).filter(Boolean) }, ...LINKED_VIDEO, mediaLocation: 'PUBLIC' } });
     const byId = new Map(ads.map((a) => [a.id, a]));
-    const usable = candidates.filter((c) => c.videoId && byId.has(c.videoId)).sort(() => Math.random() - 0.5);
+    // Campaigns that reached today's views or their budget leave the slots to others.
+    const today = await this.redis.peek(candidates.map((c) => adDayKey(c.id, now)));
+    const open = candidates.filter((c, i) => { const l = adViewLimits(c); return running(c, now) && (!l || today[i] < l.perDay); });
+    const usable = open.filter((c) => c.videoId && byId.has(c.videoId)).sort(() => Math.random() - 0.5);
     const at = [0, ...(v.durationSeconds >= MID_ROLL_MIN_SECONDS ? [Math.floor(v.durationSeconds / 2)] : [])].slice(0, MAX_ADS_PER_VIDEO);
     return {
       slots: at.slice(0, usable.length).map((t, i) => {
@@ -182,18 +196,25 @@ export class AdsController {
     const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId } });
     const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, isShort: false, isAd: false }, include: { channel: { include: { eligibility: true, user: true } } } });
     const now = new Date();
-    if (!c || !v || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now) || c.videoId === v.id || c.status !== 'ACTIVE' || c.startDate > now || c.endDate <= now) return { impressionId: null };
+    if (!c || !v || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now) || c.videoId === v.id || !running(c, now)) return { impressionId: null };
     if ((c.targetVideoIds.length || c.targetChannelIds.length) &&
         (v.visibility !== 'PUBLIC' || (!c.targetVideoIds.includes(v.id) && !c.targetChannelIds.includes(v.channelId)))) return { impressionId: null };
     const country = await this.viewerCountry(auth, req);
     if (c.targetCountries.length && (!country || !c.targetCountries.includes(country))) return { impressionId: null };
     const { count } = await this.redis.hit(`ads:seen:${who}:${c.id}:${v.id}`, 1800);
     if (count > 1) return { impressionId: null };
+    // Pacing: a campaign priced per 1,000 views gets at most its share of views each day.
+    const limits = adViewLimits(c);
+    if (limits && (await this.redis.hit(adDayKey(c.id, now), 2 * 86_400)).count > limits.perDay) return { impressionId: null };
     const imp = await this.prisma.$transaction(async (tx) => {
-      await tx.campaign.update({ where: { id: c.id }, data: { impressionsCount: { increment: 1 } } });
+      // Counted and charged in one step that never goes over the budget (another server may count at the same time).
+      const charged = await tx.$executeRaw`
+        UPDATE "Campaign" SET "impressionsCount" = "impressionsCount" + 1, "spentAmountCents" = (("impressionsCount" + 1) * "cpmRateCents") / 1000, "updatedAt" = now()
+        WHERE "id" = ${c.id} AND ("cpmRateCents" = 0 OR ("impressionsCount" + 1) * "cpmRateCents" <= "budgetAmountCents" * 1000)`;
+      if (!charged) return null;
       return tx.adImpression.create({ data: { campaignId: c.id, videoId: v.id, viewerCountry: country, watchedDurationMs: 0, currency: c.currency, costChargedCents: 0, creatorShareCents: 0, platformShareCents: 0, reinvestShareCents: 0 } });
     });
-    return { impressionId: imp.id };
+    return { impressionId: imp?.id ?? null };
   }
 
   @Post('ads/impressions/:id/events')

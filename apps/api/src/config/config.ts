@@ -19,6 +19,8 @@ export interface SafetyConfig {
 export interface BillingConfig {
   premiumUsdCents: number;
   adDayUsdCents: number;
+  /** What 1,000 ad views cost; a paid day buys `adDayUsdCents * 1000 / adCpmUsdCents` views at most. */
+  adCpmUsdCents: number;
   /** Smallest balance a creator can withdraw. */
   payoutMinUsdCents: number;
   payouts?: { rwfPerUsd: number; feeRwf: number } | null;
@@ -104,6 +106,14 @@ export interface MediaConfig {
   encoder: 'libx264' | 'nvenc' | 'qsv';
   /** Use the upload's own H.264 for the top rung when it is already suitable (no re-encoding). */
   copyTopRung: boolean;
+  /**
+   * Popularity-based encoding: 1080p and above are made only once a video has this many views (Premium creators'
+   * uploads get them at once). Most uploads are rarely watched, so their most expensive rungs are never paid for.
+   * 0 makes every quality straight away.
+   */
+  hdMinViews: number;
+  /** Highest quality (short side, e.g. 720) in the master playlist free viewers get; 0 = no limit. Premium sees all. */
+  freeMaxShort: number;
   workerConcurrency: number;
   upgradeConcurrency: number;
   /** Long videos are encoded in pieces any worker server can take (see media/chunks.ts). */
@@ -168,11 +178,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const presets = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow'];
   for (const k of ['TRANSCODE_PRESET', 'TRANSCODE_PRESET_HIGH']) if (env[k]?.trim() && !presets.includes(env[k]!.trim())) problems.push(`${k} must be one of ${presets.join(', ')}.`);
   if (env.VIDEO_ENCODER?.trim() && !['libx264', 'nvenc', 'qsv'].includes(env.VIDEO_ENCODER.trim())) problems.push('VIDEO_ENCODER must be libx264, nvenc or qsv.');
+  const count = (k: string, d: number) => { const v = env[k]?.trim(); if (!v) return d; const n = Number(v); if (!Number.isSafeInteger(n) || n < 0) { problems.push(`${k} must be a whole number of 0 or more.`); return d; } return n; };
+  const hdMinViews = count('HD_MIN_VIEWS', 100);
+  const freeMaxShort = count('FREE_MAX_QUALITY', 720);
+  if (freeMaxShort && ![144, 240, 360, 480, 720, 1080, 1440, 2160].includes(freeMaxShort)) problems.push('FREE_MAX_QUALITY must be 0 (no limit) or one of 144, 240, 360, 480, 720, 1080, 1440, 2160.');
   const media: MediaConfig = {
     driver, s3, localDir: env.LOCAL_STORAGE_DIR?.trim() || './.data/storage', publicBaseUrl, maxUploadBytes, partBytes,
     scratchDir: env.SCRATCH_DIR?.trim() || '/tmp/freeme-scratch', ffmpegPath: env.FFMPEG_PATH?.trim() || 'ffmpeg', ffprobePath: env.FFPROBE_PATH?.trim() || 'ffprobe',
     preset: env.TRANSCODE_PRESET?.trim() || 'veryfast', presetHigh: env.TRANSCODE_PRESET_HIGH?.trim() || 'superfast',
     copyTopRung: env.COPY_TOP_RUNG !== 'false',
+    hdMinViews, freeMaxShort,
     chunked: env.CHUNKED_ENCODING !== 'false', chunkMinSeconds: Math.max(10, Number(env.CHUNK_MIN_SECONDS) || 120),
     chunkSeconds: Math.max(4, Math.round((Number(env.CHUNK_SECONDS) || 30) / 2) * 2), chunkConcurrency: Math.max(1, Number(env.CHUNK_CONCURRENCY) || 1),
     encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), upgradeConcurrency: Math.max(1, Math.floor(Number(env.WORKER_UPGRADE_CONCURRENCY) || 1)), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
@@ -202,7 +217,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const payoutTestKey = env.FLW_PAYOUT_TEST_KEY?.trim() || null;
   if (payoutTestKey && !payoutTestKey.startsWith('FLWSECK_TEST-')) problems.push('FLW_PAYOUT_TEST_KEY must be a Flutterwave TEST key.');
   const billing: BillingConfig = {
-    premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
+    premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), adCpmUsdCents: cents('AD_CPM_USD_CENTS', 100), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
     payouts: payoutRate > 0 ? { rwfPerUsd: payoutRate, feeRwf: payoutFee } : null,
     payoutSandbox: payoutTestKey ? { secretKey: payoutTestKey } : null,
     momo: momoSet.length === momoKeys.length ? {

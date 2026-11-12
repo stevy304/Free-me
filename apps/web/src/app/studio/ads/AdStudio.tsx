@@ -18,6 +18,8 @@ interface Campaign {
   id: string; status: 'DRAFT' | 'PENDING_REVIEW' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'REJECTED'; businessName: string; headline: string; destinationUrl: string; days: number;
   dailyRateCents: number; totalCents: number; targetCountries: string[]; startDate: string | null; endDate: string | null; reviewNote: string | null;
   impressions: number; clicks: number; video: { id: string; title: string; durationSeconds: number } | null; createdAt: string;
+  /** Priced per 1,000 views (null: an older campaign priced per day). */
+  cpmCents?: number | null; viewsBought?: number | null; viewsPerDay?: number | null; spentCents?: number; deliverUntil?: string | null;
 }
 const STATUS: Record<Campaign['status'], [string, string]> = {
   DRAFT: ['Not paid yet', 'bg-surface'], PENDING_REVIEW: ['Paid · in review', 'bg-accent-soft text-on-accent-soft'], ACTIVE: ['Running', 'bg-brand-soft text-brand'],
@@ -232,7 +234,8 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                   <input type="range" min={1} max={90} value={form.days} onChange={(e) => setForm({ ...form, days: Number(e.target.value) })} className="mt-3 w-full accent-[var(--brand)]" />
                 </label>
                 <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-surface px-4 py-3 sm:col-span-2">
-                  <span className="text-[15px]">{form.days} {form.days === 1 ? 'day' : 'days'} × {usd(rate, locale)} = <b className="font-display text-[20px]">{usd(rate * form.days, locale)}</b></span>
+                  <span className="text-[15px]">{form.days} {form.days === 1 ? 'day' : 'days'} × {usd(rate, locale)} = <b className="font-display text-[20px]">{usd(rate * form.days, locale)}</b>
+                    {plans.ads.viewsPerDay && plans.ads.usdCentsPer1000Views && <span className="block text-[13px] text-muted">Up to {(plans.ads.viewsPerDay * form.days).toLocaleString(locale)} views ({plans.ads.viewsPerDay.toLocaleString(locale)} a day) at {usd(plans.ads.usdCentsPer1000Views, locale)} per 1,000 views. Views not delivered in time keep running for up to {form.days} more {form.days === 1 ? 'day' : 'days'}.</span>}</span>
                   <span className="ml-auto flex gap-2">
                     <button type="button" onClick={() => setCreating(false)} className="h-11 rounded-2xl px-4 text-[14px] font-semibold text-muted hover:bg-surface-hover">Cancel</button>
                     <button type="button" disabled={busy || !form.videoId || !form.country || form.headline.trim().length < 3 || form.businessName.trim().length < 2} onClick={() => void create()} className="h-11 rounded-2xl bg-brand px-5 text-[14px] font-bold text-on-brand disabled:opacity-50">Continue to payment</button>
@@ -263,6 +266,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                         <p className="flex flex-wrap items-center gap-2"><span className="font-display text-[18px] font-bold">{c.headline}</span><span className={`rounded-full px-2.5 py-0.5 text-[12px] font-semibold ${cls}`}>{label}</span></p>
                         <p className="mt-0.5 truncate text-[13px] text-muted">{c.businessName} · {c.video?.title ?? 'video removed'} · {c.targetCountries.length ? c.targetCountries.join(', ') : 'every country'} · {c.days} {c.days === 1 ? 'day' : 'days'} ({usd(c.totalCents, locale)})</p>
                         {c.startDate && c.endDate && <p className="text-[13px] text-muted">{new Date(c.startDate).toLocaleDateString(locale)} – {new Date(c.endDate).toLocaleDateString(locale)}</p>}
+                        {c.viewsBought && <p className="text-[13px] text-muted">{c.impressions.toLocaleString(locale)} of {c.viewsBought.toLocaleString(locale)} views delivered (up to {c.viewsPerDay?.toLocaleString(locale)} a day){c.deliverUntil && c.impressions < c.viewsBought ? `; the rest by ${new Date(c.deliverUntil).toLocaleDateString(locale)}` : ''}</p>}
                         {c.reviewNote && <p className={`mt-1 text-[13px] ${c.status === 'REJECTED' ? 'text-danger' : 'text-muted'}`}>Review note: {c.reviewNote}</p>}
                       </div>
                       <dl className="grid grid-cols-3 gap-4 text-center">

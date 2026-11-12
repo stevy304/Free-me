@@ -32,6 +32,14 @@ export class RedisService implements OnModuleDestroy {
     return { count: cur.n, ttl: Math.ceil((cur.until - now) / 1000) };
   }
 
+  /** Current values of several `hit` counters (0 when missing or expired), without changing them. */
+  async peek(keys: string[]): Promise<number[]> {
+    if (!keys.length) return [];
+    if (this.client) return (await this.client.mget(keys.map((k) => `fm:rl:${k}`))).map((v) => Number(v ?? 0));
+    const now = Date.now();
+    return keys.map((k) => { const cur = this.local.get(k); return cur && cur.until > now ? cur.n : 0; });
+  }
+
   async ping(): Promise<'ok' | 'not configured' | 'down'> {
     if (!this.client) return 'not configured';
     try { return (await this.client.ping()) === 'PONG' ? 'ok' : 'down'; } catch { return 'down'; }

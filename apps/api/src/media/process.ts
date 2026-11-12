@@ -14,12 +14,15 @@ import { hold, screen } from './screening';
 import { announceVideo } from '../notifications/notify';
 import type { Storage } from './storage';
 import { publish, room } from '../realtime/publish';
+import { hasPremiumAccess } from '../billing/billing';
 import { FIRST_KEYFRAMES, NEXT_KEYFRAMES, nodeName, chunkFile, chunkKey, videoChunksPrefix, type ChunkRunner, type ChunkTask } from './chunks';
 
 const TYPES: Record<string, string> = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg' };
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 /** Playlists change when HD renditions are added, so they are cached briefly. */
 const SHORT = 'public, max-age=30';
+/** Every quality, for Premium viewers and the owner, when the free playlist is limited (FREE_MAX_QUALITY). */
+export const FULL_MASTER = 'hls/master-full.m3u8';
 
 /** Where seek-bar previews are: one sprite sheet of small frames, `interval` seconds apart, in rows of `cols`. */
 export interface Storyboard { key: string; interval: number; count: number; cols: number; rows: number; width: number; height: number }
@@ -62,9 +65,13 @@ export class VideoProcessor {
    * in seconds. It answers `more: true` when higher qualities remain: they are a second, lower-priority job
    * (`rest`), so every new upload becomes watchable before any video gets its 1080p. Podcasts and videos of 360p or
    * less finish in the first job.
+   *
+   * Popularity-based encoding: unless the video already has HD_MIN_VIEWS views or its creator is a Premium member,
+   * 1080p and above are left out and the video is marked `hdPending`; the worker queues another `rest` job once it
+   * is watched enough (see MediaJobs.popularUpgrades). A `rest` job only encodes rungs that are not published yet.
    */
   async process(videoId: string, signal?: AbortSignal, part: 'playable' | 'rest' = 'playable'): Promise<{ speech: string | null; more: boolean }> {
-    const video = await this.prisma.video.findUnique({ where: { id: videoId } });
+    const video = await this.prisma.video.findUnique({ where: { id: videoId }, include: { channel: { select: { user: { select: { premiumUntil: true, roles: true } } } } } });
     if (!video?.sourceFileS3Key) return { speech: null, more: false }; // deleted, or never uploaded
     if (part === 'rest' && !video.hlsMasterKey) part = 'playable'; // nothing playable yet: start from the beginning
     const started = performance.now();
@@ -100,7 +107,11 @@ export class VideoProcessor {
       const first = ladder.filter((r) => r.short <= 360).at(-1) ?? ladder[0];
       const fast = [first];
       const remaining = ladder.filter((r) => r !== first);
-      const passes = [remaining.filter((r) => r.short < first.short || HD_RUNGS.has(r.name)), remaining.filter(isHighRung)].filter((rungs) => rungs.length);
+      // The most expensive rungs wait until people actually watch the video (most uploads are rarely watched).
+      const minViews = this.config.media.hdMinViews;
+      const deferred = !podcast && minViews > 0 && video.viewCount < BigInt(minViews) && !hasPremiumAccess(video.channel.user) ? ladder.filter(isHighRung) : [];
+      let passes = [remaining.filter((r) => r.short < first.short || HD_RUNGS.has(r.name)), remaining.filter(isHighRung)]
+        .map((rungs) => rungs.filter((r) => !deferred.includes(r))).filter((rungs) => rungs.length);
 
       // HDR phone videos are converted to normal colour; without the filters they would play washed out and grey.
       const filters = await ffmpegFilters(this.config.media.ffmpegPath);
@@ -143,8 +154,10 @@ export class VideoProcessor {
           return { speech: null, more: true };
         }
       } else {
-        // Second job: the renditions already published stay in the master playlist.
+        // Second job: the renditions already published stay in the master playlist and are not encoded again.
         done.push(...await this.publishedEntries(videoId, ladder));
+        const have = new Set(done.map((d) => d.name));
+        passes = passes.map((rungs) => rungs.filter((r) => !have.has(r.name))).filter((rungs) => rungs.length);
       }
 
       // Higher qualities. The top rung is copied from the upload when it is already suitable H.264.
@@ -164,8 +177,8 @@ export class VideoProcessor {
         await timed(`publish_${quality}Ms`, () => this.publish(videoId, work, rungs, info, done, null, index === passes.length - 1 ? 'Ready' : stage, Math.round(progress)));
       }
       signal?.throwIfAborted();
-      await this.setProgress(videoId, 100, 'Ready');
-      this.log.log({ event: 'video_processing_complete', videoId, qualities: ladder.map((r) => r.name), copied: copyTop?.rung.name ?? null, ...timings });
+      await this.setProgress(videoId, 100, 'Ready', { hdPending: deferred.length > 0 } as Partial<Video>);
+      this.log.log({ event: 'video_processing_complete', videoId, qualities: ladder.filter((r) => !deferred.includes(r)).map((r) => r.name), deferred: deferred.map((r) => r.name), copied: copyTop?.rung.name ?? null, ...timings });
       if (this.config.media.whisper && !info.hasAudio) {
         await this.prisma.video.updateMany({ where: { id: videoId }, data: { captionAttemptedAt: new Date() } });
       }
@@ -420,13 +433,19 @@ export class VideoProcessor {
       if (at >= 0) done.splice(at, 1);
       done.push({ name: r.name, width: r.width, height: r.height, bandwidth, codecs, frameRate: data.frameRate, playlist: `${r.name}/index.m3u8` });
     }
-    await this.storage.putBuffer(`${prefix}hls/master.m3u8`, Buffer.from(masterPlaylist(done, info.hasAudio)), { contentType: TYPES['.m3u8'], cacheControl: SHORT });
+    // Free viewers get a master playlist up to FREE_MAX_QUALITY (what costs the most to deliver); Premium viewers and
+    // the owner get every quality from master-full.m3u8. Without a limit (or nothing above it) there is one playlist.
+    const cap = this.config.media.freeMaxShort;
+    const free = cap ? done.filter((e) => Math.min(e.width, e.height) <= cap) : done;
+    const limited = free.length > 0 && free.length < done.length;
+    await this.storage.putBuffer(`${prefix}hls/master.m3u8`, Buffer.from(masterPlaylist(limited ? free : done, info.hasAudio)), { contentType: TYPES['.m3u8'], cacheControl: SHORT });
+    if (limited) await this.storage.putBuffer(`${prefix}${FULL_MASTER}`, Buffer.from(masterPlaylist(done, info.hasAudio)), { contentType: TYPES['.m3u8'], cacheControl: SHORT });
     const thumbKeys = thumbs?.map((t) => `thumbs/${relative(join(out, 'thumbs'), t)}`);
     // Read again now: uploading takes a while, and in the meantime moderators may have removed the video
     // or the creator may have chosen a thumbnail, which the default frame must not replace.
     const now = await this.prisma.video.findUnique({ where: { id: videoId }, select: { takenDownAt: true, thumbnailKey: true } });
     await this.prisma.video.update({ where: { id: videoId }, data: {
-      status: now?.takenDownAt ? 'SUSPENDED' : 'READY', mediaLocation: location, hlsMasterKey: 'hls/master.m3u8', processingProgress: progress, processingStage: stage, processingError: null,
+      status: now?.takenDownAt ? 'SUSPENDED' : 'READY', mediaLocation: location, hlsMasterKey: 'hls/master.m3u8', hlsFullMasterKey: limited ? FULL_MASTER : null, processingProgress: progress, processingStage: stage, processingError: null,
       ...(thumbKeys?.length ? { thumbnailCandidates: thumbKeys, ...(now?.thumbnailKey ? {} : { thumbnailKey: thumbKeys[Math.min(1, thumbKeys.length - 1)] }) } : {}),
     } });
     const playable = now?.takenDownAt ? null : performance.now();

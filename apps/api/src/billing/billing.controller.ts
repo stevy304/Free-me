@@ -50,7 +50,8 @@ export class BillingController {
     const b = await this.billing.settings();
     return {
       premium: { usdCents: b.premiumUsdCents, months: PREMIUM_MONTHS },
-      ads: { usdCentsPerDay: b.adDayUsdCents, maxAdsPerVideo: 2 },
+      // A paid day buys up to viewsPerDay ad views (priced per 1,000 views); views not delivered run on afterwards.
+      ads: { usdCentsPerDay: b.adDayUsdCents, usdCentsPer1000Views: b.adCpmUsdCents, viewsPerDay: Math.floor((b.adDayUsdCents * 1000) / b.adCpmUsdCents), maxAdsPerVideo: 2 },
       payoutMinimumUsdCents: b.payoutMinUsdCents,
       methods: (await this.billing.methods()).map((m) => ({
         ...m, perUsd: m.name === 'mtn_momo' ? b.momo!.perUsd : m.name === 'manual' ? b.manual!.perUsd : 1,

@@ -138,7 +138,9 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: tooLong.id }).expect(400)).body.message).toBe('An ad must be between 5 and 90 seconds long.');
   await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: short.id }).expect(400); // not theirs
   const camp = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: adVideo.id, targetVideoIds: [short.id] }).expect(201)).body.campaign;
-  expect(camp).toMatchObject({ status: 'DRAFT', days: 7, dailyRateCents: 300, totalCents: 2100 });
+  // $3 a day at $1 per 1,000 views: up to 3,000 views a day, 21,000 in all.
+  expect(camp).toMatchObject({ status: 'DRAFT', days: 7, dailyRateCents: 300, totalCents: 2100, cpmCents: 100, viewsBought: 21000, viewsPerDay: 3000, spentCents: 0 });
+  expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.ads).toMatchObject({ usdCentsPerDay: 300, usdCentsPer1000Views: 100, viewsPerDay: 3000 });
 
   // Paid by MoMo (21 USD → 30,450 RWF), then waits for review.
   const pay = (await biz.post(`/api/ads/campaigns/${camp.id}/pay`).set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000111' }).expect(201)).body.payment;
@@ -173,10 +175,11 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   const live = (await maker.get('/api/hub/monetisation/earn').expect(200)).body;
   expect(live).toMatchObject({ impressions: 1, activity: [{ campaignId: camp.id, videoId: short.id, impressions: 1 }] });
 
-  // Settlement: yesterday, the campaign ran all day ($3); the creator pool (60%) goes to the channel that showed it.
+  // Settlement of a campaign priced per day (as before per-view pricing): yesterday it ran all day ($3); the
+  // creator pool (60%) goes to the channel that showed it. Per-view settlement has its own test below.
   const DAY = 86_400_000;
   const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
-  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { startDate: new Date(today.getTime() - DAY), endDate: new Date(today.getTime() + 6 * DAY) } });
+  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { cpmRateCents: 0, deliverUntil: null, startDate: new Date(today.getTime() - DAY), endDate: new Date(today.getTime() + 6 * DAY) } });
   await ctx.prisma.adImpression.update({ where: { id: imp }, data: { createdAt: new Date(today.getTime() - DAY / 2) } });
   const billing = new Billing(ctx.prisma as never, ctx.config);
   expect(await billing.settleAds()).toBe(1);
@@ -200,6 +203,73 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   expect((await admin.post(`/api/admin/billing/payouts/${again.id}`).set('Origin', WEB).send({ action: 'paid', reference: 'MOMO-778899' }).expect(200)).body.payout).toMatchObject({ status: 'PAID', reference: 'MOMO-778899' });
   expect((await maker.get('/api/hub/monetisation')).body.balance).toMatchObject({ availableCents: 0, reservedCents: 0, paidCents: 180 });
 
+});
+
+test('ads priced per 1,000 views: a daily view cap, a budget that is never exceeded, and revenue that follows the views delivered', async () => {
+  const DAY = 86_400_000;
+  const maker = await creator('pace@example.com', 'pace');
+  const makerUser = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'pace@example.com' } });
+  await new Billing(ctx.prisma as never, ctx.config).grantPremium(makerUser.id, 1);
+  await maker.post('/api/hub/monetisation/join').set('Origin', WEB).expect(200);
+  const makerCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'pace' } });
+  const videos = await Promise.all(Array.from({ length: 8 }, (_, i) => ctx.prisma.video.create({ data: { channelId: makerCh.id, title: `p${i}`, durationSeconds: 120, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date() } })));
+
+  const biz = await creator('pacer@example.com', 'pacer');
+  await new Billing(ctx.prisma as never, ctx.config).grantPremium((await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'pacer@example.com' } })).id, 1);
+  const shopCh = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'pacer' } });
+  const adVideo = await ctx.prisma.video.create({ data: { channelId: shopCh.id, title: 'Ad', durationSeconds: 15, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
+  const camp = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ businessName: 'Pacer', country: 'RW', headline: 'Paced ad', destinationUrl: 'https://pacer.example.com', days: 2, videoId: adVideo.id }).expect(201)).body.campaign;
+  // A high price per view keeps the numbers small: $6 buys 6 views, 3 a day.
+  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { cpmRateCents: 100_000 } });
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { status: 'PENDING_REVIEW' } }); // as if paid
+  await admin.post(`/api/admin/billing/campaigns/${camp.id}/review`).set('Origin', WEB).send({ approve: true }).expect(200);
+  const approved = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: camp.id } });
+  // Views not delivered in the 2 days bought may be delivered for 2 more.
+  expect(approved.deliverUntil!.getTime() - approved.endDate.getTime()).toBe(2 * DAY);
+
+  const viewer = request.agent(ctx.http);
+  const show = async (v: { id: string }) => (await viewer.post('/api/ads/impressions').set('Origin', WEB).send({ campaignId: camp.id, videoId: v.id }).expect(201)).body.impressionId as string | null;
+  const shown: string[] = [];
+  for (const v of videos.slice(0, 3)) shown.push((await show(v))!);
+  expect(shown.every(Boolean)).toBe(true);
+  // Today's 3 views are delivered: no more slots and no more counted views today.
+  expect((await request(ctx.http).get(`/api/videos/${videos[3].id}/ads`).expect(200)).body.slots).toEqual([]);
+  expect(await show(videos[3])).toBeNull();
+
+  // The next day (the daily counter is gone): 3 more, then the budget is spent and nothing more is counted.
+  await ctx.clearLimits();
+  for (const v of videos.slice(3, 6)) shown.push((await show(v))!);
+  expect(shown.filter(Boolean)).toHaveLength(6);
+  await ctx.clearLimits();
+  expect(await show(videos[6])).toBeNull();
+  expect((await biz.get('/api/ads/campaigns').expect(200)).body.campaigns[0]).toMatchObject({ impressions: 6, viewsBought: 6, viewsPerDay: 3, spentCents: 600 });
+  const billing = new Billing(ctx.prisma as never, ctx.config);
+  await billing.expirePremium();
+  expect((await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: camp.id } })).status).toBe('COMPLETED');
+
+  // Settlement: 2 views two days ago ($2) and 4 views yesterday ($4); creators get 60% of each day.
+  const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+  await ctx.prisma.campaign.update({ where: { id: camp.id }, data: { startDate: new Date(today.getTime() - 2 * DAY), endDate: today, deliverUntil: new Date(today.getTime() + 2 * DAY) } });
+  for (const [i, id] of shown.entries()) await ctx.prisma.adImpression.update({ where: { id }, data: { createdAt: new Date(today.getTime() - (i < 2 ? 1.5 : 0.5) * DAY) } });
+  expect(await billing.settleAds()).toBe(2);
+  const days = await ctx.prisma.adDaySettlement.findMany({ orderBy: { day: 'asc' } });
+  expect(days.map((d) => [Number(d.grossCents), Number(d.creatorPoolCents), d.impressions])).toEqual([[200, 120, 2], [400, 240, 4]]);
+  expect((await maker.get('/api/hub/monetisation').expect(200)).body.balance).toMatchObject({ availableCents: 360, lifetimeCents: 360 });
+});
+
+test('ads priced per 1,000 views: budget not delivered by the end of the make-good period is counted on its last day', async () => {
+  const DAY = 86_400_000;
+  const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+  const user = await ctx.prisma.user.create({ data: { email: 'left@example.com' } });
+  const adv = await ctx.prisma.advertiser.create({ data: { userId: user.id, businessName: 'Leftover', country: 'RW', businessType: 'business', currency: 'USD' } });
+  // $3 for 3,000 views; none delivered; its make-good period ended yesterday.
+  await ctx.prisma.campaign.create({ data: { advertiserId: adv.id, name: 'x', headline: 'x', destinationUrl: 'https://x.example.com', currency: 'USD', days: 1, dailyRateCents: 300, cpmRateCents: 100, budgetAmountCents: 300n,
+    status: 'COMPLETED', reviewedAt: new Date(today.getTime() - 3 * DAY), startDate: new Date(today.getTime() - 3 * DAY), endDate: new Date(today.getTime() - 2 * DAY), deliverUntil: new Date(today.getTime() - DAY / 2) } });
+  const billing = new Billing(ctx.prisma as never, ctx.config);
+  expect(await billing.settleAds()).toBe(3);
+  const days = await ctx.prisma.adDaySettlement.findMany({ orderBy: { day: 'asc' } });
+  expect(days.map((d) => Number(d.grossCents))).toEqual([0, 0, 300]);
 });
 
 test('payment settings in the app: manual payments confirmed by an administrator; secrets stored encrypted; administrators have every Premium feature', async () => {

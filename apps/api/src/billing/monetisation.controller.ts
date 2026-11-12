@@ -145,7 +145,9 @@ export class AdminBillingController {
     if (!body.approve && !body.note?.trim()) throw new BadRequestException('Say why it is rejected; the business will see it.');
     const now = new Date();
     await this.prisma.campaign.update({ where: { id }, data: body.approve
-      ? { status: 'ACTIVE', reviewedAt: now, startDate: now, endDate: new Date(now.getTime() + c.days * 86_400_000), reviewNote: body.note?.trim() || (free ? 'Approved without payment by Free Me' : null),
+      ? { status: 'ACTIVE', reviewedAt: now, startDate: now, endDate: new Date(now.getTime() + c.days * 86_400_000),
+        // Priced per 1,000 views: views not delivered in the days bought may still be delivered for as many days again.
+        deliverUntil: c.cpmRateCents ? new Date(now.getTime() + 2 * c.days * 86_400_000) : null, reviewNote: body.note?.trim() || (free ? 'Approved without payment by Free Me' : null),
         // Unpaid: $0 a day, so no revenue (and nothing for creators) is counted for money that never came in.
         ...(free && c.status === 'DRAFT' ? { dailyRateCents: 0 } : {}) }
       : { status: 'REJECTED', reviewedAt: now, reviewNote: body.note!.trim() } });

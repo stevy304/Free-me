@@ -47,7 +47,7 @@ export class AdminPaymentSettingsController {
     const source = (k: 'momo' | 'flutterwave') => (stored[k] !== undefined ? 'app' : env[k] ? 'environment' : 'none');
     const m = stored.momo ?? null;
     return {
-      prices: { premiumUsdCents: eff.premiumUsdCents, adDayUsdCents: eff.adDayUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
+      prices: { premiumUsdCents: eff.premiumUsdCents, adDayUsdCents: eff.adDayUsdCents, adCpmUsdCents: eff.adCpmUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
       momo: {
         source: source('momo'), active: !!eff.momo,
         enabled: m ? m.enabled : !!env.momo, sandbox: (m?.baseUrl ?? env.momo?.baseUrl ?? SANDBOX).includes('sandbox'),
@@ -77,6 +77,7 @@ export class AdminPaymentSettingsController {
     if (prices) {
       next.premiumUsdCents = cents(prices.premiumUsdCents, 'Premium price') ?? next.premiumUsdCents;
       next.adDayUsdCents = cents(prices.adDayUsdCents, 'Ad price per day') ?? next.adDayUsdCents;
+      next.adCpmUsdCents = cents(prices.adCpmUsdCents, 'Price per 1,000 ad views') ?? next.adCpmUsdCents;
       next.payoutMinUsdCents = cents(prices.payoutMinUsdCents, 'Smallest withdrawal') ?? next.payoutMinUsdCents;
     }
     const m = obj(body.momo);

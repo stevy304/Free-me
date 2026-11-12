@@ -74,6 +74,8 @@ async function main() {
   await maintenance.upsertJobScheduler('flush-views', { every: 15_000 }, { name: 'flush-views' });
   await maintenance.upsertJobScheduler('stale-uploads', { every: 3600_000 }, { name: 'stale-uploads' });
   await maintenance.upsertJobScheduler('recover-stuck', { every: 5 * 60_000 }, { name: 'recover-stuck' });
+  // Popularity-based encoding: videos that reached HD_MIN_VIEWS get their 1080p and above.
+  await maintenance.upsertJobScheduler('hd-upgrades', { every: 60_000 }, { name: 'hd-upgrades' });
   // Money: check pending payments every minute; end memberships and share yesterday's ad revenue every 15 minutes.
   const billing = new Billing(prisma, config);
   const mail = new MailService(config);
@@ -91,6 +93,15 @@ async function main() {
     else if (job.name === 'billing-receipts') await billing.sendReceipts(mail);
     else if (job.name === 'billing-payments') await billing.reconcile();
     else if (job.name === 'billing-daily') { await billing.expirePremium(); const n = await billing.settleAds(); if (n) log.log(`Settled ${n} day(s) of ad revenue`); }
+    else if (job.name === 'hd-upgrades') {
+      const ids = await jobs.popularUpgrades();
+      for (const videoId of ids) {
+        // Not queued: put the flag back so the next run tries again.
+        try { await enqueue({ name: 'upgrade', videoId }); }
+        catch (e) { await prisma.video.updateMany({ where: { id: videoId }, data: { hdPending: true } }); throw e; }
+      }
+      if (ids.length) log.log({ event: 'hd_upgrades_queued', count: ids.length });
+    }
     else if (job.name === 'recover-stuck') {
       // A playable video that stopped before its higher qualities only needs the second job.
       for (const { id: videoId, playable } of await jobs.stuckVideos()) {

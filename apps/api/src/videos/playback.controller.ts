@@ -13,6 +13,7 @@ import { STORAGE } from '../media/queue';
 import type { Storage } from '../media/storage';
 import { ViewCounter } from '../media/views';
 import { MediaUrls } from './media-urls';
+import { hasPremiumAccess } from '../billing/billing';
 
 class ViewDto { @ApiProperty({ description: 'Seconds actually watched' }) @IsNumber() @Min(0) @Max(86_400) watchedSeconds!: number }
 
@@ -44,13 +45,15 @@ export class PlaybackController {
   }
 
   private async playlist(id: string, path: string, auth: AuthContext | null, res: Response) {
-    if (!/^(master\.m3u8|(\d{3,4}p|audio)\/index\.m3u8)$/.test(path)) throw new NotFoundException();
+    if (!/^(master(-full)?\.m3u8|(\d{3,4}p|audio)\/index\.m3u8)$/.test(path)) throw new NotFoundException();
     const v = await this.viewable(id, auth);
+    // Every quality is for Premium members and the owner; everyone else gets the limited master playlist.
+    if (path === 'master-full.m3u8' && v.channel.userId !== auth?.user.id && !(auth && hasPremiumAccess(auth.user))) throw new NotFoundException();
     const prefix = mediaPrefix(id, v.mediaLocation);
     const text = await this.storage.getText(`${prefix}hls/${path}`);
     if (text === null) throw new NotFoundException('This video is not available.');
     let body = text;
-    if (path !== 'master.m3u8') {
+    if (!path.startsWith('master')) {
       const dir = `hls/${path.split('/')[0]}/`;
       const link = (file: string) => this.urls.file(v, dir + file);
       const lines = await Promise.all(text.split('\n').map(async (line) => {

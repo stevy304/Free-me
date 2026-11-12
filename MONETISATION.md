@@ -5,9 +5,12 @@ Free Me has two sources of income, both paid up front with MTN MoMo or a card. P
 | Income | Price | Who pays | What they get |
 | --- | --- | --- | --- |
 | **Premium** | $10 a month (3, 6 and 12 months too) | Viewers and creators | The verified badge next to their name, monetisation (earning from ads), Live Studio, the Premium dashboard |
-| **Video ads** | $3 a day | Businesses | A 5–90 second video ad playing before videos of monetised creators, in the countries they choose, with a "Visit" button; uploaded and run from **Ad Studio** (`/studio/ads`, part of Premium), with results (shown, visits, rate) there. Ad videos are kept apart from the Space's videos and never appear in feeds or search. Viewers see the ad full-frame before the video starts, with a small *Sponsored* label, the business card with *Visit*, and *Skip* after 5 seconds; the video does not start until the ad is known (at most 1.5 seconds). Each campaign is reviewed by an administrator before it runs |
+| **Video ads** | $3 a day, at $1 per 1,000 views (up to 3,000 views a day) | Businesses | A 5–90 second video ad playing before videos of monetised creators, in the countries they choose, with a "Visit" button; uploaded and run from **Ad Studio** (`/studio/ads`, part of Premium), with results (shown, visits, rate) there. Ad videos are kept apart from the Space's videos and never appear in feeds or search. Viewers see the ad full-frame before the video starts, with a small *Sponsored* label, the business card with *Visit*, and *Skip* after 5 seconds; the video does not start until the ad is known (at most 1.5 seconds). Each campaign is reviewed by an administrator before it runs |
 
 ## The rules for ads
+
+- **Priced per 1,000 views.** A campaign is still bought in days ($3 each), but each day buys a set number of views: $3 ÷ $1 per 1,000 = 3,000. The campaign gets at most that many views each UTC day, and never more than its budget in total, so a few campaigns cannot take every ad slot for a flat fee. Views not delivered in the days bought keep running for as many days again (the make-good period). Both prices are the operator's to change (`AD_PRICE_PER_DAY_USD_CENTS`, `AD_CPM_USD_CENTS`, or Administration → Money).
+- Campaigns created before per-view pricing keep the old rule (paid per day, no view limit).
 
 - Ads play **only on videos of monetised creators** (Premium members who joined monetisation).
 - **At most 2 ads per video**: one before it, and one halfway through videos of 8 minutes or more. Never on Moments.
@@ -15,7 +18,7 @@ Free Me has two sources of income, both paid up front with MTN MoMo or a card. P
 
 ## How the ad money is shared
 
-Each day, everything businesses paid for that day is split **60 / 30 / 10**:
+Each day, the money earned from ads that day is split **60 / 30 / 10**. For campaigns priced per 1,000 views that is the views delivered that day (at $1 per 1,000 by default); budget a campaign could not deliver by the end of its make-good period is counted on that last day, because it was paid for. (Older campaigns priced per day count what they paid for the hours they ran.)
 
 - **60% to creators**, shared between monetised creators in proportion to the ads shown on their videos that day;
 - **30% runs Free Me** (servers, video delivery, payments, support, moderation);
@@ -25,7 +28,7 @@ The split is recorded with every entry in the creator's ledger. Earnings for a d
 
 ## What creators can expect
 
-The creator pool is `campaigns running × $3 × 60%` a day. A creator's share is their part of all ads shown.
+When campaigns deliver all their views, the creator pool is `campaigns running × $3 × 60%` a day; with fewer views, it is `views delivered ÷ 1,000 × $1 × 60%`. A creator's share is their part of all ads shown.
 
 | Ads running each day | Creator pool per day | per month (30 days) | A creator with 1% of ads shown, per month | with 5% |
 | ---: | ---: | ---: | ---: | ---: |
@@ -36,7 +39,7 @@ The creator pool is `campaigns running × $3 × 60%` a day. A creator's share is
 
 Premium is the steadier income: 1,000 members bring $10,000 a month. That pays for servers and video delivery long before ads reach volume. It also makes monetisation self-selecting: a creator who earns more than $10 a month from ads gains from joining.
 
-**Is $3 a day right?** Treat the current daily price as a pilot hypothesis. Measure valid impressions and advertiser outcomes before changing it. Effective CPM is campaign spend divided by valid impressions, multiplied by 1,000. A paid day has no guaranteed number of views unless the campaign terms explicitly provide one.
+**Are $3 a day and $1 per 1,000 views right?** Treat both as pilot hypotheses. Measure valid impressions and advertiser outcomes before changing them. A paid day buys *up to* its views (3,000 by default); it does not guarantee them unless the campaign terms explicitly say so. As the audience grows, raise the price per 1,000 views towards market rates: delivery costs money for every view, and a flat daily price with unlimited views would sell ads for less than they cost to show.
 
 The Monetisation tab in Creator Hub has a calculator with the same formula.
 

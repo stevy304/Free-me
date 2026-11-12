@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { Payment, Prisma, PrismaClient, User } from '@prisma/client';
+import { Prisma, type Campaign, type Payment, type PrismaClient, type User } from '@prisma/client';
 import { PROPOSED_SPLIT, allocatePool, splitRevenue } from '@free-me/shared';
 import type { AppConfig } from '../config/config';
 import { createProviders, currencyDigits, ProviderError, type PaymentProvider, type ProviderName } from './providers';
@@ -32,6 +32,20 @@ export function msisdn(raw: string, currency: string): string | null {
 export const isPremium = (u: Pick<User, 'premiumUntil'>, now = new Date()) => !!u.premiumUntil && u.premiumUntil > now;
 /** Premium features (Live Studio, monetisation): members, and administrators, who can use everything. */
 export const hasPremiumAccess = (u: Pick<User, 'premiumUntil' | 'roles'>, now = new Date()) => isPremium(u, now) || u.roles.includes('ADMIN');
+/**
+ * Ad views a campaign priced per 1,000 views can get: in total (its budget) and per UTC day (spread evenly over the
+ * days bought, so one campaign cannot take every slot). Null for older campaigns priced per day (no limit).
+ */
+export function adViewLimits(c: Pick<Campaign, 'cpmRateCents' | 'budgetAmountCents' | 'days'>): { total: number; perDay: number } | null {
+  if (!c.cpmRateCents) return null;
+  const total = Number((c.budgetAmountCents * 1000n) / BigInt(c.cpmRateCents));
+  return { total, perDay: Math.max(1, Math.floor(total / Math.max(1, c.days))) };
+}
+/** Revenue (cents) of a campaign's first `views` views: whole cents only, so days add up exactly to the total. */
+export const cpmRevenue = (views: bigint, cpmRateCents: number) => (views * BigInt(cpmRateCents)) / 1000n;
+/** Redis counter of a campaign's ad views on one UTC day. */
+export const adDayKey = (campaignId: string, t = new Date()) => `ads:day:${campaignId}:${t.toISOString().slice(0, 10)}`;
+
 /** Manual payments wait this long for the payer's proof and an administrator's check. */
 const MANUAL_WAIT = 7 * DAY;
 
@@ -208,13 +222,18 @@ export class Billing {
   /** Worker: memberships that ended lose the Premium badge (a badge given by administrators stays). */
   async expirePremium(now = new Date()) {
     const r = await this.prisma.channel.updateMany({ where: { verificationSource: 'PREMIUM', user: { OR: [{ premiumUntil: null }, { premiumUntil: { lte: now } }] } }, data: { isVerified: false, verificationSource: null } });
-    // Campaigns past their end are done.
-    await this.prisma.campaign.updateMany({ where: { status: 'ACTIVE', endDate: { lte: now } }, data: { status: 'COMPLETED' } });
+    // Campaigns past their end are done. One priced per 1,000 views may run on to its deliverUntil to deliver the
+    // views it paid for, and is done as soon as its budget cannot buy another view.
+    await this.prisma.$executeRaw`
+      UPDATE "Campaign" SET "status" = 'COMPLETED', "updatedAt" = now() WHERE "status" = 'ACTIVE'
+      AND (COALESCE("deliverUntil", "endDate") <= ${now} OR ("cpmRateCents" > 0 AND ("impressionsCount" + 1) * "cpmRateCents" > "budgetAmountCents" * 1000))`;
     return r.count;
   }
 
   /**
-   * Worker: shares each finished UTC day's ad revenue. Gross = what campaigns paid for the hours they ran that day.
+   * Worker: shares each finished UTC day's ad revenue. Campaigns priced per 1,000 views count the views they got that
+   * day, and on the day their delivery period ends, any budget they could not deliver. Older campaigns priced per
+   * day count what they paid for the hours they ran. Unpaid campaigns (approved without payment) count nothing.
    * The creator pool (60%) goes to monetised channels in proportion to the ads shown on their videos that day.
    */
   async settleAds(now = new Date()) {
@@ -232,9 +251,26 @@ export class Billing {
 
   async adDayShares(day: Date) {
     const end = new Date(day.getTime() + DAY);
-    const campaigns = await this.prisma.campaign.findMany({ where: { reviewedAt: { not: null }, status: { in: ['ACTIVE', 'COMPLETED', 'PAUSED'] }, startDate: { lt: end }, endDate: { gt: day } } });
+    const campaigns = await this.prisma.campaign.findMany({ where: { reviewedAt: { not: null }, status: { in: ['ACTIVE', 'COMPLETED', 'PAUSED'] }, startDate: { lt: end }, OR: [{ endDate: { gt: day } }, { deliverUntil: { gte: day } }] } });
+    const perView = campaigns.filter((c) => c.cpmRateCents > 0 && c.dailyRateCents > 0);
+    const counts = new Map((perView.length ? await this.prisma.$queryRaw<Array<{ campaignId: string; before: bigint; today: bigint }>>`
+      SELECT "campaignId", count(*) FILTER (WHERE "createdAt" < ${day.toISOString()}::timestamp)::bigint AS before,
+        count(*) FILTER (WHERE "createdAt" >= ${day.toISOString()}::timestamp)::bigint AS today
+      FROM "AdImpression" WHERE "campaignId" IN (${Prisma.join(perView.map((c) => c.id))}) AND "createdAt" < ${end.toISOString()}::timestamp
+      GROUP BY "campaignId"` : []).map((r) => [r.campaignId, r]));
     let gross = 0n;
     for (const c of campaigns) {
+      if (!c.dailyRateCents) continue;
+      if (c.cpmRateCents > 0) {
+        const n = counts.get(c.id) ?? { before: 0n, today: 0n };
+        const upTo = cpmRevenue(n.before + n.today, c.cpmRateCents);
+        gross += upTo - cpmRevenue(n.before, c.cpmRateCents);
+        // Budget the campaign could not deliver is counted when its delivery period ends (it was paid for).
+        const last = c.deliverUntil ?? c.endDate;
+        if (last >= day && last < end && c.budgetAmountCents > upTo) gross += c.budgetAmountCents - upTo;
+        continue;
+      }
+      if (c.endDate <= day) continue;
       const ran = Math.min(end.getTime(), c.endDate.getTime()) - Math.max(day.getTime(), c.startDate.getTime());
       if (ran > 0) gross += (BigInt(c.dailyRateCents) * BigInt(ran)) / BigInt(DAY);
     }
