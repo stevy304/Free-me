@@ -75,3 +75,11 @@ groups:
         annotations:
           summary: "{{ $labels.instance }} has less than 10% memory available"
           description: "FFmpeg on the media node uses the most: lower WORKER_CONCURRENCY or CHUNK_CONCURRENCY."
+
+      - alert: BackupTooOld
+        expr: (time() - max(freeme_backup_last_success_timestamp_seconds)) > 30 * 3600 or absent(freeme_backup_last_success_timestamp_seconds)
+        for: 30m
+        labels: { severity: page }
+        annotations:
+          summary: "No database backup in the last 30 hours"
+          description: "tail /var/log/freeme-backup.log on the database server; run /usr/local/bin/freeme-backup by hand to see the error."
