@@ -8,7 +8,7 @@ import type { HomeFeed } from '@/components/home/types';
 import { MomentCard, VideoCard } from '@/components/video/VideoCard';
 import { apiGet, getLocale, getViewer } from '@/lib/server-api';
 import { duration, followersLabel } from '@/lib/format';
-import type { LiveInfo } from './live/types';
+import type { LiveInfo } from '../live/types';
 
 export const metadata: Metadata = { title: 'Current' };
 
