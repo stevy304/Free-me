@@ -85,6 +85,8 @@ export interface AppConfig {
   sessionTtlDays: number;
   /** Seconds each API process keeps a session and its account (auth/session-cache.ts); 0 = read them every request. */
   sessionCacheSeconds: number;
+  /** Header the CDN or proxy puts the visitor's country in (ISO 3166-1), e.g. cf-ipcountry; used only to count playback quality per country. */
+  geoCountryHeader: string | null;
   /** Videos kept in the recommendation feature store (the active part of the catalogue, most watched first). */
   recActiveMax: number;
   google: { clientId: string; clientSecret: string } | null;
@@ -166,6 +168,8 @@ export interface MediaConfig {
    * for viewers whose device decodes AV1. Made once a video has `minViews` views; minViews 0 turns AV1 off.
    */
   av1: { minViews: number; preset: number; crf: number };
+  /** Per-title encoding (media/per-title.ts): choose each video's CRF from samples. */
+  perTitle: boolean;
   workerConcurrency: number;
   upgradeConcurrency: number;
   /** Long videos are encoded in pieces any worker server can take (see media/chunks.ts). */
@@ -261,6 +265,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     copyTopRung: env.COPY_TOP_RUNG !== 'false',
     hdMinViews, freeMaxShort, sourceRetentionDays: count('SOURCE_RETENTION_DAYS', 0),
     av1: { minViews: count('AV1_MIN_VIEWS', 500), preset: av1Preset, crf: av1Crf },
+    perTitle: env.PER_TITLE_ENCODING !== 'false',
     chunked: env.CHUNKED_ENCODING !== 'false', chunkMinSeconds: Math.max(10, Number(env.CHUNK_MIN_SECONDS) || 120),
     chunkSeconds: Math.max(4, Math.round((Number(env.CHUNK_SECONDS) || 30) / 2) * 2), chunkConcurrency: Math.max(1, Number(env.CHUNK_CONCURRENCY) || 1),
     encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), upgradeConcurrency: Math.max(1, Math.floor(Number(env.WORKER_UPGRADE_CONCURRENCY) || 1)), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
@@ -341,6 +346,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
     sessionTtlDays: Math.min(90, Math.max(1, Number(env.SESSION_TTL_DAYS || 30))),
+    geoCountryHeader: env.GEO_COUNTRY_HEADER === 'none' ? null : (env.GEO_COUNTRY_HEADER?.trim().toLowerCase() || 'cf-ipcountry'),
     recActiveMax: Math.max(1000, count('REC_ACTIVE_MAX', 200_000)),
     sessionCacheSeconds: nodeEnv === 'test' && !env.SESSION_CACHE_SECONDS ? 0 : Math.min(60, count('SESSION_CACHE_SECONDS', 15)),
     google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,

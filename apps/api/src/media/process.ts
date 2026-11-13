@@ -17,6 +17,7 @@ import { publish, room } from '../realtime/publish';
 import { hasPremiumAccess } from '../billing/billing';
 import { feedsChanged } from '../catalog/feed-cache';
 import { AV1_DIR, av1Args, av1Codecs, av1LevelFor, av1Rung } from './av1';
+import { BASE_CRF, measureRendition, perTitleCrf } from './per-title';
 import { FIRST_KEYFRAMES, NEXT_KEYFRAMES, nodeName, chunkFile, chunkKey, videoChunksPrefix, type ChunkRunner, type ChunkTask } from './chunks';
 
 const TYPES: Record<string, string> = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg' };
@@ -33,7 +34,7 @@ const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 const hlsArgs = (dir: string) => ['-f', 'hls', '-hls_time', '4', '-hls_init_time', '1', '-hls_playlist_type', 'vod', '-hls_segment_type', 'fmp4', '-hls_flags', 'independent_segments',
   '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', join(dir, 'seg_%05d.m4s'), join(dir, 'index.m3u8')];
 /** Which video a pass belongs to, for encoding in pieces (no source key: a podcast, made here, stays in one run). */
-interface EncodeContext { videoId: string; sourceKey: string | null; background: boolean }
+interface EncodeContext { videoId: string; sourceKey: string | null; background: boolean; /** x264 CRF for this video (per-title.ts); 21 by default */ crf?: number }
 
 async function walk(dir: string): Promise<string[]> {
   const out: string[] = [];
@@ -164,6 +165,8 @@ export class VideoProcessor {
 
       // Higher qualities. The top rung is copied from the upload when it is already suitable H.264.
       const copyTop = await timed('copyCheckMs', () => this.copyPlan(ladder, info, hdr, source2, signal));
+      // Per-title: how much compression this content takes (chosen once, kept for every later pass).
+      const crf = passes.length ? await timed('perTitleMs', () => this.titleCrf(videoId, source2, work, info, ladder, hdr, signal)) : BASE_CRF;
       const weight = (rungs: PlannedRung[]) => rungs.reduce((sum, rung) => sum + (rung === copyTop?.rung ? 0 : rung.width * rung.height), 400_000);
       const total = passes.reduce((sum, rungs) => sum + weight(rungs), 0);
       let progress = 5 + fastWeight;
@@ -173,7 +176,7 @@ export class VideoProcessor {
         const from = progress;
         const span = (95 - (5 + fastWeight)) * weight(base) / total;
         const quality = rungs.at(-1)!.name;
-        await timed(`encode_${quality}Ms`, () => this.encode(source2, work, rungs, info, hdr, null, (f) => this.setProgress(videoId, from + f * span, stage).catch(() => undefined), signal, { videoId, sourceKey: podcast ? null : video.sourceFileS3Key!, background: true }));
+        await timed(`encode_${quality}Ms`, () => this.encode(source2, work, rungs, info, hdr, null, (f) => this.setProgress(videoId, from + f * span, stage).catch(() => undefined), signal, { videoId, sourceKey: podcast ? null : video.sourceFileS3Key!, background: true, crf }));
         signal?.throwIfAborted();
         progress += span;
         await timed(`publish_${quality}Ms`, () => this.publish(videoId, work, rungs, info, done, null, index === passes.length - 1 ? 'Ready' : stage, index === passes.length - 1 ? 100 : Math.round(progress)));
@@ -212,6 +215,19 @@ export class VideoProcessor {
     return { rung: top, copy: { codecs: `avc1.${profiles[info.profile!]}${info.level!.toString(16).padStart(2, '0')}`, kbps: info.videoKbps! } };
   }
 
+  /** The video's per-title CRF: the one chosen before, else measured now from samples (off: PER_TITLE_ENCODING=false). */
+  private async titleCrf(videoId: string, source: string, work: string, info: ProbeResult, ladder: PlannedRung[], hdr: Hdr, signal?: AbortSignal): Promise<number> {
+    const v = await this.prisma.video.findUnique({ where: { id: videoId }, select: { encodeCrf: true } });
+    if (v?.encodeCrf) return v.encodeCrf;
+    if (!this.config.media.perTitle || this.config.media.encoder !== 'libx264' && this.config.media.encoder !== 'nvenc' && this.config.media.encoder !== 'qsv') return BASE_CRF;
+    const rung = ladder.filter((r) => r.short <= 720).at(-1) ?? ladder[0];
+    const r = await perTitleCrf(this.config.media.ffmpegPath, source, work, info.durationSeconds, rung, hdr, this.config.media.preset, signal);
+    await this.prisma.video.update({ where: { id: videoId }, data: { encodeCrf: r.crf } });
+    this.log.log({ event: 'video_per_title', videoId, crf: r.crf, reason: r.reason, rung: rung.name, ssim: r.ssim, sampleKbps: r.kbps,
+      estimatedSaving: r.kbps[BASE_CRF] ? Math.round((1 - (r.kbps[r.crf] ?? r.kbps[BASE_CRF]) / r.kbps[BASE_CRF]) * 100) / 100 : 0 });
+    return r.crf;
+  }
+
   /** Master playlist entries of the renditions a video already has (for the second job). */
   private async publishedEntries(videoId: string, ladder: PlannedRung[]): Promise<MasterEntry[]> {
     const rows = await this.prisma.videoRendition.findMany({ where: { videoId } });
@@ -219,8 +235,9 @@ export class VideoProcessor {
       const av1 = r.codec === 'av1';
       const planned = ladder.find((p) => p.name === r.resolution);
       // AV1 rows store their target bitrate; their ceiling (what players plan with) is 1.5 times that, as encoded.
-      const bandwidth = av1 ? Math.round(r.bitrateKbps * 1.5) : Math.max(planned?.maxKbps ?? 0, Math.round(r.bitrateKbps * 1.3));
-      return { name: r.resolution, width: r.width, height: r.height, bandwidth: bandwidth * 1000, codecs: r.codecs, frameRate: r.frameRate, playlist: r.playlistKey.replace(/^hls\//, ''), codec: av1 ? 'av1' : 'h264' };
+      // Measured (per-title.ts measureRendition) when known; before that, the planned ceiling.
+      const bandwidth = r.peakKbps ?? (av1 ? Math.round(r.bitrateKbps * 1.5) : Math.max(planned?.maxKbps ?? 0, Math.round(r.bitrateKbps * 1.3)));
+      return { name: r.resolution, width: r.width, height: r.height, bandwidth: bandwidth * 1000, averageBandwidth: r.averageKbps ? r.averageKbps * 1000 : undefined, codecs: r.codecs, frameRate: r.frameRate, playlist: r.playlistKey.replace(/^hls\//, ''), codec: av1 ? 'av1' : 'h264' };
     });
   }
 
@@ -315,11 +332,13 @@ export class VideoProcessor {
   }
 
   /** H.264 settings for one rung: x264 (CPU) with a faster preset for 1080p and above, or a GPU encoder. */
-  private videoArgs(enc: AppConfig['media']['encoder'], r: PlannedRung): string[] {
+  private videoArgs(enc: AppConfig['media']['encoder'], r: PlannedRung, crf = BASE_CRF): string[] {
     const rate = ['-maxrate', `${r.maxKbps}k`, '-bufsize', `${r.maxKbps * 2}k`];
-    if (enc === 'nvenc') return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'hq', '-profile:v', 'high', '-rc', 'vbr', '-cq', '23', '-b:v', `${r.videoKbps}k`, ...rate, '-forced-idr', '1'];
-    if (enc === 'qsv') return ['-c:v', 'h264_qsv', '-preset', 'veryfast', '-profile:v', 'high', '-global_quality', '23', '-b:v', `${r.videoKbps}k`, ...rate, '-forced_idr', '1'];
-    return ['-c:v', 'libx264', '-preset', isHighRung(r) ? this.config.media.presetHigh : this.config.media.preset, '-profile:v', 'high', '-crf', '21', ...rate];
+    // GPU encoders' quality scales move with the same per-title offset.
+    const offset = crf - BASE_CRF;
+    if (enc === 'nvenc') return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'hq', '-profile:v', 'high', '-rc', 'vbr', '-cq', String(23 + offset), '-b:v', `${r.videoKbps}k`, ...rate, '-forced-idr', '1'];
+    if (enc === 'qsv') return ['-c:v', 'h264_qsv', '-preset', 'veryfast', '-profile:v', 'high', '-global_quality', String(23 + offset), '-b:v', `${r.videoKbps}k`, ...rate, '-forced_idr', '1'];
+    return ['-c:v', 'libx264', '-preset', isHighRung(r) ? this.config.media.presetHigh : this.config.media.preset, '-profile:v', 'high', '-crf', String(crf), ...rate];
   }
 
   /**
@@ -357,7 +376,7 @@ export class VideoProcessor {
       const args = ['-hide_banner', '-y', '-nostats', '-ss', String(index * length), ...(index < count - 1 ? ['-t', String(length)] : []), '-i', '{IN}', '-filter_complex', filter];
       encoded.forEach((r, i) => args.push('-map', `[o${i}]`, ...(codec
         ? [...(hdr ? BT709_TAGS : []), ...codec.args(r)]
-        : [...(hdr ? BT709_H264 : []), ...this.videoArgs(enc, r), '-force_key_frames', index === 0 ? FIRST_KEYFRAMES : NEXT_KEYFRAMES, '-sc_threshold', '0']), '-an', `{OUT:${r.name}}`));
+        : [...(hdr ? BT709_H264 : []), ...this.videoArgs(enc, r, ctx.crf), '-force_key_frames', index === 0 ? FIRST_KEYFRAMES : NEXT_KEYFRAMES, '-sc_threshold', '0']), '-an', `{OUT:${r.name}}`));
       return { videoId: ctx.videoId, run: runId, index, args, rungs: encoded.map((r) => r.name), source: { host: nodeName(), path: source, key: ctx.sourceKey }, out: { host: nodeName(), dir }, niceness: ctx.background ? 10 : 0 };
     });
     try {
@@ -402,7 +421,7 @@ export class VideoProcessor {
       if (r.copy) { args.push('-map', '0:v:0', '-c:v', 'copy', ...hlsArgs(dir)); continue; }
       args.push('-map', `[o${encoded.indexOf(r)}]`, ...(hdr ? BT709_H264 : []));
       args.push(
-        ...this.videoArgs(enc, r),
+        ...this.videoArgs(enc, r, ctx?.crf),
         '-force_key_frames', FIRST_KEYFRAMES, '-sc_threshold', '0', '-movflags', '+faststart',
         ...hlsArgs(dir),
       );
@@ -464,7 +483,9 @@ export class VideoProcessor {
       const names = new Set(missing.map((r) => r.resolution));
       const rungs = ladder.filter((r) => names.has(r.name)).map(av1Rung);
       if (!rungs.length) return [];
-      const settings = this.config.media.av1;
+      // The per-title offset applies to AV1 too: content that looks the same at a higher x264 CRF does with AV1.
+      const offset = (video.encodeCrf ?? BASE_CRF) - BASE_CRF;
+      const settings = { ...this.config.media.av1, crf: Math.min(55, this.config.media.av1.crf + offset) };
       const fps = Math.min(60, info.fps);
       const args = (r: PlannedRung) => av1Args(r, fps, settings);
       if (sourceKey && this.chunks && this.config.media.chunked && info.durationSeconds >= this.config.media.chunkMinSeconds) {
@@ -503,7 +524,9 @@ export class VideoProcessor {
           const size = (await Promise.all(files.map((f) => stat(f).then((x) => x.size)))).reduce((a, b) => a + b, 0);
           const level = await probe(this.config.media.ffprobePath, join(dir, 'index.m3u8')).then((p) => p.level ?? null).catch(() => null);
           const codecs = av1Codecs(level ?? av1LevelFor(r.width, r.height, fps)) + (hasAudio ? `,${AUDIO.codecs}` : '');
-          const data = { width: r.width, height: r.height, bitrateKbps: r.videoKbps, playlistKey: `hls/${AV1_DIR(r.name)}/index.m3u8`, fileSizeBytes: BigInt(size), codecs, frameRate: fps };
+          const measured = await measureRendition(dir);
+          const data = { width: r.width, height: r.height, bitrateKbps: r.videoKbps, playlistKey: `hls/${AV1_DIR(r.name)}/index.m3u8`, fileSizeBytes: BigInt(size), codecs, frameRate: fps,
+            peakKbps: measured?.peakKbps ?? null, averageKbps: measured?.averageKbps ?? null };
           await this.prisma.videoRendition.upsert({ where: { videoId_resolution_codec: { videoId, resolution: r.name, codec: 'av1' } }, create: { videoId, resolution: r.name, codec: 'av1', ...data }, update: data });
           const same = h264.find((x) => x.resolution === r.name);
           if (same) savedBytes += Number(same.fileSizeBytes) - size;
@@ -546,13 +569,16 @@ export class VideoProcessor {
       const sizes = await Promise.all((await walk(join(out, 'hls', r.name))).map((f) => stat(f).then((s) => s.size)));
       const codecs = (r.copy?.codecs ?? codecsFor(r)) + (info.hasAudio ? `,${AUDIO.codecs}` : '');
       // Video only (the master playlist adds the shared audio); a copied rung at its own peak, with room.
-      const bandwidth = r.copy ? Math.max(r.maxKbps, Math.round(r.copy.kbps * 1.3)) * 1000 : r.maxKbps * 1000;
-      const data = { width: r.width, height: r.height, bitrateKbps: r.copy?.kbps ?? r.videoKbps, playlistKey: `hls/${r.name}/index.m3u8`, fileSizeBytes: BigInt(sizes.reduce((a, b) => a + b, 0)), codecs, frameRate: Math.min(60, info.fps) };
+      // What the encoded segments really need (per-title.ts), else the planned ceiling.
+      const measured = await measureRendition(join(out, 'hls', r.name));
+      const bandwidth = (measured?.peakKbps ?? (r.copy ? Math.max(r.maxKbps, Math.round(r.copy.kbps * 1.3)) : r.maxKbps)) * 1000;
+      const data = { width: r.width, height: r.height, bitrateKbps: r.copy?.kbps ?? r.videoKbps, playlistKey: `hls/${r.name}/index.m3u8`, fileSizeBytes: BigInt(sizes.reduce((a, b) => a + b, 0)), codecs, frameRate: Math.min(60, info.fps),
+        peakKbps: measured?.peakKbps ?? null, averageKbps: measured?.averageKbps ?? null };
       await this.prisma.videoRendition.upsert({ where: { videoId_resolution_codec: { videoId, resolution: r.name, codec: 'h264' } }, create: { videoId, resolution: r.name, codec: 'h264', ...data }, update: data });
       // Replaces the entry an earlier, interrupted attempt left (the second job starts from what is published).
       const at = done.findIndex((d) => d.name === r.name && d.codec !== 'av1');
       if (at >= 0) done.splice(at, 1);
-      done.push({ name: r.name, width: r.width, height: r.height, bandwidth, codecs, frameRate: data.frameRate, playlist: `${r.name}/index.m3u8`, codec: 'h264' });
+      done.push({ name: r.name, width: r.width, height: r.height, bandwidth, averageBandwidth: measured ? measured.averageKbps * 1000 : undefined, codecs, frameRate: data.frameRate, playlist: `${r.name}/index.m3u8`, codec: 'h264' });
     }
     const limited = await this.writeMasters(prefix, done, info.hasAudio);
     const thumbKeys = thumbs?.map((t) => `thumbs/${relative(join(out, 'thumbs'), t)}`);

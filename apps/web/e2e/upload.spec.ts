@@ -117,7 +117,8 @@ test('upload, details, publish, processing to every quality, then on the home pa
     element.dispatchEvent(new Event('play'));
     element.dispatchEvent(new Event('timeupdate'));
   });
-  const recoveryReport = page.waitForResponse((response) => response.url().endsWith('/playback-health') && response.request().method() === 'POST');
+  // The recovery report specifically: the startup report can arrive at any time, whenever the first frame shows.
+  const recoveryReport = page.waitForResponse((response) => response.url().endsWith('/playback-health') && response.request().method() === 'POST' && response.request().postDataJSON()?.kind === 'recovery');
   await page.context().setOffline(true);
   try {
     await player.evaluate((element: HTMLVideoElement) => {

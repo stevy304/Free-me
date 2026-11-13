@@ -75,6 +75,9 @@ Defined in `deploy/monitoring/alerts.yml`:
 | `SlowApi` | 95% of requests take over 1 s | Database server CPU and disk |
 | `UploadsWaiting` / `MediaQueueBacklog` | Uploads wait too long to become playable | Media worker; add one or raise `WORKER_CONCURRENCY` |
 | `WorkerJobsFailing` | Media jobs keep failing | `journalctl -u 'freeme-worker@*'` |
+| `ViewersRebuffering` | In a country (and codec), viewers spent over 2% of watching time waiting, for 2 hours | Administration → Playback Health by connection and device; the CDN's logs for that country |
+| `SlowStart` | 1 in 10 playbacks in a country took over 5 s to show a picture | CDN cache hit rate and first-byte time there; `SlowApi` |
+| `PlaybackFailures` | Over 1% of playbacks fail in a country (and codec) | `codec="av1"`: the AV1 renditions (`AV1_MIN_VIEWS=0` stops new ones); otherwise the CDN and signed links |
 | `DiskFilling` / `MemoryLow` | A server is running out of space or memory | Scratch directory on the media node; backups on the database node |
 
 ## What the metrics are

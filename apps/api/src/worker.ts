@@ -1,4 +1,5 @@
 import { MailService } from './mail/mail.service';
+import { QoeCounter, summarise } from './media/qoe';
 import { refreshSignals } from './recommend/signals';
 import { refreshRelated } from './recommend/related';
 import { setAuthPublisher } from './auth/session-cache';
@@ -24,7 +25,7 @@ import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { verifyEncoder } from './media/encoder-health';
 import { createServer } from 'node:http';
-import { Counter, Histogram } from 'prom-client';
+import { Counter, Gauge, Histogram } from 'prom-client';
 import { createRegistry, tokenMatches } from './metrics/metrics';
 import { forgetFeedKeys, setFeedCacheSink } from './catalog/feed-cache';
 
@@ -78,6 +79,27 @@ async function main() {
 
   // Metrics (see MONITORING.md): jobs by result and how long they take; served on WORKER_METRICS_PORT.
   const registry = createRegistry('worker');
+  // Playback quality of the last finished hour (media/qoe.ts), per country and codec: what the alerts watch.
+  const qoeLabels = ['country', 'codec'] as const;
+  const qoeGauges = {
+    sessions: new Gauge({ name: 'freeme_qoe_sessions', help: 'Playbacks in the last finished hour', labelNames: qoeLabels, registers: [registry] }),
+    rebuffer: new Gauge({ name: 'freeme_qoe_rebuffer_ratio', help: 'Time spent loading / time watching, last finished hour', labelNames: qoeLabels, registers: [registry] }),
+    startup: new Gauge({ name: 'freeme_qoe_startup_p90_seconds', help: '90% of playbacks showed their first frame within this, last finished hour', labelNames: qoeLabels, registers: [registry] }),
+    errors: new Gauge({ name: 'freeme_qoe_error_rate', help: 'Share of playbacks that failed, last finished hour', labelNames: qoeLabels, registers: [registry] }),
+  };
+  const qoe = new QoeCounter(prisma, new Redis(config.redisUrl!));
+  const updateQoeGauges = async () => {
+    const hour = new Date(Math.floor(Date.now() / 3_600_000) * 3_600_000 - 3_600_000);
+    const rows = (await qoe.read(hour, 0)).filter((r) => r.hour.getTime() === hour.getTime());
+    for (const g of Object.values(qoeGauges)) g.reset();
+    const byPair = new Map<string, typeof rows>();
+    for (const r of rows) { const k = `${r.country}|${r.codec}`; byPair.set(k, [...(byPair.get(k) ?? []), r]); }
+    for (const [k, list] of byPair) {
+      const [country, codec] = k.split('|'); const s = summarise(list, null)[0];
+      qoeGauges.sessions.set({ country, codec }, s.sessions); qoeGauges.rebuffer.set({ country, codec }, s.rebufferRatio);
+      qoeGauges.errors.set({ country, codec }, s.errorRate); if (s.startupP90Ms !== null) qoeGauges.startup.set({ country, codec }, s.startupP90Ms / 1000);
+    }
+  };
   const jobsDone = new Counter({ name: 'freeme_worker_jobs_total', help: 'Media jobs finished', labelNames: ['job', 'result'] as const, registers: [registry] });
   const jobTime = new Histogram({ name: 'freeme_worker_job_duration_seconds', help: 'Media job duration', labelNames: ['job'] as const,
     buckets: [1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600], registers: [registry] });
@@ -113,6 +135,8 @@ async function main() {
   await maintenance.upsertJobScheduler('stale-uploads', { every: 3600_000 }, { name: 'stale-uploads' });
   await maintenance.upsertJobScheduler('recover-stuck', { every: 5 * 60_000 }, { name: 'recover-stuck' });
   // Popularity-based encoding: videos that reached HD_MIN_VIEWS get their 1080p and above.
+  // Playback quality: finished hours to the database, and the gauges the alerts read.
+  await maintenance.upsertJobScheduler('qoe-flush', { every: 5 * 60_000 }, { name: 'qoe-flush' });
   await maintenance.upsertJobScheduler('hd-upgrades', { every: 60_000 }, { name: 'hd-upgrades' });
   // Recommendations: the feature store and pools every 5 minutes, related lists every 2 (the ones viewers needed first, then popular videos).
   await maintenance.upsertJobScheduler('rec-signals', { every: 5 * 60_000 }, { name: 'rec-signals' });
@@ -156,6 +180,7 @@ async function main() {
       }
       if (ids.length) log.log({ event: 'hd_upgrades_queued', count: ids.length });
     }
+    else if (job.name === 'qoe-flush') { await qoe.flush(); await updateQoeGauges(); }
     else if (job.name === 'rec-signals') { const n = await refreshSignals(prisma, recRedis, { maxActive: config.recActiveMax }); log.log({ event: 'rec_signals_built', videos: n }); }
     else if (job.name === 'rec-related') { const n = await refreshRelated(prisma, recRedis); if (n) log.log({ event: 'rec_related_built', videos: n }); }
     else if (job.name === 'av1-upgrades') {

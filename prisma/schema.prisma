@@ -312,6 +312,9 @@ model Video {
   hdPending             Boolean           @default(false)
   /// When the AV1 renditions (popular videos, AV1_MIN_VIEWS) were queued; null = not yet. Set once, so it is queued once.
   av1QueuedAt           DateTime?
+  /// Per-title encoding (media/per-title.ts): the CRF this video's content needs to look as good as CRF 21 (21–25);
+  /// chosen once from samples, then used by every later pass (HD, AV1) so its qualities stay consistent.
+  encodeCrf             Int?
   publishedAt           DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
@@ -360,6 +363,10 @@ model VideoRendition {
   codec                 String            @default("h264") // "h264" or "av1" (the same resolution can exist in both)
   codecs                String            @default("avc1.640028,mp4a.40.2") // RFC 6381, for the master playlist
   frameRate             Float             @default(30)
+  /// Measured from the encoded segments (video only): the busiest segment's bitrate and the average. The master
+  /// playlist declares these, so players choose from what this video really needs, not from the rung's ceiling.
+  peakKbps              Int?
+  averageKbps           Int?
   createdAt             DateTime          @default(now())
 
   @@unique([videoId, resolution, codec])
@@ -885,6 +892,30 @@ model Notification {
 }
 
 /// Views and watch time of one video on one day (UTC), written by the view counter's batches. Creator Hub's charts read it.
+/// What viewers experienced while playing, per hour (UTC) and per country, codec, device and connection
+/// (media/qoe.ts): sessions, time to first frame (histogram), seconds played, rebuffering, quality shown, errors.
+/// No account, video or address: only counts.
+model QoeHourly {
+  hour                  DateTime
+  country               String            // ISO 3166-1 alpha-2, or ZZ when unknown
+  codec                 String            // av1, h264, native (Safari's own player), other
+  device                String            // phone, tablet, desktop, tv, other
+  network               String            // slow-2g, 2g, 3g, 4g, unknown (the browser's estimate)
+  sessions              Int               @default(0)
+  /// Sessions that reached a first frame, by time to it: under 0.5, 1, 2, 3, 5, 8, 15 s and longer (8 buckets)
+  startupBuckets        Int[]
+  playedSeconds         BigInt            @default(0)
+  stalls                Int               @default(0)
+  stallMs               BigInt            @default(0)
+  stalledSessions       Int               @default(0)
+  /// Seconds played × the short side of the picture shown (average quality = this ÷ playedSeconds)
+  qualitySeconds        BigInt            @default(0)
+  errors                Int               @default(0)
+
+  @@id([hour, country, codec, device, network])
+  @@index([hour])
+}
+
 /// A batch of counted views and watch time already written (ViewCounter.flush): written in the same transaction as
 /// the counts, so a batch retried after a crash is never added twice. Rows older than a week are deleted.
 model CounterFlush {

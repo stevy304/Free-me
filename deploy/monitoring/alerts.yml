@@ -27,6 +27,30 @@ groups:
           summary: "More than 2% of API requests fail"
           description: "Search the API's JSON logs for level=error; each line has a requestId users can quote."
 
+      - alert: ViewersRebuffering
+        expr: freeme_qoe_rebuffer_ratio > 0.02 and freeme_qoe_sessions >= 100
+        for: 2h
+        labels: { severity: ticket }
+        annotations:
+          summary: "Viewers in {{ $labels.country }} ({{ $labels.codec }}) spend over 2% of their time waiting for video"
+          description: "Rebuffering for two hours in a row. Administration → Playback quality shows it by connection and device; check the CDN's logs for that country, and whether the codec is the cause (codec label)."
+
+      - alert: SlowStart
+        expr: freeme_qoe_startup_p90_seconds > 5 and freeme_qoe_sessions >= 100
+        for: 2h
+        labels: { severity: ticket }
+        annotations:
+          summary: "In {{ $labels.country }} ({{ $labels.codec }}), 1 in 10 playbacks takes over 5 s to show the first frame"
+          description: "Check the CDN's cache hit rate and first-byte time for that country, and playlist response times (SlowApi)."
+
+      - alert: PlaybackFailures
+        expr: freeme_qoe_error_rate > 0.01 and freeme_qoe_sessions >= 100
+        for: 1h
+        labels: { severity: page }
+        annotations:
+          summary: "Over 1% of playbacks fail in {{ $labels.country }} ({{ $labels.codec }})"
+          description: "Videos do not play. A codec label of av1 points at AV1 renditions (AV1_MIN_VIEWS=0 turns new ones off); otherwise check the CDN and signed links."
+
       - alert: SlowApi
         expr: |
           histogram_quantile(0.95, sum by (le) (rate(freeme_http_request_duration_seconds_bucket[10m]))) > 1

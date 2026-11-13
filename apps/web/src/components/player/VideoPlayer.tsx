@@ -7,6 +7,7 @@ import { languageName } from '@free-me/shared';
 import { AdBreak, type AdSlot } from './AdBreak';
 import { DATA_SAVER_MAX, dataSaverActive } from '@/lib/datasaver';
 import { av1Preferred, codecFamily } from '@/lib/codecs';
+import { QoeSession } from '@/lib/qoe';
 
 export interface CaptionTrack { language: string; auto: boolean; url: string }
 
@@ -55,8 +56,11 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const frame = useRef<number | null>(null);
   const bufferingSince = useRef<number | null>(null);
   const recoverySince = useRef<number | null>(null);
+  // This playback's experience (lib/qoe.ts): sent when the viewer leaves the video or the page.
+  const qoe = useRef<QoeSession | null>(null);
   const reportHealth = (kind: 'startup' | 'buffer' | 'recovery', ms: number) => {
     if (!videoId || !Number.isFinite(ms) || ms < 0 || ms > 86_400_000) return;
+    if (kind === 'startup') qoe.current?.startup(ms); else qoe.current?.stall(ms);
     void fetch(`/api/videos/${videoId}/playback-health`, {
       method: 'POST', credentials: 'same-origin', keepalive: true,
       headers: { 'content-type': 'application/json' },
@@ -97,6 +101,17 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const cues = useStoryboard(storyboard);
   const [flash, setFlash] = useState<'play' | 'pause' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!videoId) return;
+    const session = new QoeSession(videoId);
+    qoe.current = session;
+    const leave = () => { if (document.visibilityState === 'hidden') session.send(); };
+    const hide = () => session.send();
+    document.addEventListener('visibilitychange', leave);
+    window.addEventListener('pagehide', hide);
+    return () => { document.removeEventListener('visibilitychange', leave); window.removeEventListener('pagehide', hide); session.send(); if (qoe.current === session) qoe.current = null; };
+  }, [videoId, src]);
+  useEffect(() => { if (error) qoe.current?.failed(); }, [error]);
   const watched = useRef(0);
   const reported = useRef(false);
   // Watch time after the view was counted, not yet reported (sent with each progress save: every 30 s while playing,
@@ -255,6 +270,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     };
     if (el.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) {
       el.src = url;
+      qoe.current?.setCodec('native');
       autoplay();
     } else {
       Promise.all([import('hls.js'), av1Preferred()]).then(([{ default: H }, av1]) => {
@@ -287,7 +303,11 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
             setSaver(false);
           }
         });
-        h.on(H.Events.LEVEL_SWITCHED, (_e, d) => { const l = h.levels[d.level]; setPlayingLevel(l ? Math.min(l.height, l.width) : null); });
+        h.on(H.Events.LEVEL_SWITCHED, (_e, d) => {
+          const l = h.levels[d.level]; setPlayingLevel(l ? Math.min(l.height, l.width) : null);
+          const f = codecFamily(l?.codecSet);
+          qoe.current?.setCodec(f === 'av01' ? 'av1' : f === 'avc1' ? 'h264' : 'other');
+        });
         let recoveries = 0;
         h.on(H.Events.ERROR, (_e, d) => {
           if (d.details === H.ErrorDetails.MANIFEST_INCOMPATIBLE_CODECS_ERROR) { setError('This browser cannot play H.264 video. Open the video in Chrome, Edge, Safari or Firefox.'); setWaiting(false); return; }
@@ -403,7 +423,10 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     if (mid && !ad && !el.paused) { adsPlayed.current.add(mid.at); el.pause(); setAd(mid); return; }
     if (el.buffered.length) setBuffered(el.buffered.end(el.buffered.length - 1));
     const delta = el.currentTime - lastT.current;
-    if (!el.paused && delta > 0 && delta < 2) { watched.current += delta; if (reported.current) unsent.current += delta; }
+    if (!el.paused && delta > 0 && delta < 2) {
+      watched.current += delta; if (reported.current) unsent.current += delta;
+      if (!ad) qoe.current?.watched(delta, Math.min(el.videoWidth, el.videoHeight) || 0);
+    }
     lastT.current = el.currentTime;
     if (!el.paused && Date.now() - lastSaved.current > 30_000) save(); // every 30 s while playing (and on pause, leave and end)
     const need = Math.min(30, (el.duration || duration) * 0.5);
