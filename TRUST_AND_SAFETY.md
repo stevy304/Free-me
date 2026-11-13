@@ -71,6 +71,7 @@ closes as soon as it is saved. Only the names of changed keys go into the audit 
 | Edits to title, description, tags | Before they are saved | The video is hidden at the same moment, and a moderator is asked |
 | What is said (automatic transcript) | When captions are made, after publishing | AI: limited or hidden with a reason (appealable). Without it: hidden and a moderator is asked |
 | Comments | Before they are posted; with the AI moderator, low-risk ones (established accounts, nothing the word rules notice) are shown at once and checked by the AI within seconds | Not posted, and the writer is told why; or removed just after it was shown. Edits are checked before they are saved |
+| Direct messages | Before they are delivered | Not sent; the writer is told why. Either person can block the other (no messages either way). New conversations are limited to 20 a day per account, and messages to 60 an hour |
 | Live chat | Before it reaches anyone | Not sent; the writer is told why (built-in rules only, so chat stays instant) |
 | Reports from people | Any time | Several established accounts hide the video until a moderator decides (`REPORT_HOLD_THRESHOLD`) |
 

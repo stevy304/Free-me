@@ -7,7 +7,7 @@ import { MomentAd, type MomentAdData } from './MomentAd';
 import type Hls from 'hls.js';
 import { Avatar } from '@/components/Avatar';
 import { useShell } from '@/components/shell/ShellContext';
-import { viewsLabel } from '@/lib/format';
+import { compactNumber, viewsLabel } from '@/lib/format';
 import type { VideoCardData, VideoPage } from '@/lib/types';
 
 /** One Moment: plays when it fills the screen, pauses when scrolled away, reports a view after real watching. */
@@ -54,20 +54,29 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
     }
   };
   const share = async () => { const url = `${location.origin}/watch?v=${v.id}`; try { if (navigator.share) await navigator.share({ title: v.title, url }); else { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1800); } } catch { /* dismissed */ } };
-  // Spark state is read the first time this Moment comes on screen.
-  const [spark, setSpark] = useState<{ on: boolean; count: number } | null>(null);
+  // Likes and dislikes (both shown on Moments) are read the first time this Moment comes on screen.
+  const [votes, setVotes] = useState<{ mine: 'like' | 'dislike' | 'none'; likes: number; dislikes: number } | null>(null);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
-    if (!active || spark) return;
-    fetch(`/api/videos/${v.id}`).then((r) => r.ok ? r.json() : null).then((d) => d && setSpark({ on: d.viewer?.reaction === 'like', count: d.video.likeCount })).catch(() => undefined);
+    if (!active || votes) return;
+    fetch(`/api/videos/${v.id}`).then((r) => r.ok ? r.json() : null).then((d) => d && setVotes({ mine: d.viewer?.reaction ?? 'none', likes: d.video.likeCount, dislikes: d.video.dislikeCount ?? 0 })).catch(() => undefined);
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
-  const toggleSpark = async () => {
-    if (!viewer) { window.location.href = `/login?returnTo=${encodeURIComponent('/moments')}`; return; }
-    const cur = spark ?? { on: false, count: 0 };
-    const next = { on: !cur.on, count: cur.count + (cur.on ? -1 : 1) };
-    setSpark(next);
-    const r = await fetch(`/api/videos/${v.id}/reaction`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value: next.on ? 'like' : 'none' }) }).catch(() => null);
-    if (r?.ok) { const d = await r.json(); setSpark({ on: next.on, count: d.likeCount }); } else setSpark(cur);
+  const signIn = () => { window.location.href = `/login?returnTo=${encodeURIComponent(`/moments#${v.id}`)}`; };
+  const vote = async (value: 'like' | 'dislike') => {
+    if (!viewer) { signIn(); return; }
+    const cur = votes ?? { mine: 'none' as const, likes: 0, dislikes: 0 };
+    const mine: 'like' | 'dislike' | 'none' = cur.mine === value ? 'none' : value;
+    // Shown at once; the server's counts replace the guess.
+    const next = { mine, likes: cur.likes + (mine === 'like' ? 1 : 0) - (cur.mine === 'like' ? 1 : 0), dislikes: cur.dislikes + (mine === 'dislike' ? 1 : 0) - (cur.mine === 'dislike' ? 1 : 0) };
+    setVotes(next);
+    const at = el.current?.currentTime;
+    const r = await fetch(`/api/videos/${v.id}/reaction`, { method: 'PUT', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value: mine, ...(mine === 'like' && at !== undefined ? { at: Math.floor(at) } : {}) }) }).catch(() => null);
+    if (r?.ok) { const d = await r.json(); setVotes({ mine, likes: d.likeCount, dislikes: d.dislikeCount ?? next.dislikes }); } else setVotes(cur);
+  };
+  /** Opens (or starts) a conversation with whoever posted this Moment. */
+  const message = async () => {
+    if (!viewer) { signIn(); return; }
+    window.location.href = `/messages?to=${encodeURIComponent(v.channel.handle)}`;
   };
   const action = 'grid h-12 w-12 place-items-center rounded-2xl backdrop-blur';
 
@@ -81,7 +90,14 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
           <button type="button" onClick={() => setMuted(!muted)} aria-label={muted ? 'Unmute' : 'Mute'} className="grid h-10 w-10 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{muted ? <Icon.VolumeOff size={20} /> : <Icon.VolumeHigh size={20} />}</button>
         </div>
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-4 pt-16 text-white">
-          <Link href={`/@${v.channel.handle}`} className="flex items-center gap-2 text-[14px] font-semibold"><Avatar name={v.channel.name} src={v.channel.avatarUrl} size={32} />@{v.channel.handle}</Link>
+          <div className="flex items-center gap-2">
+            <Link href={`/@${v.channel.handle}`} className="flex min-w-0 items-center gap-2 text-[14px] font-semibold"><Avatar name={v.channel.name} src={v.channel.avatarUrl} size={32} /><span className="truncate">@{v.channel.handle}</span></Link>
+            {viewer?.channel?.handle !== v.channel.handle && (
+              <button type="button" onClick={message} className="flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-3 text-[12.5px] font-semibold backdrop-blur hover:bg-white/25">
+                <Icon.Message size={16} />Message
+              </button>
+            )}
+          </div>
           <p className="mt-2 line-clamp-2 text-[14px]">{v.title}</p>
           <p className="mt-1 text-[12px] opacity-80" suppressHydrationWarning>{viewsLabel(v.viewCount, locale)}</p>
         </div>
@@ -89,8 +105,10 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
       </div>
       {/* Actions: beside the video on wide screens, over it on phones. */}
       <div className="absolute bottom-24 right-5 flex flex-col items-center gap-3 text-[11px] font-semibold text-white sm:static sm:self-end sm:pb-6 sm:text-ink">
-        <button type="button" onClick={toggleSpark} aria-pressed={!!spark?.on} aria-label="Spark" className={`${action} ${spark?.on ? 'bg-accent-soft text-accent' : 'bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover'}`}><Icon.Spark size={24} filled={!!spark?.on} /></button>
-        <span suppressHydrationWarning>{spark ? spark.count : ''}</span>
+        <button type="button" onClick={() => vote('like')} aria-pressed={votes?.mine === 'like'} aria-label={`Like (${votes?.likes ?? 0})`} className={`${action} ${votes?.mine === 'like' ? 'bg-[#e8505b] text-white' : 'bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover'}`}><Icon.Like size={24} filled={votes?.mine === 'like'} /></button>
+        <span suppressHydrationWarning>{votes ? compactNumber(votes.likes, locale) : ''}</span>
+        <button type="button" onClick={() => vote('dislike')} aria-pressed={votes?.mine === 'dislike'} aria-label={`Dislike (${votes?.dislikes ?? 0})`} className={`${action} ${votes?.mine === 'dislike' ? 'bg-[#5b6b8a] text-white' : 'bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover'}`}><Icon.Dislike size={24} filled={votes?.mine === 'dislike'} /></button>
+        <span suppressHydrationWarning>{votes ? compactNumber(votes.dislikes, locale) : ''}</span>
         <Link href={`/watch?v=${v.id}`} aria-label="Conversation" className={`${action} bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover`}><Icon.Comment size={22} /></Link>
         <button type="button" onClick={share} aria-label="Pass along" className={`${action} bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover`}><Icon.PassAlong size={22} /></button>
         <span>{copied ? 'Copied' : 'Pass'}</span>

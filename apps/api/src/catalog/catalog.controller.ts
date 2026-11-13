@@ -87,7 +87,9 @@ export class CatalogController {
     // A position saved in the last few seconds may not be in the database yet (see media/progress.ts).
     const history = pending ? { progressSeconds: pending.seconds, completed: pending.completed } : stored;
     return {
-      video: { ...card, thumbnailUrl: await this.urls.thumb(v), description: v.description, status: v.status, visibility: v.visibility, likeCount: v.likeCount, commentCount: v.commentCount,
+      video: { ...card, thumbnailUrl: await this.urls.thumb(v), description: v.description, status: v.status, visibility: v.visibility, likeCount: v.likeCount,
+        // Moments show their dislike count to everyone; on other videos it stays private to the creator (Creator Hub).
+        ...(v.isShort ? { dislikeCount: v.dislikeCount } : {}), commentCount: v.commentCount,
         commentsOpen: v.commentsEnabled && !v.madeForKids, takenDownAt: v.takenDownAt,
         category: v.category ? { name: v.category.name, slug: v.category.slug } : null, playbackUrl: this.urls.playback(v, fullQuality),
         // Set when this viewer gets a limited playlist: the player can say that higher qualities come with Premium.

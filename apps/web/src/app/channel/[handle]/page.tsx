@@ -52,7 +52,10 @@ export default async function Channel({ params, searchParams }: { params: Promis
           <div className="mt-4">
             {viewer.isOwner
               ? <span className="flex flex-wrap gap-2"><Link href="/settings#channel" className="inline-flex h-10 items-center rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover">Edit your Space</Link><Link href="/hub" className="inline-flex h-10 items-center rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand hover:bg-brand-strong">Creator Hub</Link></span>
-              : <FollowButton handle={c.handle} initial={viewer.following} initialCount={c.followerCount} />}
+              : <span className="flex flex-wrap items-center gap-2">
+                  <FollowButton handle={c.handle} initial={viewer.following} initialCount={c.followerCount} />
+                  <Link href={`/messages?to=${encodeURIComponent(c.handle)}`} className="inline-flex h-10 items-center gap-2 rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover"><Icon.Message size={18} />Message</Link>
+                </span>}
           </div>
         </div>
       </div>

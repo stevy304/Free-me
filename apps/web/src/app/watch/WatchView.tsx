@@ -11,7 +11,7 @@ import { ReportDialog } from '@/components/engagement/ReportDialog';
 import { SaveDialog } from '@/components/engagement/SaveDialog';
 import { VideoPlayer, type CaptionTrack } from '@/components/player/VideoPlayer';
 import { useShell } from '@/components/shell/ShellContext';
-import { Thumbnail, VideoRow } from '@/components/video/VideoCard';
+import { Thumbnail, VideoCard, VideoRow } from '@/components/video/VideoCard';
 import { api } from '@/lib/client-api';
 import { compactNumber, duration, followersLabel, fullDate, timeAgo, viewsLabel } from '@/lib/format';
 import type { VideoCardData } from '@/lib/types';
@@ -375,7 +375,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
         </div>
       )}
       {/* Under the stage: about, the conversation (beside the video on wide screens) and more to watch. The creator is under the title. */}
-      <div className="mx-auto hidden max-w-[1280px] px-4 sm:mt-8 sm:block sm:px-6">
+      <div className="mx-auto hidden max-w-[1880px] px-4 sm:mt-8 sm:block sm:px-6">
         <div className="min-w-0">
           <div role="tablist" className="flex gap-1 border-b border-line">
             {tabBtn('about', t('watch.about'))}<span className={theater ? 'contents' : 'contents xl:hidden'}>{tabBtn('conversation', v.commentsOpen ? `${t('watch.conversation')} · ${compactNumber(v.commentCount, locale)}` : t('watch.conversation'))}</span>{more.length > 0 && tabBtn('next', t('watch.keepWatching'))}
@@ -393,14 +393,9 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
               <h2 className="flex items-center gap-3 text-[18px] font-bold"><span className="flex-1">{t('watch.keepWatching')}</span>
                 <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="hidden items-center gap-2 font-sans text-[12px] font-semibold text-muted sm:flex xl:hidden">{t('watch.flowOn')}<span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-brand' : 'bg-line'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span></button>
                 <button type="button" onClick={() => setTab('next')} className="font-sans text-[13px] font-semibold text-brand">{t('watch.seeAll')}</button></h2>
-              <div className="no-scrollbar -mx-4 mt-3 flex gap-4 overflow-x-auto px-4 pb-2">
-                {more.slice(0, 8).map((x) => (
-                  <Link key={x.id} href={`/watch?v=${x.id}`} className="group w-[220px] shrink-0">
-                    <Thumbnail v={x} rounded="rounded-[16px]" />
-                    <p className="mt-2 line-clamp-2 text-[14px] font-semibold leading-tight">{x.title}</p>
-                    <p className="text-[12px] text-muted">{x.channel.name}</p>
-                  </Link>
-                ))}
+              {/* Laptops and computers: a grid of rectangles, like the home page. */}
+              <div className="mt-4 grid gap-x-5 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                {more.slice(0, 16).map((x) => <VideoCard key={x.id} v={x} locale={locale} />)}
               </div>
             </section>
           )}

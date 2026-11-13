@@ -258,3 +258,13 @@ export const NotForMe = icon('NotForMe', (f) => (<><circle cx="12" cy="12" r="8.
 export const PassAlong = icon('PassAlong', () => (<><path d="M5 5v14" /><path d="M9 12h11M15 6.5l5.5 5.5-5.5 5.5" /></>));
 /** Trail: watch history. A path between two points. */
 export const Trail = icon('Trail', () => (<><path d="M5.5 18.5c3.2-.8 4.2-4 6.2-7s4.7-4.6 7-5" /><circle cx="5" cy="18.8" r="1.8" /><circle cx="19" cy="6.2" r="1.8" /></>));
+
+/* Moments: Like (a heart with a spark inside), Dislike (the heart cracked) and Message (a speech bubble carrying a
+   paper plane). Filled when chosen; the spark, crack and plane are cut out of the filled shape. */
+const HEART = 'M12 19.8c-.4 0-.8-.1-1.1-.4C7.2 16.4 4 13.4 4 9.7 4 7.2 5.9 5.3 8.3 5.3c1.5 0 2.9.8 3.7 2 .8-1.2 2.2-2 3.7-2 2.4 0 4.3 1.9 4.3 4.4 0 3.7-3.2 6.7-6.9 9.7-.3.3-.7.4-1.1.4z';
+export const Like = icon('Like', (f) => <path d={HEART} fill={F(f)} />,
+  () => <path d="M12 9.6l.75 1.9 1.9.75-1.9.75-.75 1.9-.75-1.9-1.9-.75 1.9-.75z" strokeWidth={1.2} fill="currentColor" />);
+export const Dislike = icon('Dislike', (f) => <path d={HEART} fill={F(f)} />,
+  () => <path d="M12 7.3l-1.3 3.2 2.2 1.8-1.5 2.8.6 2.2" strokeWidth={1.6} />);
+export const Message = icon('Message', (f) => <path d="M5.3 4.6h13.4a2.3 2.3 0 0 1 2.3 2.3v8.4a2.3 2.3 0 0 1-2.3 2.3h-7.4l-4.6 3.3v-3.3H5.3A2.3 2.3 0 0 1 3 15.3V6.9a2.3 2.3 0 0 1 2.3-2.3z" fill={F(f)} />,
+  () => <><path d="M7.6 10.9l8.6-3.4-2.9 7.9-2-3.2z" strokeWidth={1.4} /><path d="M11.3 12.2l4.9-4.7" strokeWidth={1.4} /></>);
