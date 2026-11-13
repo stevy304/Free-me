@@ -10,7 +10,7 @@ describe('profiles', () => {
   test('anyone in the world can set their country, language and time zone; bad values are refused', async () => {
     const { agent } = await signIn(ctx.http, ctx.mail, 'kenji@example.jp');
     const ok = await agent.patch('/api/me/profile').set('Origin', WEB).send({ displayName: '  Kenji  ', country: 'jp', preferredLanguage: 'ja', timezone: 'Asia/Tokyo', city: 'Osaka', bio: 'Travel films' }).expect(200);
-    expect(ok.body.profile).toEqual({ displayName: 'Kenji', avatarUrl: null, bio: 'Travel films', country: 'JP', city: 'Osaka', preferredLanguage: 'ja', timezone: 'Asia/Tokyo' });
+    expect(ok.body.profile).toEqual({ displayName: 'Kenji', avatarUrl: null, bio: 'Travel films', country: 'JP', city: 'Osaka', preferredLanguage: 'ja', timezone: 'Asia/Tokyo', personalizedRecommendations: true });
     await agent.patch('/api/me/profile').set('Origin', WEB).send({ country: 'XX' }).expect(400);
     await agent.patch('/api/me/profile').set('Origin', WEB).send({ preferredLanguage: 'klingon' }).expect(400);
     await agent.patch('/api/me/profile').set('Origin', WEB).send({ timezone: 'Mars/Olympus' }).expect(400);

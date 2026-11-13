@@ -176,7 +176,7 @@ export class VideoProcessor {
         await timed(`encode_${quality}Ms`, () => this.encode(source2, work, rungs, info, hdr, null, (f) => this.setProgress(videoId, from + f * span, stage).catch(() => undefined), signal, { videoId, sourceKey: podcast ? null : video.sourceFileS3Key!, background: true }));
         signal?.throwIfAborted();
         progress += span;
-        await timed(`publish_${quality}Ms`, () => this.publish(videoId, work, rungs, info, done, null, index === passes.length - 1 ? 'Ready' : stage, Math.round(progress)));
+        await timed(`publish_${quality}Ms`, () => this.publish(videoId, work, rungs, info, done, null, index === passes.length - 1 ? 'Ready' : stage, index === passes.length - 1 ? 100 : Math.round(progress)));
       }
       signal?.throwIfAborted();
       await this.setProgress(videoId, 100, 'Ready', { hdPending: deferred.length > 0 } as Partial<Video>);
