@@ -2,7 +2,8 @@
 
 import * as Icon from '@/components/icons';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { MomentAd, type MomentAdData } from './MomentAd';
 import type Hls from 'hls.js';
 import { Avatar } from '@/components/Avatar';
 import { useShell } from '@/components/shell/ShellContext';
@@ -16,6 +17,7 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
   const [paused, setPaused] = useState(false);
   const [progress, setProgress] = useState(0);
   const watched = useRef(0); const last = useRef(0); const sent = useRef(false);
+  const ticket = useRef<Promise<string | null> | null>(null);
   const { locale, viewer } = useShell();
 
   useEffect(() => {
@@ -39,11 +41,16 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
     const video = el.current!; const d = video.duration || v.durationSeconds;
     setProgress(d ? video.currentTime / d : 0);
     const delta = video.currentTime - last.current;
-    if (!video.paused && delta > 0 && delta < 2) watched.current += delta;
+    if (!video.paused && delta > 0 && delta < 2) {
+      // Playback really started: the play ticket the view needs.
+      if (!ticket.current) ticket.current = fetch(`/api/videos/${v.id}/play`, { method: 'POST', credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((j) => j?.ticket ?? null).catch(() => null);
+      watched.current += delta;
+    }
     last.current = video.currentTime;
     if (!sent.current && d && watched.current >= Math.min(30, d * 0.5)) {
       sent.current = true;
-      fetch(`/api/videos/${v.id}/views`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ watchedSeconds: Math.round(watched.current) }) }).catch(() => undefined);
+      const seconds = Math.round(watched.current);
+      void (ticket.current ?? Promise.resolve(null)).then((t) => fetch(`/api/videos/${v.id}/views`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ watchedSeconds: seconds, ...(t ? { ticket: t } : {}) }) })).catch(() => undefined);
     }
   };
   const share = async () => { const url = `${location.origin}/watch?v=${v.id}`; try { if (navigator.share) await navigator.share({ title: v.title, url }); else { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1800); } } catch { /* dismissed */ } };
@@ -93,12 +100,33 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
 }
 
 /** Vertical feed: scroll, swipe or use the arrow keys; the Moment on screen plays, the others pause. */
+/** One ad after this many Moments. */
+const AD_EVERY = 6;
+
 export function MomentsFeed({ first }: { first: VideoPage }) {
   const [items, setItems] = useState(first.videos);
   const [cursor, setCursor] = useState(first.nextCursor);
   const [active, setActive] = useState(0);
   const [muted, setMuted] = useState(true);
   const box = useRef<HTMLDivElement>(null);
+  // Ads between Moments: one after every AD_EVERY Moments, asked for just before it is reached (none for Plus members).
+  const [ads, setAds] = useState<Record<number, MomentAdData | null>>({});
+  const list = useMemo(() => {
+    const out: Array<{ kind: 'moment'; v: VideoCardData } | { kind: 'ad'; ad: MomentAdData; after: string; slot: number }> = [];
+    items.forEach((v, i) => {
+      out.push({ kind: 'moment', v });
+      const slot = (i + 1) / AD_EVERY;
+      if (Number.isInteger(slot) && ads[slot]) out.push({ kind: 'ad', ad: ads[slot]!, after: v.id, slot });
+    });
+    return out;
+  }, [items, ads]);
+  useEffect(() => {
+    const seen = list.slice(0, active + 1).filter((x) => x.kind === 'moment').length;
+    const slot = Math.floor(seen / AD_EVERY) + 1;
+    if (seen < slot * AD_EVERY - 3 || slot in ads || items.length < slot * AD_EVERY) return;
+    setAds((a) => ({ ...a, [slot]: null }));
+    fetch('/api/moments/ads', { credentials: 'same-origin' }).then((r) => r.json()).then((d: { ad: MomentAdData | null }) => { if (d.ad?.playbackUrl) setAds((a) => ({ ...a, [slot]: d.ad })); }).catch(() => undefined);
+  }, [active, list, ads, items.length]);
 
   useEffect(() => {
     const root = box.current!;
@@ -107,18 +135,18 @@ export function MomentsFeed({ first }: { first: VideoPage }) {
     }, { root, threshold: 0.6 });
     root.querySelectorAll('[data-index]').forEach((n) => io.observe(n));
     return () => io.disconnect();
-  }, [items.length]);
+  }, [list.length]);
   // /moments#<id> opens at that Moment.
   useEffect(() => {
     const id = window.location.hash.slice(1);
-    const i = items.findIndex((v) => v.id === id);
+    const i = list.findIndex((x) => x.kind === 'moment' && x.v.id === id);
     if (i > 0) box.current?.querySelector(`[data-index="${i}"]`)?.scrollIntoView();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!cursor || active < items.length - 3) return;
+    if (!cursor || active < list.length - 3) return;
     fetch(`/api/videos?moments=true&limit=12&cursor=${encodeURIComponent(cursor)}`).then((r) => r.json()).then((d: VideoPage) => { setItems((x) => [...x, ...d.videos]); setCursor(d.nextCursor); }).catch(() => undefined);
-  }, [active, cursor, items.length]);
-  const go = (d: number) => box.current?.querySelector(`[data-index="${Math.max(0, Math.min(items.length - 1, active + d))}"]`)?.scrollIntoView({ behavior: 'smooth' });
+  }, [active, cursor, list.length]);
+  const go = (d: number) => box.current?.querySelector(`[data-index="${Math.max(0, Math.min(list.length - 1, active + d))}"]`)?.scrollIntoView({ behavior: 'smooth' });
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if ((e.target as HTMLElement).closest('input, textarea')) return; if (e.key === 'ArrowDown') { e.preventDefault(); go(1); } if (e.key === 'ArrowUp') { e.preventDefault(); go(-1); } };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
@@ -127,11 +155,13 @@ export function MomentsFeed({ first }: { first: VideoPage }) {
   return (
     <div className="relative">
       <div ref={box} className="no-scrollbar mx-auto h-[calc(100dvh-4rem-6.5rem)] snap-y snap-mandatory overflow-y-auto md:h-[calc(100dvh-4rem-2.5rem)]">
-        {items.map((v, i) => <div key={v.id} data-index={i} className="h-full"><Moment v={v} muted={muted} setMuted={setMuted} active={i === active} /></div>)}
+        {list.map((x, i) => x.kind === 'moment'
+          ? <div key={x.v.id} data-index={i} className="h-full"><Moment v={x.v} muted={muted} setMuted={setMuted} active={i === active} /></div>
+          : <div key={`ad-${x.slot}`} data-index={i} className="h-full"><MomentAd ad={x.ad} after={x.after} muted={muted} setMuted={setMuted} active={i === active} /></div>)}
       </div>
       <div className="absolute right-6 top-1/2 hidden -translate-y-1/2 flex-col gap-3 lg:flex">
         <button type="button" onClick={() => go(-1)} disabled={active === 0} aria-label="Previous Moment" className="grid h-12 w-12 place-items-center rounded-2xl bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronUp size={24} /></button>
-        <button type="button" onClick={() => go(1)} disabled={active >= items.length - 1} aria-label="Next Moment" className="grid h-12 w-12 place-items-center rounded-2xl bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronDown size={24} /></button>
+        <button type="button" onClick={() => go(1)} disabled={active >= list.length - 1} aria-label="Next Moment" className="grid h-12 w-12 place-items-center rounded-2xl bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronDown size={24} /></button>
       </div>
     </div>
   );

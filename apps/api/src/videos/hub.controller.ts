@@ -1,4 +1,8 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Put, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import { APP_CONFIG, type AppConfig } from '../config/config';
+import { checkText, refusal, videoText } from '../safety/check';
+import { AUTOMATED_MATCH } from '../media/screening';
+import { forgetHotVideo } from '../engagement/hot-video';
 import { feedsChanged } from '../catalog/feed-cache';
 import { announceVideo } from '../notifications/notify';
 import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
@@ -36,7 +40,7 @@ const IMAGE: Array<[string, number[], string]> = [['image/jpeg', [0xff, 0xd8, 0x
 export class HubController {
   constructor(
     private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly queue: MediaQueue,
-    private readonly urls: MediaUrls, @Inject(STORAGE) private readonly storage: Storage,
+    private readonly urls: MediaUrls, @Inject(STORAGE) private readonly storage: Storage, @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   private async mine(auth: AuthContext, id: string) {
@@ -50,11 +54,14 @@ export class HubController {
       id: v.id, title: v.title, description: v.description, visibility: v.visibility, status: v.status, madeForKids: v.madeForKids, isShort: v.isShort, isPodcast: v.isPodcast, isAd: v.isAd,
       language: v.language, category: v.category ? { slug: v.category.slug, name: v.category.name } : null, tags: v.tags?.map((t) => t.tag.name) ?? [],
       durationSeconds: v.durationSeconds, width: v.width, height: v.height, processingProgress: v.processingProgress, processingStage: v.processingStage,
+      // The automatic safety decision (safety/ai.ts), what the creator reads, and whether they can still appeal.
+      safety: { decision: v.safetyDecision, reason: v.safetyReason, limited: !!v.safetyLimitedAt, appealedAt: v.appealedAt,
+        canAppeal: !v.appealedAt && !v.takenDownAt && (v.safetyDecision === 'reject' || v.safetyDecision === 'limit') },
       processingError: v.processingError, viewCount: v.viewCount.toString(), likeCount: v.likeCount, dislikeCount: v.dislikeCount, commentCount: v.commentCount, commentsEnabled: v.commentsEnabled,
       takenDownAt: v.takenDownAt, takedownReason: v.takedownReason,
       createdAt: v.createdAt, publishedAt: v.publishedAt, thumbnailUrl: await this.urls.thumb(v), customThumbnail: v.customThumbnail,
       thumbnailCandidates: await Promise.all(v.thumbnailCandidates.map((k) => this.urls.file(v, k))),
-      renditions: (v.renditions ?? []).sort((a, b) => a.height * a.width - b.height * b.width).map((r) => r.resolution),
+      renditions: (v.renditions ?? []).sort((a, b) => a.height * a.width - b.height * b.width).map((r) => r.resolution).filter((name, i, all) => all.indexOf(name) === i),
       playbackUrl: this.urls.playback(v), sourceSizeBytes: v.sourceSizeBytes?.toString() ?? null,
       captions: (await this.prisma.caption.findMany({ where: { videoId: v.id }, orderBy: { language: 'asc' } }))
         .map((c) => ({ language: c.language, source: c.source, cues: c.cueCount, updatedAt: c.updatedAt, url: `/api/videos/${v.id}/captions/${c.language}.vtt` })),
@@ -100,8 +107,20 @@ export class HubController {
       data.visibility = body.visibility;
       if (body.visibility !== 'PRIVATE' && !v.publishedAt) data.publishedAt = new Date();
     }
+    // Changed words are checked before they are saved (safety/): over the line, the video is hidden at the same moment
+    // (reviewHoldAt) and a moderator is asked, so it is never shown with them.
+    let flagged: Awaited<ReturnType<typeof checkText>> | null = null;
+    if (body.title !== undefined || body.description !== undefined || body.tags !== undefined) {
+      const tags = body.tags ?? (await this.prisma.videoTag.findMany({ where: { videoId: id }, select: { tag: { select: { name: true } } } })).map((t) => t.tag.name);
+      const verdict = await checkText(this.prisma, this.config, videoText({ title: (data.title as string | undefined) ?? v.title, description: body.description !== undefined ? (data.description as string | null) : v.description, tags }), undefined, { kind: 'edit' });
+      // The AI moderator decided: the words are not saved, and the creator is told why.
+      if (verdict.hold && verdict.ai) throw new BadRequestException(refusal(verdict, 'title'));
+      if (verdict.hold && !v.reviewHoldAt) { data.reviewHoldAt = new Date(); flagged = verdict; }
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.video.update({ where: { id }, data });
+      if (flagged) await tx.report.create({ data: { videoId: id, reason: AUTOMATED_MATCH, details: `${flagged.reason} — in the title, description or tags`, priority: flagged.priority } });
+      forgetHotVideo(id);
       if (body.tags) {
         const names = [...new Set(body.tags.map((t) => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean))].slice(0, 30);
         await tx.videoTag.deleteMany({ where: { videoId: id } });
@@ -112,11 +131,25 @@ export class HubController {
       }
     });
     // Media follows visibility: public/unlisted to the CDN prefix, private (and removed) behind signed links.
-    const want = wantedLocation({ visibility: (data.visibility as string | undefined) ?? v.visibility, takenDownAt: v.takenDownAt });
+    const want = wantedLocation({ visibility: (data.visibility as string | undefined) ?? v.visibility, safetyCheckedAt: v.safetyCheckedAt, takenDownAt: v.takenDownAt });
     if (v.hlsMasterKey && want !== v.mediaLocation) await this.queue.add({ name: 'relocate', videoId: id });
     await feedsChanged();
     await announceVideo(this.prisma, id);
     await this.audit.record({ userId: auth.user.id, action: 'VIDEO_UPDATED', entityType: 'Video', entityId: id, req, details: { fields: Object.keys(data).concat(body.tags ? ['tags'] : []) } });
+    return { video: await this.view(await this.mine(auth, id)) };
+  }
+
+  @Post(':id/appeal')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Ask for an automatic safety decision (rejected or limited) to be looked at again, once per video' })
+  async appeal(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Req() req: AppRequest) {
+    const v = await this.mine(auth, id);
+    if (v.takenDownAt) throw new BadRequestException('A moderator removed this video; reply to the removal email to ask for a review.');
+    if (v.safetyDecision !== 'reject' && v.safetyDecision !== 'limit') throw new BadRequestException('There is nothing to appeal on this video.');
+    if (v.appealedAt) throw new ConflictException('You already appealed this decision.');
+    await this.prisma.video.update({ where: { id }, data: { appealedAt: new Date() } });
+    await this.queue.add({ name: 'appeal', videoId: id });
+    await this.audit.record({ userId: auth.user.id, action: 'VIDEO_APPEALED', entityType: 'Video', entityId: id, req, details: { decision: v.safetyDecision } });
     return { video: await this.view(await this.mine(auth, id)) };
   }
 
@@ -185,6 +218,7 @@ export class HubController {
     const v = await this.mine(auth, id);
     if (v.uploadId && v.sourceFileS3Key) await this.storage.abortMultipart(v.sourceFileS3Key, v.uploadId);
     await this.prisma.video.delete({ where: { id } });
+    forgetHotVideo(id);
     await this.queue.add({ name: 'purge', videoId: id });
     await feedsChanged();
     await this.audit.record({ userId: auth.user.id, action: 'VIDEO_DELETED', entityType: 'Video', entityId: id, req, details: { title: v.title } });

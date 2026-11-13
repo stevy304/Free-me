@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { cookies } from 'next/headers';
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
-import { getLocale, getViewer, siteOrigin } from '@/lib/server-api';
+import { getLang, getLocale, getViewer, siteOrigin } from '@/lib/server-api';
 import './fonts/fonts.css';
 import './globals.css';
 
@@ -30,10 +30,10 @@ export const viewport: Viewport = {
 const THEME_SCRIPT = `try{var m=document.cookie.match(/(?:^|; )fm_theme=(light|dark|system)/);var t=m?m[1]:'system';if(t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}`;
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const [viewer, jar, locale] = await Promise.all([getViewer().catch(() => null), cookies(), getLocale()]);
+  const [viewer, jar, locale, lang] = await Promise.all([getViewer().catch(() => null), cookies(), getLocale(), getLang()]);
   const theme = jar.get('fm_theme')?.value;
   return (
-    <html lang={viewer?.profile?.preferredLanguage ?? 'en'} className={theme === 'dark' ? 'dark' : undefined} suppressHydrationWarning>
+    <html lang={lang} className={theme === 'dark' ? 'dark' : undefined} suppressHydrationWarning>
       <head>
         {/* Private preview tunnels need their session cookie on manifest requests. */}
         <link rel="manifest" href="/manifest.webmanifest" crossOrigin="use-credentials" />
@@ -41,7 +41,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       </head>
       {/* Browser extensions (Grammarly, password managers…) add attributes to <body> before React loads. */}
       <body className="font-sans" suppressHydrationWarning>
-        <AppShell viewer={viewer} locale={locale}>{children}</AppShell>
+        <AppShell viewer={viewer} locale={locale} lang={lang}>{children}</AppShell>
       </body>
     </html>
   );

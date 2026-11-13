@@ -6,7 +6,8 @@ import { CurrentAuth } from '../common/auth.guard';
 import type { AuthContext } from '../common/request';
 import { MediaUrls } from '../videos/media-urls';
 import { PUBLIC_VIDEO, videoCard } from './serialize';
-import { coWatched } from './trending';
+import { RedisService } from '../database/redis.service';
+import { related } from '../recommend/related';
 
 type Candidate = Video & { channel: Channel; tags: { tagId: string }[] };
 
@@ -52,7 +53,7 @@ export function arrangeNext<T extends { id: string; channelId: string; score: nu
 @ApiTags('catalog')
 @Controller()
 export class NextController {
-  constructor(private readonly prisma: PrismaService, private readonly urls: MediaUrls) {}
+  constructor(private readonly prisma: PrismaService, private readonly urls: MediaUrls, private readonly redis: RedisService) {}
 
   @Get('videos/:id/next')
   @ApiOperation({ summary: 'What to watch after this video: same Space, shared tags and topic, the viewer\'s interests; finished videos last' })
@@ -68,7 +69,8 @@ export class NextController {
     }
     const [tagIds, coWatch] = await Promise.all([
       this.prisma.videoTag.findMany({ where: { videoId: id }, select: { tagId: true } }).then((rows) => rows.map((t) => t.tagId)),
-      coWatched(this.prisma, id),
+      // Prepared by the worker for popular videos, else computed once and kept (recommend/related.ts).
+      related(this.prisma, this.redis.client, id),
     ]);
     // A few small, indexed queries instead of scoring the whole catalogue.
     const pools = await Promise.all([

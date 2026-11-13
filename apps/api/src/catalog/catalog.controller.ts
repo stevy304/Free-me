@@ -1,4 +1,6 @@
-import { BadRequestException, Controller, Get, GoneException, NotFoundException, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Inject, Get, GoneException, NotFoundException, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import { APP_CONFIG, type AppConfig } from '../config/config';
+import { recordOpened } from '../recommend/for-you';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
@@ -8,6 +10,8 @@ import { publicChannel } from '../users/serialize';
 import { PUBLIC_VIDEO, videoCard } from './serialize';
 import { MediaUrls } from '../videos/media-urls';
 import { hasPlus } from '../billing/billing';
+import { RedisService } from '../database/redis.service';
+import { ProgressBuffer } from '../media/progress';
 
 /** Keyset pagination cursor: "<publishedAt ISO>_<id>", stable while new videos arrive. */
 function parseCursor(cursor?: string) {
@@ -22,7 +26,10 @@ const pageSize = (v?: string) => Math.min(48, Math.max(1, Number(v) || 24));
 @ApiTags('catalog')
 @Controller()
 export class CatalogController {
-  constructor(private readonly prisma: PrismaService, private readonly urls: MediaUrls) {}
+  private readonly positions: ProgressBuffer;
+  constructor(private readonly prisma: PrismaService, private readonly urls: MediaUrls, private readonly redis: RedisService, @Inject(APP_CONFIG) private readonly config: AppConfig) {
+    this.positions = new ProgressBuffer(prisma, redis.client);
+  }
 
   @Get('categories')
   @ApiOperation({ summary: 'Video categories' })
@@ -65,14 +72,20 @@ export class CatalogController {
     }
     if (!v || (!owner && (v.status !== 'READY' || v.visibility === 'PRIVATE'))) throw new NotFoundException('This video is not available.');
     if (v.reviewHoldAt && !owner) throw new NotFoundException('This video is being reviewed by our moderators.');
+    if (!v.safetyCheckedAt && !owner) throw new NotFoundException('This video is not available.');
     const card = videoCard(v, this.urls);
     const fullQuality = owner || (!!auth && await hasPlus(this.prisma, auth.user));
-    const [reaction, history, following, saved] = auth ? await Promise.all([
+    const [reaction, stored, following, saved, pending] = auth ? await Promise.all([
       this.prisma.like.findUnique({ where: { userId_videoId: { userId: auth.user.id, videoId: id } }, select: { isLike: true } }),
       this.prisma.watchHistory.findUnique({ where: { userId_videoId: { userId: auth.user.id, videoId: id } }, select: { progressSeconds: true, completed: true } }),
       this.prisma.subscription.findUnique({ where: { userId_channelId: { userId: auth.user.id, channelId: v.channelId } }, select: { id: true } }),
       this.prisma.playlistItem.count({ where: { videoId: id, playlist: { userId: auth.user.id } } }),
-    ]) : [null, null, null, 0];
+      this.positions.pending(auth.user.id, id),
+    ]) : [null, null, null, 0, null];
+    // Opened: no longer counts as shown and passed over in "For you".
+    if (auth) await recordOpened(this.redis.client, auth.user.id, id);
+    // A position saved in the last few seconds may not be in the database yet (see media/progress.ts).
+    const history = pending ? { progressSeconds: pending.seconds, completed: pending.completed } : stored;
     return {
       video: { ...card, thumbnailUrl: await this.urls.thumb(v), description: v.description, status: v.status, visibility: v.visibility, likeCount: v.likeCount, commentCount: v.commentCount,
         commentsOpen: v.commentsEnabled && !v.madeForKids, takenDownAt: v.takenDownAt,
@@ -98,6 +111,11 @@ export class CatalogController {
     const term = q.trim().replace(/\s+/g, ' ').slice(0, 100);
     if (!term) return { query: '', channels: [], videos: [], nextCursor: null };
     const offset = cursor && /^o:\d{1,5}$/.test(cursor) ? Number(cursor.slice(2)) : 0;
+    // Popular searches repeat many times a minute: the same results for everyone are reused (FEED_CACHE_SECONDS).
+    return this.redis.cached(`search:${offset}:${term}`, this.config.feedCacheSeconds, () => this.runSearch(term, offset));
+  }
+
+  private async runSearch(term: string, offset: number) {
     const take = 24;
     const words = term.toLowerCase().replace(/^@/, '').split(' ').filter(Boolean).slice(0, 8);
     const handle = term.replace(/^@/, '').toLowerCase();
@@ -106,15 +124,17 @@ export class CatalogController {
     const [, rows, channels] = await this.prisma.$transaction([
       this.prisma.$executeRaw`SET LOCAL pg_trgm.word_similarity_threshold = 0.4`,
       this.prisma.$queryRaw<{ id: string }[]>`
-        WITH q AS (SELECT plainto_tsquery('simple', ${term}) AS tsq)
-        SELECT v.id FROM "Video" v JOIN "Channel" c ON c.id = v."channelId", q
-        WHERE v.status = 'READY' AND v.visibility = 'PUBLIC' AND v."mediaLocation" = 'PUBLIC' AND v."publishedAt" IS NOT NULL AND v."takenDownAt" IS NULL AND v."reviewHoldAt" IS NULL
-          AND (
-            to_tsvector('simple', v.title || ' ' || coalesce(v.description, '')) @@ q.tsq
-            OR ${term} <% v.title
-            OR ${term} <% c.name
-            OR EXISTS (SELECT 1 FROM "VideoTag" vt JOIN "Tag" t ON t.id = vt."tagId" WHERE vt."videoId" = v.id AND t.name = ANY(${words}))
-          )
+        WITH q AS (SELECT plainto_tsquery('simple', ${term}) AS tsq),
+        -- Matches found through indexes (full text, close spellings of titles and Space names, tags), then only
+        -- those are ranked: a search never reads every video.
+        found AS (
+          SELECT v.id FROM "Video" v, q WHERE to_tsvector('simple'::regconfig, v.title || ' ' || coalesce(v.description, '')) @@ q.tsq
+          UNION SELECT v.id FROM "Video" v WHERE ${term} <% v.title
+          UNION SELECT v.id FROM "Channel" c JOIN "Video" v ON v."channelId" = c.id WHERE ${term} <% c.name
+          UNION SELECT vt."videoId" FROM "Tag" t JOIN "VideoTag" vt ON vt."tagId" = t.id WHERE t.name = ANY(${words})
+        )
+        SELECT v.id FROM found f JOIN "Video" v ON v.id = f.id JOIN "Channel" c ON c.id = v."channelId", q
+        WHERE v.status = 'READY' AND v.visibility = 'PUBLIC' AND v."mediaLocation" = 'PUBLIC' AND v."publishedAt" IS NOT NULL AND v."takenDownAt" IS NULL AND v."reviewHoldAt" IS NULL AND v."safetyCheckedAt" IS NOT NULL AND v."safetyLimitedAt" IS NULL
         ORDER BY (
             ts_rank(to_tsvector('simple', v.title), q.tsq) * 4
           + ts_rank(to_tsvector('simple', coalesce(v.description, '')), q.tsq)

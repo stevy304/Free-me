@@ -18,7 +18,7 @@ interface Data { removals: Removal[]; strikes: { copyright: number; guidelines: 
 
 /** Removed videos, why they were removed, strikes, and the counter-notice form for copyright removals. */
 export function HubNotices() {
-  const { locale } = useShell();
+  const { locale, t } = useShell();
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [counterFor, setCounterFor] = useState<Removal | null>(null);
@@ -31,29 +31,29 @@ export function HubNotices() {
   return (
     <div className="mt-6 space-y-6">
       <div className="grid gap-3 sm:grid-cols-2">
-        {([['Copyright strikes', s.copyright, Icon.Copyright], ['Community Guidelines strikes', s.guidelines, Icon.Shield]] as const).map(([l, n, I]) => (
+        {([['notices.copyrightStrikes', s.copyright, Icon.Copyright], ['notices.guidelineStrikes', s.guidelines, Icon.Shield]] as const).map(([l, n, I]) => (
           <div key={l} className={`flex items-center gap-4 rounded-2xl border p-4 ${n ? 'border-danger/40 bg-danger/5' : 'border-line'}`}>
             <div className={`grid h-12 w-12 place-items-center rounded-full ${n ? 'bg-danger/15 text-danger' : 'bg-brand-soft text-brand'}`}><I size={24} /></div>
-            <div><p className="text-[24px] font-bold leading-7">{n}</p><p className="text-[13px] text-muted">{l} in the last {s.windowDays} days</p></div>
+            <div><p className="text-[24px] font-bold leading-7">{n}</p><p className="text-[13px] text-muted">{t(l, { days: s.windowDays })}</p></div>
           </div>
         ))}
       </div>
-      <p className="text-[13px] text-muted">A strike stays on your channel for {s.windowDays} days after a removal and disappears if the video is restored. Read the <Link href="/legal/guidelines" className="text-brand">Community Guidelines</Link> and the <Link href="/legal/copyright" className="text-brand">copyright policy</Link>.</p>
+      <p className="text-[13px] text-muted">{t('notices.strikeRule', { days: s.windowDays })} <Link href="/legal/guidelines" className="text-brand">{t('hub.guidelines')}</Link> · <Link href="/legal/copyright" className="text-brand">{t('notices.copyrightPolicy')}</Link></p>
       {data.removals.length === 0
-        ? <div className="rounded-2xl border border-line px-6 py-12 text-center"><Icon.CheckCircle size={40} filled className="mx-auto text-brand" /><p className="mt-3 text-[16px] font-semibold">Your channel is in good standing</p><p className="text-[14px] text-muted">None of your videos has been removed.</p></div>
+        ? <div className="rounded-2xl border border-line px-6 py-12 text-center"><Icon.CheckCircle size={40} filled className="mx-auto text-brand" /><p className="mt-3 text-[16px] font-semibold">{t('notices.goodStanding')}</p><p className="text-[14px] text-muted">{t('notices.noneRemoved')}</p></div>
         : data.removals.map((r) => (
           <article key={r.video.id} className="rounded-2xl border border-line p-4">
             <div className="flex flex-col gap-4 sm:flex-row">
               <div className="aspect-video w-full shrink-0 overflow-hidden rounded-lg bg-surface sm:w-48">{r.video.thumbnailUrl && <img src={r.video.thumbnailUrl} alt="" className="h-full w-full object-cover opacity-60 grayscale" />}</div>
               <div className="min-w-0 flex-1 text-[14px]">
                 <p className="text-[16px] font-semibold">{r.video.title}</p>
-                <p className="mt-1 flex items-center gap-1.5 font-medium text-danger"><Icon.Warning size={16} />Removed {fullDate(r.takenDownAt, locale)}: {r.reason === 'COPYRIGHT' ? 'copyright notice' : r.reasonLabel}</p>
-                {r.notice && <p className="mt-2"><span className="text-muted">Notice from</span> {r.notice.claimantName}<br /><span className="text-muted">Work claimed:</span> {r.notice.originalWork}{r.notice.details && <><br /><span className="text-muted">What they say infringes:</span> {r.notice.details}</>}</p>}
-                {r.moderatorNote && <p className="mt-2"><span className="text-muted">Moderator&apos;s note:</span> {r.moderatorNote}</p>}
+                <p className="mt-1 flex items-center gap-1.5 font-medium text-danger"><Icon.Warning size={16} />{t('notices.removedOn', { date: fullDate(r.takenDownAt, locale) })} {r.reason === 'COPYRIGHT' ? t('hub.copyrightNotice') : r.reasonLabel}</p>
+                {r.notice && <p className="mt-2"><span className="text-muted">{t('notices.from')}</span> {r.notice.claimantName}<br /><span className="text-muted">{t('notices.work')}</span> {r.notice.originalWork}{r.notice.details && <><br /><span className="text-muted">{t('notices.infringes')}</span> {r.notice.details}</>}</p>}
+                {r.moderatorNote && <p className="mt-2"><span className="text-muted">{t('notices.modNote')}</span> {r.moderatorNote}</p>}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {r.canCounter && <button type="button" className={buttonClass.primary} onClick={() => setCounterFor(r)}>Send a counter-notice</button>}
-                  {r.counter && <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-3 py-1.5 text-[13px] font-medium text-brand"><Icon.Clock size={15} />Counter-notice sent {fullDate(r.counter.submittedAt, locale)}. The video can be restored after 10 to 14 business days unless the claimant goes to court.</span>}
-                  {r.reason !== 'COPYRIGHT' && <span className="text-[13px] text-muted">To ask for a review, reply to the removal email.</span>}
+                  {r.canCounter && <button type="button" className={buttonClass.primary} onClick={() => setCounterFor(r)}>{t('notices.sendCounter')}</button>}
+                  {r.counter && <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-3 py-1.5 text-[13px] font-medium text-brand"><Icon.Clock size={15} />{t('notices.counterSent', { date: fullDate(r.counter.submittedAt, locale) })}</span>}
+                  {r.reason !== 'COPYRIGHT' && <span className="text-[13px] text-muted">{t('notices.askReview')}</span>}
                 </div>
               </div>
             </div>

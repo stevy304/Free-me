@@ -31,6 +31,10 @@ export async function makeApp(opts: { adminEmails?: string[]; google?: GoogleOAu
     SESSION_SECRET: 'test-session-secret-0123456789-abcdefghijklmnop', ADMIN_EMAILS: (opts.adminEmails ?? []).join(','),
     // Uploads are not limited by the Creator pass unless a test asks (creator-pass tests set it lower).
     CREATOR_FREE_VIDEOS: '1000',
+    // No audience needed to join monetisation unless a test asks (the production defaults are YouTube's).
+    MONETISE_MIN_WATCH_HOURS: '0', MONETISE_MIN_FOLLOWERS: '0', MONETISE_MIN_MOMENT_VIEWS: '0',
+    // Views count without play tickets and real waiting unless a test asks (view-quality.test.ts).
+    VIEW_CHECKS: 'off', VIEWS_ALLOW_AUTOMATED: 'true',
     ...opts.env,
   });
   const google = opts.google ?? Object.assign(new FakeGoogle(), { enabled: false });

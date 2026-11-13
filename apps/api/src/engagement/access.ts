@@ -6,7 +6,7 @@ import type { AuthContext } from '../common/request';
 export async function watchable(prisma: PrismaService, id: string, auth: AuthContext | null) {
   const v = await prisma.video.findUnique({ where: { id }, include: { channel: { select: { id: true, userId: true, handle: true, name: true } } } });
   if (!v || v.status !== 'READY' || v.takenDownAt) throw new NotFoundException('This video is not available.');
-  if (v.visibility === 'PRIVATE' && v.channel.userId !== auth?.user.id) throw new NotFoundException('This video is not available.');
+  if ((v.visibility === 'PRIVATE' || !v.safetyCheckedAt) && v.channel.userId !== auth?.user.id) throw new NotFoundException('This video is not available.');
   return v;
 }
 

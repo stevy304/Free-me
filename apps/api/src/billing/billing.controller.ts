@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, Inject, Injectable, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
+import { authChanged } from '../auth/session-cache';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsEmail, IsIn, IsInt, IsOptional, IsString, MaxLength } from 'class-validator';
 import type { Payment, User } from '@prisma/client';
@@ -183,6 +184,7 @@ export class BillingController {
     if (!member) throw new NotFoundException('No account uses this email. They need to sign in to Free Me once first.');
     if (member.id === holder.id) throw new BadRequestException('You are already in your plan.');
     const joined = await this.prisma.user.updateMany({ where: { id: member.id, familyOwnerId: null }, data: { familyOwnerId: holder.id } });
+    if (joined.count) authChanged(member.id);
     if (!joined.count) throw new BadRequestException(member.familyOwnerId === holder.id ? 'They are already in your plan.' : 'They are already in another Family & TV plan.');
     return this.family(auth);
   }
@@ -193,6 +195,7 @@ export class BillingController {
   @ApiOperation({ summary: 'Remove someone from my Family & TV plan' })
   async removeMember(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     await this.prisma.user.updateMany({ where: { id, familyOwnerId: auth.user.id }, data: { familyOwnerId: null } });
+    authChanged(id);
     return this.family(auth);
   }
 
@@ -202,6 +205,7 @@ export class BillingController {
   @ApiOperation({ summary: 'Leave the Family & TV plan I was added to' })
   async leave(@CurrentAuth() auth: AuthContext) {
     await this.prisma.user.update({ where: { id: auth.user.id }, data: { familyOwnerId: null } });
+    authChanged(auth.user.id);
     return this.family(auth);
   }
 

@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Query, Req } from '@nestjs/common';
+import { authChanged } from '../auth/session-cache';
 import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsIn, IsString } from 'class-validator';
 import type { Role, UserStatus } from '@prisma/client';
@@ -40,6 +41,7 @@ export class AdminController {
     if (id === auth.user.id && !roles.includes('ADMIN')) throw new BadRequestException('You cannot remove your own administrator role.');
     if (user.channel && !roles.includes('CREATOR')) roles.push('CREATOR');
     const updated = await this.prisma.user.update({ where: { id }, data: { roles: { set: roles } } });
+    authChanged(id);
     await this.audit.record({ userId: auth.user.id, action: 'ROLES_CHANGED', entityType: 'User', entityId: id, req, details: { before: user.roles, after: updated.roles } });
     return { id, roles: updated.roles };
   }
@@ -51,6 +53,7 @@ export class AdminController {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Account not found.');
     const updated = await this.prisma.user.update({ where: { id }, data: { status: body.status } });
+    authChanged(id);
     const signedOut = body.status === 'SUSPENDED' ? await this.sessions.revokeAll(id) : 0;
     await this.audit.record({ userId: auth.user.id, action: body.status === 'SUSPENDED' ? 'ACCOUNT_SUSPENDED' : 'ACCOUNT_REACTIVATED', entityType: 'User', entityId: id, req, details: { before: user.status, signedOut } });
     return { id, status: updated.status, signedOut };

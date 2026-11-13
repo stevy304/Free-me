@@ -16,6 +16,20 @@ export interface SafetyConfig {
   failClosed: boolean;
   /** Uploads a day for accounts in their first week. */
   newAccountDailyUploads: number;
+  /** The engine that looks at pictures and text beyond the built-in rules (safety/engines.ts). */
+  engine: 'none' | 'openai' | 'http';
+  openaiKey: string | null;
+  /** For tests and proxies; the OpenAI moderation endpoint by default. */
+  openaiUrl: string | null;
+  /**
+   * Without an engine that looks at pictures, which new videos a person checks before they can be seen:
+   * 'new' (default) videos of Spaces under a week old or with fewer than 3 published videos, 'all', or 'none'.
+   */
+  unscannedReview: 'new' | 'all' | 'none';
+  /** For tests and proxies: where the Anthropic API is (its own address by default). */
+  anthropicUrl: string | null;
+  /** Comments the AI moderator checks per day at most (0: no limit); over it, low-risk comments get the word rules only. */
+  aiCommentsPerDay: number;
 }
 
 /** Prices and payment providers (see ENVIRONMENT.md → Payments). Money is in US cents unless named otherwise. */
@@ -83,6 +97,12 @@ export interface AppConfig {
   /** 32+ random characters; signs the short-lived OAuth state cookie and keys the sign-in code hashes. */
   sessionSecret: string;
   sessionTtlDays: number;
+  /** Seconds each API process keeps a session and its account (auth/session-cache.ts); 0 = read them every request. */
+  sessionCacheSeconds: number;
+  /** Header the CDN or proxy puts the visitor's country in (ISO 3166-1), e.g. cf-ipcountry; used only to count playback quality per country. */
+  geoCountryHeader: string | null;
+  /** Videos kept in the recommendation feature store (the active part of the catalogue, most watched first). */
+  recActiveMax: number;
   google: { clientId: string; clientSecret: string } | null;
   mail: { transport: 'smtp' | 'console' | 'memory'; from: string; smtp: { host: string; port: number; secure: boolean; user?: string; pass?: string } | null };
   /** Accounts that are administrators (their email addresses). Applied each time they sign in. */
@@ -101,7 +121,12 @@ export interface AppConfig {
   media: MediaConfig;
   safety: SafetyConfig;
   /** To join monetisation: watch hours in the last 365 days and followers (0: not required). */
-  monetisation: { minWatchHours: number; minFollowers: number };
+  monetisation: { minWatchHours: number; minFollowers: number; minMomentViews: number };
+  /**
+   * Which views count (media/view-quality.ts). checks 'full': a play ticket and real watching time are required, and
+   * invalid traffic is recorded instead of counted; 'off' (tests only): the player's word is taken.
+   */
+  views: { checks: 'full' | 'off'; maxPerNetworkPerVideo: number; maxPerAccountPerDay: number; allowAutomated: boolean };
   /** Who runs the service, shown on the legal pages and in notices (see ENVIRONMENT.md). */
   legal: LegalConfig;
   billing: BillingConfig;
@@ -157,6 +182,13 @@ export interface MediaConfig {
    * did not reach HD_MIN_VIEWS by then keeps its qualities up to 720p for good. Originals are often the largest file.
    */
   sourceRetentionDays: number;
+  /**
+   * AV1 renditions for popular videos (see media/av1.ts): about a third fewer bytes than H.264 for the same picture,
+   * for viewers whose device decodes AV1. Made once a video has `minViews` views; minViews 0 turns AV1 off.
+   */
+  av1: { minViews: number; preset: number; crf: number };
+  /** Per-title encoding (media/per-title.ts): choose each video's CRF from samples. */
+  perTitle: boolean;
   workerConcurrency: number;
   upgradeConcurrency: number;
   /** Long videos are encoded in pieces any worker server can take (see media/chunks.ts). */
@@ -240,6 +272,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const count = (k: string, d: number) => { const v = env[k]?.trim(); if (!v) return d; const n = Number(v); if (!Number.isSafeInteger(n) || n < 0) { problems.push(`${k} must be a whole number of 0 or more.`); return d; } return n; };
   const hdMinViews = count('HD_MIN_VIEWS', 100);
   const freeMaxShort = count('FREE_MAX_QUALITY', 720);
+  const av1Preset = count('AV1_PRESET', 8);
+  if (av1Preset > 13) problems.push('AV1_PRESET must be from 0 (slowest, smallest) to 13 (fastest).');
+  const av1Crf = count('AV1_CRF', 32);
+  if (av1Crf < 10 || av1Crf > 55) problems.push('AV1_CRF must be from 10 to 55.');
   if (freeMaxShort && ![144, 240, 360, 480, 720, 1080, 1440, 2160].includes(freeMaxShort)) problems.push('FREE_MAX_QUALITY must be 0 (no limit) or one of 144, 240, 360, 480, 720, 1080, 1440, 2160.');
   const media: MediaConfig = {
     driver, s3, localDir: env.LOCAL_STORAGE_DIR?.trim() || './.data/storage', publicBaseUrl, maxUploadBytes, partBytes,
@@ -247,6 +283,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     preset: env.TRANSCODE_PRESET?.trim() || 'veryfast', presetHigh: env.TRANSCODE_PRESET_HIGH?.trim() || 'superfast',
     copyTopRung: env.COPY_TOP_RUNG !== 'false',
     hdMinViews, freeMaxShort, sourceRetentionDays: count('SOURCE_RETENTION_DAYS', 0),
+    av1: { minViews: count('AV1_MIN_VIEWS', 500), preset: av1Preset, crf: av1Crf },
+    perTitle: env.PER_TITLE_ENCODING !== 'false',
     chunked: env.CHUNKED_ENCODING !== 'false', chunkMinSeconds: Math.max(10, Number(env.CHUNK_MIN_SECONDS) || 120),
     chunkSeconds: Math.max(4, Math.round((Number(env.CHUNK_SECONDS) || 30) / 2) * 2), chunkConcurrency: Math.max(1, Number(env.CHUNK_CONCURRENCY) || 1),
     encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), upgradeConcurrency: Math.max(1, Math.floor(Number(env.WORKER_UPGRADE_CONCURRENCY) || 1)), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',
@@ -327,16 +365,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
     sessionTtlDays: Math.min(90, Math.max(1, Number(env.SESSION_TTL_DAYS || 30))),
+    geoCountryHeader: env.GEO_COUNTRY_HEADER === 'none' ? null : (env.GEO_COUNTRY_HEADER?.trim().toLowerCase() || 'cf-ipcountry'),
+    recActiveMax: Math.max(1000, count('REC_ACTIVE_MAX', 200_000)),
+    sessionCacheSeconds: nodeEnv === 'test' && !env.SESSION_CACHE_SECONDS ? 0 : Math.min(60, count('SESSION_CACHE_SECONDS', 15)),
     google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,
     mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)), feedCacheSeconds: nodeEnv === 'test' && !env.FEED_CACHE_SECONDS ? 0 : count('FEED_CACHE_SECONDS', 60), metricsToken, workerMetricsPort, workerMetricsHost: env.WORKER_METRICS_HOST?.trim() || '127.0.0.1',
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
     media, legal, billing, live,
-    monetisation: { minWatchHours: count('MONETISE_MIN_WATCH_HOURS', 0), minFollowers: count('MONETISE_MIN_FOLLOWERS', 0) },
+    // YouTube's Partner Programme: 1,000 followers and 4,000 public watch hours in 12 months, or 10 million Moments views in 90 days.
+    views: {
+      checks: env.VIEW_CHECKS === 'off' && nodeEnv !== 'production' ? 'off' : 'full',
+      maxPerNetworkPerVideo: Math.max(1, count('VIEW_MAX_PER_NETWORK_PER_VIDEO', 100)), maxPerAccountPerDay: Math.max(1, count('VIEW_MAX_PER_ACCOUNT_PER_DAY', 300)),
+      allowAutomated: env.VIEWS_ALLOW_AUTOMATED === 'true' && nodeEnv !== 'production',
+    },
+    monetisation: { minWatchHours: count('MONETISE_MIN_WATCH_HOURS', 4000), minFollowers: count('MONETISE_MIN_FOLLOWERS', 1000), minMomentViews: count('MONETISE_MIN_MOMENT_VIEWS', 10_000_000) },
     safety: {
       scanUrl: env.SAFETY_SCAN_URL?.trim() || null, scanToken: env.SAFETY_SCAN_TOKEN?.trim() || null,
       timeoutMs: Math.max(1000, Number(env.SAFETY_SCAN_TIMEOUT_MS) || 60_000), failClosed: env.SAFETY_SCAN_FAIL_CLOSED === 'true',
       newAccountDailyUploads: Math.max(1, Number(env.NEW_ACCOUNT_DAILY_UPLOADS) || 5),
       reportHoldThreshold: count('REPORT_HOLD_THRESHOLD', 5),
+      engine: (['openai', 'http'].includes(env.SAFETY_ENGINE?.trim() ?? '') ? env.SAFETY_ENGINE!.trim() : env.SAFETY_SCAN_URL?.trim() ? 'http' : 'none') as SafetyConfig['engine'],
+      openaiKey: env.SAFETY_OPENAI_KEY?.trim() || null, anthropicUrl: env.SAFETY_ANTHROPIC_URL?.trim() || null, aiCommentsPerDay: Math.max(0, Number(env.SAFETY_AI_COMMENTS_PER_DAY) || 0), openaiUrl: env.SAFETY_OPENAI_URL?.trim() || null,
+      unscannedReview: (['new', 'all', 'none'].includes(env.SAFETY_UNSCANNED_REVIEW?.trim() ?? '') ? env.SAFETY_UNSCANNED_REVIEW!.trim() : nodeEnv === 'test' ? 'none' : 'new') as SafetyConfig['unscannedReview'],
     },
   };
 }

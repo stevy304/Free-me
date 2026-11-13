@@ -5,7 +5,7 @@ export interface ChannelInfo {
   id: string; handle: string; name: string; description: string | null; avatarUrl: string | null; bannerUrl: string | null;
   country: string | null; defaultLanguage: string | null; isVerified: boolean; badge?: 'verified' | 'premium' | null; followerCount: number; totalViews: string; createdAt: string;
 }
-export interface Profile { displayName: string; avatarUrl: string | null; bio: string | null; country: string | null; city: string | null; preferredLanguage: string; timezone: string | null }
+export interface Profile { displayName: string; avatarUrl: string | null; bio: string | null; country: string | null; city: string | null; preferredLanguage: string; timezone: string | null; personalizedRecommendations?: boolean }
 export interface Viewer {
   user: { id: string; email: string; roles: Role[]; status: string; createdAt: string; lastLoginAt: string | null };
   profile: Profile | null;

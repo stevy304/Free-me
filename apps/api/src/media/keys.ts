@@ -13,4 +13,5 @@ export const VIDEO_TYPES: Record<string, string> = {
 export const AUDIO_EXTENSIONS = new Set(['.mp3', '.m4a', '.aac', '.wav', '.ogg', '.opus', '.flac']);
 
 /** Where a video's media belongs: private videos and removed videos behind signed links, the rest on the CDN. */
-export const wantedLocation = (v: { visibility: string; takenDownAt: Date | null }) => (v.visibility === 'PRIVATE' || v.takenDownAt ? 'PRIVATE' : 'PUBLIC') as 'PRIVATE' | 'PUBLIC';
+/** Not yet through the safety check (safety/): stays private too, so its files are never on the public CDN early. */
+export const wantedLocation = (v: { visibility: string; takenDownAt: Date | null; safetyCheckedAt: Date | null }) => (v.visibility === 'PRIVATE' || v.takenDownAt || v.safetyCheckedAt === null ? 'PRIVATE' : 'PUBLIC') as 'PRIVATE' | 'PUBLIC';

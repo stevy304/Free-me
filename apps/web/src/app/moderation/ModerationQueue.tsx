@@ -95,7 +95,7 @@ export function ModerationQueue() {
                     <p className="mt-1 text-[12px] text-muted">Restore 10 to 14 business days after the counter-notice unless the claimant shows that a court action was filed.</p>
                   </div>
                 )}
-                <p className="mt-1 text-[12px] text-muted">{r.automatic ? 'Raised by the automatic upload check' : `Reported by ${r.reporterEmail}`}</p>
+                <p className="mt-1 text-[12px] text-muted">{r.automatic ? 'Raised by the automatic check' : `Reported by ${r.reporterEmail}`}</p>
                 {r.video.status === 'FLAGGED' && !r.video.takenDownAt && <p className="mt-1 text-[12px] font-semibold text-accent">Held: not processed or public until you decide. Release lets it go live as its creator chose.</p>}
                 {r.resolution && <p className="mt-2 rounded-lg bg-surface px-3 py-2"><span className="text-muted">Decision:</span> {r.resolution}</p>}
                 <div className="mt-3 flex flex-wrap gap-2">

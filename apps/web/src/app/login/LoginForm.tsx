@@ -5,6 +5,7 @@ import * as Icon from '@/components/icons';
 import { useEffect, useRef, useState } from 'react';
 import { LogoMark } from '@/components/Logo';
 import { api, ApiError } from '@/lib/client-api';
+import { useT } from '@/components/shell/ShellContext';
 
 function GoogleIcon() {
   return (
@@ -18,6 +19,7 @@ function GoogleIcon() {
 }
 
 export function LoginForm({ returnTo, google, initialError }: { returnTo: string; google: boolean; initialError: string | null }) {
+  const t = useT();
   const [step, setStep] = useState<'email' | 'code'>('email');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -35,7 +37,7 @@ export function LoginForm({ returnTo, google, initialError }: { returnTo: string
       const r = await api<{ email: string }>('/auth/email/request', { body: { email } });
       setEmail(r.email); setStep('code'); setCode(''); setWait(60);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not send the code.');
+      setError(e instanceof Error ? e.message : t('login.sendFailed'));
       if (e instanceof ApiError && e.retryAfterSeconds && step === 'code') setWait(e.retryAfterSeconds);
     } finally { setBusy(false); }
   };
@@ -45,7 +47,7 @@ export function LoginForm({ returnTo, google, initialError }: { returnTo: string
     try {
       await api('/auth/email/verify', { body: { email, code: value } });
       window.location.href = returnTo;
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not sign in.'); setBusy(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : t('login.failed')); setBusy(false); }
   };
 
   return (
@@ -54,48 +56,48 @@ export function LoginForm({ returnTo, google, initialError }: { returnTo: string
         <LogoMark size={40} />
         {step === 'email' ? (
           <>
-            <h1 className="mt-5 text-[26px] font-semibold tracking-tight">Sign in to Free Me</h1>
-            <p className="mt-1.5 text-[15px] text-muted">Watch, follow and create. New here? Signing in creates your account.</p>
+            <h1 className="mt-5 text-[26px] font-semibold tracking-tight">{t('login.title')}</h1>
+            <p className="mt-1.5 text-[15px] text-muted">{t('login.subtitle')}</p>
             {error && <p role="alert" className="mt-5 rounded-xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
             {google && (
               <>
                 <a href={`/api/auth/google?returnTo=${encodeURIComponent(returnTo)}`} className="mt-6 flex h-12 w-full items-center justify-center gap-3 rounded-full border border-line text-[15px] font-medium hover:bg-surface">
-                  <GoogleIcon />Continue with Google
+                  <GoogleIcon />{t('login.google')}
                 </a>
-                <div className="my-6 flex items-center gap-3 text-[13px] text-faint"><span className="h-px flex-1 bg-line" />or<span className="h-px flex-1 bg-line" /></div>
+                <div className="my-6 flex items-center gap-3 text-[13px] text-faint"><span className="h-px flex-1 bg-line" />{t('login.or')}<span className="h-px flex-1 bg-line" /></div>
               </>
             )}
             <form className={google ? '' : 'mt-6'} onSubmit={(e) => { e.preventDefault(); void send(); }}>
-              <label htmlFor="email" className="text-[14px] font-medium">Email address</label>
+              <label htmlFor="email" className="text-[14px] font-medium">{t('login.email')}</label>
               <input id="email" type="email" required autoComplete="email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
                 className="mt-2 h-12 w-full rounded-xl border border-line bg-bg px-4 text-[16px] outline-none focus:border-brand" />
               <button type="submit" disabled={busy || !email} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-brand text-[15px] font-semibold text-on-brand hover:opacity-90 disabled:opacity-50">
-                {busy ? <Icon.Spinner size={18} className="animate-spin" /> : <Icon.Mail size={18} />}Email me a sign-in code
+                {busy ? <Icon.Spinner size={18} className="animate-spin" /> : <Icon.Mail size={18} />}{t('login.sendCode')}
               </button>
             </form>
-            <p className="mt-6 text-[12px] leading-5 text-faint">No password needed. We send a one-time code that works for ten minutes.</p>
+            <p className="mt-6 text-[12px] leading-5 text-faint">{t('login.noPassword')}</p>
           </>
         ) : (
           <>
-            <button type="button" onClick={() => { setStep('email'); setError(null); }} className="mt-4 flex items-center gap-1 text-[14px] text-muted hover:text-ink"><Icon.ArrowLeft size={16} />Use another email</button>
-            <h1 className="mt-3 text-[26px] font-semibold tracking-tight">Check your email</h1>
-            <p className="mt-1.5 text-[15px] text-muted">We sent a 6-digit code to <span className="font-medium text-ink">{email}</span>.</p>
+            <button type="button" onClick={() => { setStep('email'); setError(null); }} className="mt-4 flex items-center gap-1 text-[14px] text-muted hover:text-ink"><Icon.ArrowLeft size={16} />{t('login.useAnother')}</button>
+            <h1 className="mt-3 text-[26px] font-semibold tracking-tight">{t('login.checkEmail')}</h1>
+            <p className="mt-1.5 text-[15px] text-muted">{t('login.sentTo')} <span className="font-medium text-ink">{email}</span>.</p>
             {error && <p role="alert" className="mt-5 rounded-xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
             <form className="mt-6" onSubmit={(e) => { e.preventDefault(); void verify(); }}>
-              <label htmlFor="code" className="text-[14px] font-medium">Sign-in code</label>
+              <label htmlFor="code" className="text-[14px] font-medium">{t('login.code')}</label>
               <input id="code" ref={codeInput} value={code} inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="\d{6}"
                 onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 6); setCode(v); if (v.length === 6) void verify(v); }}
                 className="mt-2 h-14 w-full rounded-xl border border-line bg-bg px-4 text-center font-mono text-[28px] tracking-[0.5em] outline-none focus:border-brand" placeholder="••••••" />
               <button type="submit" disabled={busy || code.length !== 6} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-brand text-[15px] font-semibold text-on-brand hover:opacity-90 disabled:opacity-50">
-                {busy && <Icon.Spinner size={18} className="animate-spin" />}Sign in
+                {busy && <Icon.Spinner size={18} className="animate-spin" />}{t('login.signIn')}
               </button>
             </form>
             <button type="button" disabled={wait > 0 || busy} onClick={() => void send()} className="mt-5 text-[14px] font-medium text-brand disabled:text-faint">
-              {wait > 0 ? `Send a new code in ${wait}s` : 'Send a new code'}
+              {wait > 0 ? t('login.resendIn', { seconds: wait }) : t('login.resend')}
             </button>
           </>
         )}
-        <p className="mt-8 text-[12px] leading-5 text-muted">By continuing you agree to the <Link href="/legal/terms" className="text-brand">Terms of Service</Link> and confirm you have read the <Link href="/legal/privacy" className="text-brand">Privacy Policy</Link>.</p>
+        <p className="mt-8 text-[12px] leading-5 text-muted">{t('login.agree1')} <Link href="/legal/terms" className="text-brand">{t('login.terms')}</Link> {t('login.agree2')} <Link href="/legal/privacy" className="text-brand">{t('login.privacy')}</Link>.</p>
       </div>
     </div>
   );

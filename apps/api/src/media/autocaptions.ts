@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { checkTranscript } from '../safety/check';
 import type { PrismaClient } from '@prisma/client';
 import { spawn } from 'node:child_process';
 import { readFile, rm } from 'node:fs/promises';
@@ -76,7 +77,10 @@ export async function autoCaptions(prisma: PrismaClient, storage: Storage, confi
     }
     if (!language || !CODE.test(language)) { log.warn(`${videoId}: language not recognised; no automatic captions`); return null; }
     if (video.captions.some((c) => c.language === language && c.source === 'UPLOADED')) return null;
-    const cues = await saveAuto(prisma, storage, videoId, language, await readFile(`${outBase}.vtt`, 'utf8'));
+    const transcript = await readFile(`${outBase}.vtt`, 'utf8');
+    const cues = await saveAuto(prisma, storage, videoId, language, transcript);
+    // What is said is checked too (safety/): hate, threats or sexual talk hide the video until a moderator decides.
+    await checkTranscript(prisma, config, videoId, transcript, signal);
     log.log(`${videoId}: automatic captions (${language}, ${cues} cues)`);
     // English for everyone: Whisper's translation of the same speech, unless the creator uploaded English captions.
     let english: number | null = null;

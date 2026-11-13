@@ -34,6 +34,13 @@ export function ffmpegFilters(ffmpeg: string): Promise<Set<string>> {
   return filters;
 }
 
+let encoders: Promise<Set<string>> | null = null;
+/** Encoders this ffmpeg has (Ubuntu's has libsvtav1 for AV1; minimal builds may not). */
+export function ffmpegEncoders(ffmpeg: string): Promise<Set<string>> {
+  encoders ??= run(ffmpeg, ['-hide_banner', '-encoders']).then(({ stdout }) => new Set(stdout.split('\n').map((l) => l.trim().split(/\s+/)[1]).filter(Boolean))).catch(() => new Set<string>());
+  return encoders;
+}
+
 /** Same loudness for every video: -14 LUFS integrated, -1.5 dBTP peak, as most streaming services. */
 export const LOUDNESS = { I: -14, TP: -1.5, LRA: 11 } as const;
 export interface Loudness { input_i: string; input_tp: string; input_lra: string; input_thresh: string; target_offset: string }

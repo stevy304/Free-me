@@ -3,13 +3,16 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeApp, resetDb, signIn, WEB } from './helpers';
+import { MediaJobs } from '../src/media/jobs';
+import { LocalChunks } from '../src/media/chunks';
+import { createStorage } from '../src/media/storage';
 
 // Long videos are encoded in pieces (here: anything of 10 s or more, 4-second pieces, two at a time) and joined
 // without re-encoding. The result must be the same video: every frame, the keyframe grid, 1-second first segment.
 const dir = mkdtempSync(join(tmpdir(), 'freeme-chunked-'));
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 beforeAll(async () => {
-  ctx = await makeApp({ redis: false, storageDir: join(dir, 'storage'), env: { CHUNK_MIN_SECONDS: '10', CHUNK_SECONDS: '4', CHUNK_CONCURRENCY: '2', COPY_TOP_RUNG: 'false', SCRATCH_DIR: join(dir, 'scratch') } });
+  ctx = await makeApp({ redis: false, storageDir: join(dir, 'storage'), env: { CHUNK_MIN_SECONDS: '10', CHUNK_SECONDS: '4', CHUNK_CONCURRENCY: '2', COPY_TOP_RUNG: 'false', SCRATCH_DIR: join(dir, 'scratch'), AV1_PRESET: '12' } });
 }, 60_000);
 beforeEach(async () => { await resetDb(ctx.prisma); ctx.mail.outbox.length = 0; await ctx.clearLimits(); });
 afterAll(async () => { await ctx.app.close(); rmSync(dir, { recursive: true, force: true }); });
@@ -54,4 +57,20 @@ test('a long video is encoded in pieces and joined: every frame there, 2-second 
   const leftovers = () => readdirSync(join(dir, 'scratch')).filter((f) => f.startsWith(v.id));
   for (let i = 0; i < 50 && leftovers().length; i++) await new Promise((r) => setTimeout(r, 100));
   expect(leftovers()).toEqual([]);
+
+  // A popular long video's AV1 renditions are made in pieces too, joined into the same 2-second keyframe grid.
+  const storage = createStorage(ctx.config);
+  const jobs = new MediaJobs(ctx.prisma as never, storage, ctx.config, null, null, new LocalChunks(2, { ffmpegPath: 'ffmpeg', storage, scratchDir: join(dir, 'scratch') }));
+  await jobs.av1(v.id);
+  const av1 = join(dir, 'storage', 'prv', v.id, 'hls', 'av1-720p');
+  const durations = [...readFileSync(join(av1, 'index.m3u8'), 'utf8').matchAll(/#EXTINF:([\d.]+)/g)].map((m) => Number(m[1]));
+  expect(durations.reduce((a, b) => a + b, 0)).toBeCloseTo(13.5, 1);
+  const keyframes = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v', '-show_entries', 'frame=key_frame,pts_time', '-of', 'csv=p=0', join(av1, 'index.m3u8')]).toString()
+    .trim().split('\n').map((l) => l.split(',')).filter(([k]) => k === '1').map(([, t]) => Number(t));
+  expect(keyframes.length).toBeGreaterThanOrEqual(7);
+  expect(keyframes.every((t) => Math.abs(t / 2 - Math.round(t / 2)) < 0.02)).toBe(true);
+  const joinedAv1 = join(dir, 'av1.mp4');
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', join(av1, 'index.m3u8'), '-c', 'copy', joinedAv1]);
+  expect(frames(joinedAv1)).toBe(405);
+  expect(existsSync(join(dir, 'storage', 'tmp', 'chunks', v.id))).toBe(false);
 }, 300_000);

@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import { getViewer } from '@/lib/server-api';
+import { getT, getViewer } from '@/lib/server-api';
 import { HubContent } from './HubContent';
 
-export const metadata: Metadata = { title: 'Creator Hub' };
+export async function generateMetadata(): Promise<Metadata> { return { title: (await getT())('watch.creatorHub') }; }
 
 export default async function CreatorHub() {
   const viewer = await getViewer();

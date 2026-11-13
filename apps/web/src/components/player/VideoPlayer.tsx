@@ -6,6 +6,8 @@ import type Hls from 'hls.js';
 import { languageName } from '@free-me/shared';
 import { AdBreak, type AdSlot } from './AdBreak';
 import { DATA_SAVER_MAX, dataSaverActive } from '@/lib/datasaver';
+import { av1Preferred, codecFamily } from '@/lib/codecs';
+import { QoeSession } from '@/lib/qoe';
 
 export interface CaptionTrack { language: string; auto: boolean; url: string }
 
@@ -54,8 +56,11 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const frame = useRef<number | null>(null);
   const bufferingSince = useRef<number | null>(null);
   const recoverySince = useRef<number | null>(null);
+  // This playback's experience (lib/qoe.ts): sent when the viewer leaves the video or the page.
+  const qoe = useRef<QoeSession | null>(null);
   const reportHealth = (kind: 'startup' | 'buffer' | 'recovery', ms: number) => {
     if (!videoId || !Number.isFinite(ms) || ms < 0 || ms > 86_400_000) return;
+    if (kind === 'startup') qoe.current?.startup(ms); else qoe.current?.stall(ms);
     void fetch(`/api/videos/${videoId}/playback-health`, {
       method: 'POST', credentials: 'same-origin', keepalive: true,
       headers: { 'content-type': 'application/json' },
@@ -79,7 +84,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     setSoundOnly(false);
     setAudio(null);
     resumeAt.current = null;
-    reported.current = false;
+    reported.current = false; playTicket.current = null;
     unsent.current = 0;
     watched.current = 0;
     lastT.current = 0;
@@ -96,8 +101,21 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const cues = useStoryboard(storyboard);
   const [flash, setFlash] = useState<'play' | 'pause' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!videoId) return;
+    const session = new QoeSession(videoId);
+    qoe.current = session;
+    const leave = () => { if (document.visibilityState === 'hidden') session.send(); };
+    const hide = () => session.send();
+    document.addEventListener('visibilitychange', leave);
+    window.addEventListener('pagehide', hide);
+    return () => { document.removeEventListener('visibilitychange', leave); window.removeEventListener('pagehide', hide); session.send(); if (qoe.current === session) qoe.current = null; };
+  }, [videoId, src]);
+  useEffect(() => { if (error) qoe.current?.failed(); }, [error]);
   const watched = useRef(0);
   const reported = useRef(false);
+  /** The play ticket for the current video (asked for when playback really starts). */
+  const playTicket = useRef<Promise<string | null> | null>(null);
   // Watch time after the view was counted, not yet reported (sent with each progress save: every 30 s while playing,
   // on pause, leave and end). The server checks it against real time.
   const unsent = useRef(0);
@@ -254,22 +272,30 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     };
     if (el.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) {
       el.src = url;
+      qoe.current?.setCodec('native');
       autoplay();
     } else {
-      import('hls.js').then(({ default: H }) => {
+      Promise.all([import('hls.js'), av1Preferred()]).then(([{ default: H }, av1]) => {
         if (cancelled) return;
         if (!H.isSupported()) { setError('This browser cannot play this video.'); return; }
+        // Popular videos also come in AV1 (fewer bytes). hls.js keeps to one codec for the whole playback; this says
+        // which one when both are there. A device that cannot decode one never sees it (hls.js drops those).
+        const family = av1 ? 'av01' : 'avc1';
         // startFragPrefetch: the first segment downloads while the player is still setting up.
-        const h = new H({ capLevelToPlayerSize: true, startLevel: -1, startFragPrefetch: true, maxBufferLength: 30, backBufferLength: 60 });
+        const h = new H({ capLevelToPlayerSize: true, startLevel: -1, startFragPrefetch: true, maxBufferLength: 30, backBufferLength: 60, videoPreference: { videoCodec: family } });
         hls.current = h;
         h.on(H.Events.MANIFEST_PARSED, () => {
           autoplay();
-          setLevels(h.levels.map((l, index) => ({ index, height: l.height, width: l.width, label: label(l.height, l.width) })).reverse());
+          // The quality menu and data saver work on the chosen codec's renditions only (each quality is listed once).
+          const pool = h.levels.map((l, index) => ({ l, index })).filter(({ l }) => codecFamily(l.codecSet) === family);
+          const usable = pool.length ? pool : h.levels.map((l, index) => ({ l, index }));
+          setLevels(usable.map(({ l, index }) => ({ index, height: l.height, width: l.width, label: label(l.height, l.width) })).reverse());
           const track = h.audioTracks[0];
           if (track?.url && url === src) setAudio({ for: src, url: track.url });
           // Data saver: "Auto" stays at 360p or below (the viewer can still pick a higher quality).
-          const cap = h.levels.reduce((best, l, i) => (Math.min(l.width, l.height) <= DATA_SAVER_MAX && (best < 0 || l.height * l.width > h.levels[best].height * h.levels[best].width) ? i : best), -1);
-          const on = dataSaverActive() && cap >= 0 && cap < h.levels.length - 1;
+          const cap = usable.reduce((best, { l, index: i }) => (Math.min(l.width, l.height) <= DATA_SAVER_MAX && (best < 0 || l.height * l.width > h.levels[best].height * h.levels[best].width) ? i : best), -1);
+          const top = usable.reduce((a, b) => (b.l.height * b.l.width > a.l.height * a.l.width ? b : a)).index;
+          const on = dataSaverActive() && cap >= 0 && cap !== top;
           setSaver(on);
           if (on) { h.autoLevelCapping = cap; h.nextLoadLevel = Math.min(h.nextLoadLevel, cap); }
           if (quality !== null && quality >= 0 && quality < h.levels.length) {
@@ -279,7 +305,11 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
             setSaver(false);
           }
         });
-        h.on(H.Events.LEVEL_SWITCHED, (_e, d) => { const l = h.levels[d.level]; setPlayingLevel(l ? Math.min(l.height, l.width) : null); });
+        h.on(H.Events.LEVEL_SWITCHED, (_e, d) => {
+          const l = h.levels[d.level]; setPlayingLevel(l ? Math.min(l.height, l.width) : null);
+          const f = codecFamily(l?.codecSet);
+          qoe.current?.setCodec(f === 'av01' ? 'av1' : f === 'avc1' ? 'h264' : 'other');
+        });
         let recoveries = 0;
         h.on(H.Events.ERROR, (_e, d) => {
           if (d.details === H.ErrorDetails.MANIFEST_INCOMPATIBLE_CODECS_ERROR) { setError('This browser cannot play H.264 video. Open the video in Chrome, Edge, Safari or Firefox.'); setWaiting(false); return; }
@@ -395,13 +425,19 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     if (mid && !ad && !el.paused) { adsPlayed.current.add(mid.at); el.pause(); setAd(mid); return; }
     if (el.buffered.length) setBuffered(el.buffered.end(el.buffered.length - 1));
     const delta = el.currentTime - lastT.current;
-    if (!el.paused && delta > 0 && delta < 2) { watched.current += delta; if (reported.current) unsent.current += delta; }
+    if (!el.paused && delta > 0 && delta < 2) {
+      // Playback really started: ask for the play ticket the view needs (checked against the server's clock).
+      if (videoId && !playTicket.current) playTicket.current = fetch(`/api/videos/${videoId}/play`, { method: 'POST', credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((j) => j?.ticket ?? null).catch(() => null);
+      watched.current += delta; if (reported.current) unsent.current += delta;
+      if (!ad) qoe.current?.watched(delta, Math.min(el.videoWidth, el.videoHeight) || 0);
+    }
     lastT.current = el.currentTime;
     if (!el.paused && Date.now() - lastSaved.current > 30_000) save(); // every 30 s while playing (and on pause, leave and end)
     const need = Math.min(30, (el.duration || duration) * 0.5);
     if (videoId && !reported.current && need > 0 && watched.current >= need) {
       reported.current = true;
-      fetch(`/api/videos/${videoId}/views`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ watchedSeconds: Math.round(watched.current) }), credentials: 'same-origin' }).catch(() => undefined);
+      const seconds = Math.round(watched.current);
+      void (playTicket.current ?? Promise.resolve(null)).then((ticket) => fetch(`/api/videos/${videoId}/views`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ watchedSeconds: seconds, ...(ticket ? { ticket } : {}) }), credentials: 'same-origin' })).catch(() => undefined);
     }
   };
 

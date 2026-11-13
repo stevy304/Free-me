@@ -1,17 +1,19 @@
 'use client';
 
 import * as Icon from '@/components/icons';
+import type { Key } from '@/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { LanguageSelect, inputClass } from '../Pickers';
 import { languageName } from '@free-me/shared';
 import { api } from '@/lib/client-api';
 import type { Category } from '@/lib/types';
 import type { HubVideo } from './types';
+import { useT } from '@/components/shell/ShellContext';
 
-const VISIBILITY = [
-  { v: 'PRIVATE', label: 'Private', help: 'Only you can watch it', Icon: Icon.Lock },
-  { v: 'UNLISTED', label: 'Unlisted', help: 'Anyone with the link can watch it', Icon: Icon.Link },
-  { v: 'PUBLIC', label: 'Public', help: 'Everyone can find and watch it', Icon: Icon.Globe },
+const VISIBILITY: Array<{ v: HubVideo['visibility']; label: Key; help: Key; Icon: typeof Icon.Lock }> = [
+  { v: 'PRIVATE', label: 'details.private', help: 'details.privateHelp', Icon: Icon.Lock },
+  { v: 'UNLISTED', label: 'details.unlisted', help: 'details.unlistedHelp', Icon: Icon.Link },
+  { v: 'PUBLIC', label: 'details.public', help: 'details.publicHelp', Icon: Icon.Globe },
 ] as const;
 
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -42,7 +44,8 @@ export async function prepareThumbnail(f: File): Promise<Blob> {
 }
 
 /** Title, description, thumbnail, audience, category, tags, language and visibility of one video. */
-export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video: HubVideo; onSaved: (v: HubVideo) => void; saveLabel?: string }) {
+export function VideoDetailsForm({ video, onSaved, saveLabel }: { video: HubVideo; onSaved: (v: HubVideo) => void; saveLabel?: string }) {
+  const t = useT();
   const [title, setTitle] = useState(video.title);
   const [description, setDescription] = useState(video.description ?? '');
   const [visibility, setVisibility] = useState(video.visibility);
@@ -60,16 +63,16 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
   useEffect(() => { fetch('/api/categories').then((r) => r.json()).then((d) => setCategories(d.categories ?? [])).catch(() => undefined); }, []);
 
   const save = async () => {
-    if (kids === null) { setMessage({ ok: false, text: 'Choose whether this video is made for kids.' }); return; }
+    if (kids === null) { setMessage({ ok: false, text: t('details.kidsRequired') }); return; }
     setBusy(true); setMessage(null);
     try {
       const r = await api<{ video: HubVideo }>(`/hub/videos/${video.id}`, { method: 'PATCH', body: {
         title, description, visibility, category: category || null, language, madeForKids: kids, commentsEnabled: comments,
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean), ...(thumb !== null ? { thumbnail: thumb } : {}),
       } });
-      setMessage({ ok: true, text: visibility === 'PRIVATE' ? 'Saved' : video.status === 'READY' ? 'Published' : 'Saved. It goes live when processing finishes.' });
+      setMessage({ ok: true, text: visibility === 'PRIVATE' ? t('details.saved') : video.status === 'READY' ? t('watch.published') : t('details.savedLater') });
       onSaved(r.video);
-    } catch (e) { setMessage({ ok: false, text: e instanceof Error ? e.message : 'Could not save.' }); } finally { setBusy(false); }
+    } catch (e) { setMessage({ ok: false, text: e instanceof Error ? e.message : t('details.couldNotSave') }); } finally { setBusy(false); }
   };
   const uploadThumb = async (f: File) => {
     setBusy(true); setMessage(null);
@@ -77,8 +80,8 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
       const body = await prepareThumbnail(f);
       const res = await fetch(`/api/hub/videos/${video.id}/thumbnail`, { method: 'PUT', body, headers: { 'content-type': body.type || 'application/octet-stream' }, credentials: 'same-origin' });
       const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.message ?? (res.status === 413 ? 'The image is too large.' : 'Could not upload the image. Check your connection and try again.'));
-      setThumb(null); onSaved(d.video); setMessage({ ok: true, text: 'Thumbnail updated' });
+      if (!res.ok) throw new Error(d.message ?? (res.status === 413 ? t('details.imageLarge') : t('details.imageFailed')));
+      setThumb(null); onSaved(d.video); setMessage({ ok: true, text: t('details.thumbUpdated') });
     } catch (e) { setMessage({ ok: false, text: (e as Error).message }); } finally { setBusy(false); }
   };
 
@@ -87,18 +90,18 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
   return (
     <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); void save(); }}>
       <div>
-        <label htmlFor="v-title" className={label}>Title (required)</label>
+        <label htmlFor="v-title" className={label}>{t('details.title')}</label>
         <input id="v-title" required maxLength={100} value={title} onChange={(e) => setTitle(e.target.value)} className={`${inputClass} mt-2`} />
         <p className="mt-1 text-right text-[12px] text-faint">{title.length}/100</p>
       </div>
       <div>
-        <label htmlFor="v-desc" className={label}>Description</label>
-        <textarea id="v-desc" rows={5} maxLength={5000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Tell viewers about your video"
+        <label htmlFor="v-desc" className={label}>{t('details.description')}</label>
+        <textarea id="v-desc" rows={5} maxLength={5000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('details.descPlaceholder')}
           className="mt-2 w-full rounded-xl border border-line bg-bg px-3 py-2.5 text-[15px] outline-none focus:border-brand" />
       </div>
       <div>
-        <p className={label}>Thumbnail</p>
-        <p className="text-[13px] text-muted">Pick a frame or upload a picture. Any size works: big photos are resized to 1280×720 for you.</p>
+        <p className={label}>{t('details.thumbnail')}</p>
+        <p className="text-[13px] text-muted">{t('details.thumbHelp')}</p>
         <div className="mt-3 flex flex-wrap gap-3">
           <button type="button" disabled={!video.thumbnailCandidates.length || busy} onClick={() => file.current?.click()}
             className="flex aspect-video w-36 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line text-[12px] text-muted hover:bg-surface disabled:opacity-50">
@@ -110,41 +113,41 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
           )}
           {video.thumbnailCandidates.length ? video.thumbnailCandidates.map((u, i) => (
             <button key={u} type="button" onClick={() => setThumb(i)} aria-pressed={chosen === i} className={`relative aspect-video w-36 overflow-hidden rounded-lg ring-2 ${chosen === i ? 'ring-ink' : 'ring-transparent hover:ring-line'}`}>
-              <img src={u} alt={`Frame ${i + 1}`} className="h-full w-full object-cover" />{chosen === i && <Icon.Check size={18} className="absolute right-1 top-1 rounded-full bg-black/70 p-0.5 text-white" />}
+              <img src={u} alt={t('details.frame', { n: i + 1 })} className="h-full w-full object-cover" />{chosen === i && <Icon.Check size={18} className="absolute right-1 top-1 rounded-full bg-black/70 p-0.5 text-white" />}
             </button>
-          )) : <p className="flex items-center gap-2 text-[13px] text-muted"><Icon.Spinner size={14} className="animate-spin" />Frames, and your own picture, can be chosen once the first version is ready.</p>}
+          )) : <p className="flex items-center gap-2 text-[13px] text-muted"><Icon.Spinner size={14} className="animate-spin" />{t('details.framesLater')}</p>}
         </div>
       </div>
       <fieldset>
-        <legend className={label}>Audience (required)</legend>
-        <p className="text-[13px] text-muted">Videos made for kids get fewer personalised features to protect children&apos;s privacy.</p>
+        <legend className={label}>{t('details.audience')}</legend>
+        <p className="text-[13px] text-muted">{t('details.kidsHelp')}</p>
         <div className="mt-2 space-y-1.5 text-[14px]">
-          <label className="flex items-center gap-3"><input type="radio" name="kids" checked={kids === true} onChange={() => setKids(true)} className="h-4 w-4 accent-[var(--brand)]" />Yes, it&apos;s made for kids</label>
-          <label className="flex items-center gap-3"><input type="radio" name="kids" checked={kids === false} onChange={() => setKids(false)} className="h-4 w-4 accent-[var(--brand)]" />No, it&apos;s not made for kids</label>
+          <label className="flex items-center gap-3"><input type="radio" name="kids" checked={kids === true} onChange={() => setKids(true)} className="h-4 w-4 accent-[var(--brand)]" />{t('details.kidsYes')}</label>
+          <label className="flex items-center gap-3"><input type="radio" name="kids" checked={kids === false} onChange={() => setKids(false)} className="h-4 w-4 accent-[var(--brand)]" />{t('details.kidsNo')}</label>
         </div>
       </fieldset>
       <div className="grid gap-5 sm:grid-cols-2">
         <div>
-          <label htmlFor="v-cat" className={label}>Category</label>
+          <label htmlFor="v-cat" className={label}>{t('details.category')}</label>
           <select id="v-cat" value={category} onChange={(e) => setCategory(e.target.value)} className={`${inputClass} mt-2`}>
-            <option value="">None</option>{categories.map((c) => <option key={c.id} value={c.slug}>{c.name}</option>)}
+            <option value="">{t('details.none')}</option>{categories.map((c) => <option key={c.id} value={c.slug}>{c.name}</option>)}
           </select>
         </div>
-        <div><label htmlFor="v-lang" className={label}>Video language</label><div className="mt-2"><LanguageSelect id="v-lang" allowEmpty value={language} onChange={setLanguage} /></div></div>
+        <div><label htmlFor="v-lang" className={label}>{t('details.language')}</label><div className="mt-2"><LanguageSelect id="v-lang" allowEmpty value={language} onChange={setLanguage} /></div></div>
         <div className="sm:col-span-2"><Captions video={video} onSaved={onSaved} /></div>
-        <div className="sm:col-span-2"><label htmlFor="v-tags" className={label}>Tags</label><input id="v-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Separate tags with commas" className={`${inputClass} mt-2`} /></div>
+        <div className="sm:col-span-2"><label htmlFor="v-tags" className={label}>{t('details.tags')}</label><input id="v-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('details.tagsPlaceholder')} className={`${inputClass} mt-2`} /></div>
       </div>
       <label className={`flex items-start gap-3 rounded-xl border border-line p-3 ${kids ? 'opacity-60' : 'cursor-pointer hover:bg-surface'}`}>
         <input type="checkbox" checked={comments && !kids} disabled={!!kids} onChange={(e) => setComments(e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
-        <span><span className="flex items-center gap-1.5 text-[14px] font-medium"><Icon.Comment size={15} />Allow comments</span><span className="text-[12px] text-muted">{kids ? 'Comments are always off on videos made for kids.' : 'Viewers can comment and reply. You can remove or pin comments.'}</span></span>
+        <span><span className="flex items-center gap-1.5 text-[14px] font-medium"><Icon.Comment size={15} />{t('details.allowComments')}</span><span className="text-[12px] text-muted">{kids ? t('details.commentsKids') : t('details.commentsHelp')}</span></span>
       </label>
       <fieldset>
-        <legend className={label}>Visibility</legend>
+        <legend className={label}>{t('details.visibility')}</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-3">
           {VISIBILITY.map(({ v, label: l, help, Icon: VisIcon }) => (
             <label key={v} className={`flex cursor-pointer gap-3 rounded-xl border p-3 ${visibility === v ? 'border-brand bg-brand-soft' : 'border-line hover:bg-surface'}`}>
               <input type="radio" name="visibility" checked={visibility === v} onChange={() => setVisibility(v)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
-              <span><span className="flex items-center gap-1.5 text-[14px] font-medium"><VisIcon size={15} />{l}</span><span className="text-[12px] text-muted">{help}</span></span>
+              <span><span className="flex items-center gap-1.5 text-[14px] font-medium"><VisIcon size={15} />{t(l)}</span><span className="text-[12px] text-muted">{t(help)}</span></span>
             </label>
           ))}
         </div>
@@ -152,7 +155,7 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
       <div className="flex items-center justify-end gap-4">
         {message && <p role="status" className={`text-[14px] ${message.ok ? 'text-brand' : 'text-danger'}`}>{message.text}</p>}
         <button type="submit" disabled={busy || !title.trim()} className="flex h-10 items-center gap-2 rounded-xl bg-brand px-6 text-[14px] font-semibold text-on-brand hover:opacity-90 disabled:opacity-40">
-          {busy && <Icon.Spinner size={16} className="animate-spin" />}{saveLabel}
+          {busy && <Icon.Spinner size={16} className="animate-spin" />}{saveLabel ?? t('comments.save')}
         </button>
       </div>
     </form>
@@ -161,20 +164,21 @@ export function VideoDetailsForm({ video, onSaved, saveLabel = 'Save' }: { video
 
 /** Subtitles per language: upload a .vtt or .srt file; automatic ones (when the server makes them) are marked. */
 function Captions({ video, onSaved }: { video: HubVideo; onSaved: (v: HubVideo) => void }) {
+  const t = useT();
   const [lang, setLang] = useState<string | null>(video.language ?? null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const caps = video.captions ?? [];
   const upload = async (f: File) => {
-    if (!lang) { setMessage({ ok: false, text: 'Choose the language of the captions first.' }); return; }
-    if (f.size > 1024 * 1024) { setMessage({ ok: false, text: 'A caption file must be 1 MB or smaller.' }); return; }
+    if (!lang) { setMessage({ ok: false, text: t('details.captionLang') }); return; }
+    if (f.size > 1024 * 1024) { setMessage({ ok: false, text: t('details.captionSize') }); return; }
     setBusy(true); setMessage(null);
     try {
       const res = await fetch(`/api/hub/videos/${video.id}/captions/${lang}`, { method: 'PUT', body: await f.text(), headers: { 'content-type': f.name.toLowerCase().endsWith('.srt') ? 'application/x-subrip' : 'text/vtt' }, credentials: 'same-origin' });
       const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.message ?? 'Could not add the captions.');
-      onSaved(d.video); setMessage({ ok: true, text: `${languageName(lang)} captions added` });
+      if (!res.ok) throw new Error(d.message ?? t('details.captionFailed'));
+      onSaved(d.video); setMessage({ ok: true, text: t('details.captionsAdded', { lang: languageName(lang) }) });
     } catch (e) { setMessage({ ok: false, text: (e as Error).message }); } finally { setBusy(false); }
   };
   const remove = async (language: string) => {
@@ -184,16 +188,16 @@ function Captions({ video, onSaved }: { video: HubVideo; onSaved: (v: HubVideo) 
   };
   return (
     <div>
-      <p className="text-[14px] font-medium">Captions</p>
-      <p className="text-[13px] text-muted">Captions can be generated after processing. Upload a WebVTT (.vtt) or SubRip (.srt) file if you want to provide your own.</p>
+      <p className="text-[14px] font-medium">{t('details.captions')}</p>
+      <p className="text-[13px] text-muted">{t('details.captionsHelp')}</p>
       {caps.length > 0 && (
         <ul className="mt-3 divide-y divide-line rounded-xl border border-line">
           {caps.map((c) => (
             <li key={c.language} className="flex items-center gap-3 px-3 py-2.5 text-[14px]">
               <span className="grid h-7 min-w-9 place-items-center rounded-md bg-surface px-1.5 text-[11px] font-extrabold uppercase">{c.language}</span>
-              <span className="min-w-0 flex-1"><span className="font-medium">{languageName(c.language)}</span>{c.source === 'AUTO' && <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-on-accent-soft">Automatic</span>}<span className="block text-[12px] text-muted">{c.cues} lines</span></span>
-              <a href={c.url} target="_blank" rel="noreferrer" className="rounded-lg px-2 py-1 text-[13px] font-semibold text-brand hover:bg-surface">View</a>
-              <button type="button" disabled={busy} onClick={() => remove(c.language)} aria-label={`Remove ${languageName(c.language)} captions`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-danger"><Icon.Trash size={17} /></button>
+              <span className="min-w-0 flex-1"><span className="font-medium">{languageName(c.language)}</span>{c.source === 'AUTO' && <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-on-accent-soft">{t('details.automatic')}</span>}<span className="block text-[12px] text-muted">{t('details.lines', { count: c.cues })}</span></span>
+              <a href={c.url} target="_blank" rel="noreferrer" className="rounded-lg px-2 py-1 text-[13px] font-semibold text-brand hover:bg-surface">{t('details.view')}</a>
+              <button type="button" disabled={busy} onClick={() => remove(c.language)} aria-label={t('details.removeCaptions', { lang: languageName(c.language) })} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-danger"><Icon.Trash size={17} /></button>
             </li>
           ))}
         </ul>
@@ -201,7 +205,7 @@ function Captions({ video, onSaved }: { video: HubVideo; onSaved: (v: HubVideo) 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <div className="min-w-[200px] flex-1"><LanguageSelect id="v-cap-lang" allowEmpty value={lang} onChange={setLang} /></div>
         <button type="button" disabled={busy} onClick={() => file.current?.click()} className="flex h-10 items-center gap-2 rounded-xl border border-line px-4 text-[14px] font-semibold hover:bg-surface disabled:opacity-50">
-          {busy ? <Icon.Spinner size={16} className="animate-spin" /> : <Icon.Upload size={18} />}Add captions
+          {busy ? <Icon.Spinner size={16} className="animate-spin" /> : <Icon.Upload size={18} />}{t('details.addCaptions')}
         </button>
         <input ref={file} type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ''; }} />
       </div>

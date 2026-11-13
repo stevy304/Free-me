@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { BIO_MAX, DISPLAY_NAME_MAX } from '@free-me/shared';
 
 export class UpdateProfileDto {
@@ -9,4 +9,5 @@ export class UpdateProfileDto {
   @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsString() @MaxLength(100) city?: string | null;
   @ApiPropertyOptional({ description: 'BCP 47 language' }) @IsOptional() @IsString() preferredLanguage?: string;
   @ApiPropertyOptional({ description: 'IANA time zone, e.g. Africa/Kigali', nullable: true }) @IsOptional() @IsString() @MaxLength(64) timezone?: string | null;
+  @ApiPropertyOptional({ description: 'Let "For you" use what I watch and like' }) @IsOptional() @IsBoolean() personalizedRecommendations?: boolean;
 }

@@ -10,6 +10,8 @@ Values for local development are in [.env.example](.env.example). In production 
 | `PORT` | | `4000` | Listening port |
 | `API_PROCESSES` | | `1` | API processes sharing the port; `auto` = one per CPU core (a Node process uses one core). Set `auto` on app servers |
 | `FEED_CACHE_SECONDS` | | `60` (`0` in tests) | How long parts of the home page and Rising that are the same for everyone are reused. New videos appear on the home page within this time |
+| `SESSION_CACHE_SECONDS` | | `15` (`0` in tests), at most `60` | How long each API process keeps a signed-in session and its account, so requests do not each read them from the database. Sign-outs, suspensions, role and plan changes are announced to every process over Redis and seen at once; this is only the longest a change could lag if such a message were lost. `0` reads them on every request |
+| `REC_ACTIVE_MAX` | | `200000` | How many videos the recommendation feature store keeps (the active part of the catalogue: published in the last 90 days or watched in the last 7, most watched first). Raise it with Redis memory (about 300 bytes a video) |
 | `DATABASE_URL` | yes | | PostgreSQL connection string (private address of server 3) |
 | `REDIS_URL` | production | | Redis: shared rate limits, the video job queue and view counting. Without it (development only) limits are per process and the API processes uploads itself |
 | `APP_URL` | production | `http://localhost:3000` | Public origin of the web app, e.g. `https://freeme.example`. Must be https in production |
@@ -57,6 +59,11 @@ Values for local development are in [.env.example](.env.example). In production 
 | `HD_MIN_VIEWS` | | `100` | Popularity-based encoding: 1080p and above are made only once a video has this many views (checked every minute by the worker). Premium creators' uploads get them at once. `0` makes every quality straight away |
 | `FREE_MAX_QUALITY` | | `720` | Highest quality free viewers get (`144`, `240`, `360`, `480`, `720`, `1080`, `1440` or `2160`); Premium members and the video's owner get every quality. `0` = no limit. Applies to videos processed after it is set. It saves delivery cost, it is not protection: the higher-quality files of public videos are still on the CDN |
 | `SOURCE_RETENTION_DAYS` | | `0` (keep) | Delete a ready video's original upload after this many days, keeping its renditions. Originals are often the largest file, so this can cut storage a lot. A video that has not reached `HD_MIN_VIEWS` by then keeps up to 720p for good, and the original cannot be used again (for example for new formats later). Try `90` once you are sure |
+| `AV1_MIN_VIEWS` | | `500` | AV1 renditions for popular videos: once a ready video has this many views, the worker (every 5 minutes, most watched first) adds an AV1 version of every quality beside the H.264 ones. AV1 needs roughly a third fewer bytes for the same picture, for every later viewer whose device plays it well; other devices keep H.264. Several times slower to encode than H.264, so it is kept for videos that are watched. Needs an ffmpeg with `libsvtav1` (Ubuntu's has it); without it nothing is queued. `0` turns AV1 off |
+| `AV1_PRESET` | | `8` | SVT-AV1 speed, `0` (slowest, smallest files) to `13` (fastest). Lower it when encoding capacity is spare: each step down saves a little more delivery for a lot more encoding time |
+| `AV1_CRF` | | `32` | AV1 quality, `10`–`55` (lower is better and bigger). 360p and below use 2 less. Each rendition also has a bitrate ceiling of 65% of its H.264 one |
+| `PER_TITLE_ENCODING` | | `true` | Choose each video's CRF from samples (higher for content that looks the same with fewer bytes, never above 25; grainy content keeps 21). `false` encodes everything at CRF 21 |
+| `GEO_COUNTRY_HEADER` | | `cf-ipcountry` | Header your CDN or proxy sets to the visitor's country (two letters). Used only to count playback quality per country; `none` uses the profile's country instead |
 | `COPY_TOP_RUNG` | | `true` | Use the upload's own H.264 as the top quality when it is suitable (exact size, 8-bit, normal colour, keyframe at least every 4.5 s, bitrate viewers can stream): the most expensive encode is skipped. `false` always re-encodes |
 | `VIDEO_ENCODER` | | `libx264` | `nvenc` (NVIDIA GPU) or `qsv` (Intel Quick Sync) for a media server with a GPU: several times faster. Falls back to `libx264` by itself if the GPU encoder fails |
 | `FFMPEG_PATH`, `FFPROBE_PATH` | | `ffmpeg`, `ffprobe` | Binaries |
@@ -64,7 +71,13 @@ Values for local development are in [.env.example](.env.example). In production 
 | `WHISPER_CPP_PATH`, `WHISPER_MODEL` | | off | Automatic captions on the media server: the whisper.cpp program (e.g. `/opt/whisper.cpp/build/bin/whisper-cli`) and a model file (e.g. `ggml-small.bin`). Set both or neither. See DEPLOYMENT.md → Automatic captions |
 | `AUTO_CAPTIONS_ENGLISH` | | `true` | With automatic captions: videos spoken in another language also get English captions (Whisper's translation). Use a multilingual model (not an `.en` one). `false` keeps only the spoken language |
 | `WHISPER_THREADS` | | `4` | CPU threads for one transcription |
+| `ANTHROPIC_API_KEY` | | | Turns on the AI moderator (Claude). Better entered in Administration → Secrets (stored encrypted, never shown again); this variable is used only when none is saved there. `SAFETY_OPENAI_KEY` and `SAFETY_SCAN_TOKEN` can be entered there too |
+| `SAFETY_ANTHROPIC_URL` | | Anthropic's API | Another address for the Messages API (a gateway, or a stand-in in tests) |
+| `SAFETY_AI_COMMENTS_PER_DAY` | | `0` (no limit) | The most low-risk comments the AI moderator checks per day. Over it they get the word rules only. Comments the rules notice, and comments from new accounts, always go to the AI |
 | `SAFETY_SCAN_URL` | | off | Optional outside matching service for uploads (e.g. a PDQ/TMK service such as Meta's Hasher-Matcher-Actioner behind a small adapter, or a vendor). Receives `POST { videoId, sha256, md5, durationSeconds, frames: [base64 JPEG] }`, answers `{ match: boolean, label? }` |
+| `SAFETY_ENGINE` | | `none` (`http` when `SAFETY_SCAN_URL` is set) | What looks at pictures (and text) beyond the built-in rules: `openai`, `http` or `none`. See TRUST_AND_SAFETY.md |
+| `SAFETY_OPENAI_KEY` | with `SAFETY_ENGINE=openai` | | OpenAI API key for its moderation model (free to use). Frames and text are sent to OpenAI |
+| `SAFETY_UNSCANNED_REVIEW` | | `new` | Without a picture engine, which uploads a person checks before they are shown: `new` (Spaces under a week old or with fewer than 3 published videos), `all`, or `none` |
 | `SAFETY_SCAN_TOKEN` | | | Sent as `Authorization: Bearer …` to the scanner |
 | `SAFETY_SCAN_TIMEOUT_MS` | | `60000` | How long to wait for the scanner |
 | `SAFETY_SCAN_FAIL_CLOSED` | | `false` | `true`: hold uploads when the scanner cannot be reached, instead of letting them through |
@@ -112,8 +125,13 @@ To make someone an administrator (everything, including every Premium feature su
 | `VERIFICATION_PRICE_USD_CENTS` | | `1000` ($10) | Verified business badge, per year, paid after an administrator approved the business |
 | `AD_CPM_USD_CENTS` | | `100` ($1) | Price of 1,000 ad views. A paid day buys `AD_PRICE_PER_DAY_USD_CENTS × 1000 / AD_CPM_USD_CENTS` views at most (3,000 by default); views not delivered in the days bought keep running for as many days again. Administrators can change it in the app |
 | `PAYOUT_MINIMUM_USD_CENTS` | | `1000` ($10) | Smallest withdrawal a creator can ask for |
-| `MONETISE_MIN_WATCH_HOURS` | | `0` (none) | Watch hours a Space needs in the last 12 months to join monetisation. Watch time is counted by the player's heartbeats, checked against real time |
-| `MONETISE_MIN_FOLLOWERS` | | `0` (none) | Followers a Space needs to join monetisation |
+| `VIEW_MAX_PER_NETWORK_PER_VIDEO` | | `100` | Signed-out views of one video from one network address in a day that can count; more are recorded as not valid. Kept generous because many people share an address through their mobile operator |
+| `VIEW_MAX_PER_ACCOUNT_PER_DAY` | | `300` | Views by one signed-in account in a day that can count; more are recorded as not valid |
+| `VIEWS_ALLOW_AUTOMATED` | | `false` | `true` lets headless browsers' views count (browser tests only; ignored in production) |
+| `VIEW_CHECKS` | | `full` | `off` takes the player's word without play tickets (API tests only; ignored in production) |
+| `MONETISE_MIN_WATCH_HOURS` | | `4000` (YouTube's) | Watch hours a Space needs in the last 12 months to join monetisation. Watch time is counted by the player's heartbeats, checked against real time |
+| `MONETISE_MIN_FOLLOWERS` | | `1000` (YouTube's) | Followers a Space needs to join monetisation |
+| `MONETISE_MIN_MOMENT_VIEWS` | | `10000000` (YouTube's 10 million Shorts views) | Moments views in the last 90 days that count instead of the watch hours. `0` turns this way in off; with both at `0`, only the followers count |
 | `MOMO_SUBSCRIPTION_KEY`, `MOMO_API_USER`, `MOMO_API_KEY` | for MTN MoMo | off | MTN MoMo **Collections** product: the primary subscription key and the API user and key from momodeveloper.mtn.com (sandbox) or the MTN partner portal (live). Set all three or none |
 | `MOMO_BASE_URL` | | `https://sandbox.momodeveloper.mtn.com` | Live: the address MTN gives you (e.g. `https://proxy.momoapi.mtn.com`) |
 | `MOMO_TARGET_ENVIRONMENT` | | `sandbox` | Live: your market, e.g. `mtnrwanda` |

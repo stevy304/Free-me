@@ -1,5 +1,10 @@
 import { MailService } from './mail/mail.service';
+import { QoeCounter, summarise } from './media/qoe';
+import { refreshSignals } from './recommend/signals';
+import { refreshRelated } from './recommend/related';
+import { setAuthPublisher } from './auth/session-cache';
 import 'reflect-metadata';
+import { sweepComments } from './engagement/comment-check';
 import { ConsoleLogger, Logger } from '@nestjs/common';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { Queue, QueueEvents, UnrecoverableError, Worker, type Processor } from 'bullmq';
@@ -21,7 +26,7 @@ import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { verifyEncoder } from './media/encoder-health';
 import { createServer } from 'node:http';
-import { Counter, Histogram } from 'prom-client';
+import { Counter, Gauge, Histogram } from 'prom-client';
 import { createRegistry, tokenMatches } from './metrics/metrics';
 import { forgetFeedKeys, setFeedCacheSink } from './catalog/feed-cache';
 
@@ -38,6 +43,9 @@ async function main() {
   const log = new Logger('Worker');
   const prisma = new PrismaClient();
   const connection = () => new Redis(config.redisUrl!, { maxRetriesPerRequest: null });
+  // Plans bought or granted here (payments, administrators) reach the API processes' session caches at once.
+  setAuthPublisher(new Redis(config.redisUrl!));
+  const recRedis = new Redis(config.redisUrl!);
   // Instant updates from the worker (processing progress, notifications, payments) reach browsers through Redis.
   const emitter = new Emitter(new Redis(config.redisUrl));
   setRealtimeSink((r, event, data) => emitter.to(r).emit(event, data));
@@ -57,7 +65,7 @@ async function main() {
   const media = new Queue<MediaJob>(MEDIA_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
   const upgrades = new Queue<MediaJob>(MEDIA_UPGRADE_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
   const enqueue = async (job: MediaJob) => {
-    const queue = job.name === 'upgrade' || job.name === 'caption' ? upgrades : media;
+    const queue = job.name === 'upgrade' || job.name === 'caption' || job.name === 'av1' ? upgrades : media;
     await queue.add(job.name, job, jobOptions(job));
   };
   const jobs = new MediaJobs(prisma, storage, config, new Redis(config.redisUrl), enqueue, new QueueChunks(chunkQueue, chunkEvents, chunkDestinations));
@@ -72,6 +80,27 @@ async function main() {
 
   // Metrics (see MONITORING.md): jobs by result and how long they take; served on WORKER_METRICS_PORT.
   const registry = createRegistry('worker');
+  // Playback quality of the last finished hour (media/qoe.ts), per country and codec: what the alerts watch.
+  const qoeLabels = ['country', 'codec'] as const;
+  const qoeGauges = {
+    sessions: new Gauge({ name: 'freeme_qoe_sessions', help: 'Playbacks in the last finished hour', labelNames: qoeLabels, registers: [registry] }),
+    rebuffer: new Gauge({ name: 'freeme_qoe_rebuffer_ratio', help: 'Time spent loading / time watching, last finished hour', labelNames: qoeLabels, registers: [registry] }),
+    startup: new Gauge({ name: 'freeme_qoe_startup_p90_seconds', help: '90% of playbacks showed their first frame within this, last finished hour', labelNames: qoeLabels, registers: [registry] }),
+    errors: new Gauge({ name: 'freeme_qoe_error_rate', help: 'Share of playbacks that failed, last finished hour', labelNames: qoeLabels, registers: [registry] }),
+  };
+  const qoe = new QoeCounter(prisma, new Redis(config.redisUrl!));
+  const updateQoeGauges = async () => {
+    const hour = new Date(Math.floor(Date.now() / 3_600_000) * 3_600_000 - 3_600_000);
+    const rows = (await qoe.read(hour, 0)).filter((r) => r.hour.getTime() === hour.getTime());
+    for (const g of Object.values(qoeGauges)) g.reset();
+    const byPair = new Map<string, typeof rows>();
+    for (const r of rows) { const k = `${r.country}|${r.codec}`; byPair.set(k, [...(byPair.get(k) ?? []), r]); }
+    for (const [k, list] of byPair) {
+      const [country, codec] = k.split('|'); const s = summarise(list, null)[0];
+      qoeGauges.sessions.set({ country, codec }, s.sessions); qoeGauges.rebuffer.set({ country, codec }, s.rebufferRatio);
+      qoeGauges.errors.set({ country, codec }, s.errorRate); if (s.startupP90Ms !== null) qoeGauges.startup.set({ country, codec }, s.startupP90Ms / 1000);
+    }
+  };
   const jobsDone = new Counter({ name: 'freeme_worker_jobs_total', help: 'Media jobs finished', labelNames: ['job', 'result'] as const, registers: [registry] });
   const jobTime = new Histogram({ name: 'freeme_worker_job_duration_seconds', help: 'Media job duration', labelNames: ['job'] as const,
     buckets: [1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600], registers: [registry] });
@@ -107,7 +136,19 @@ async function main() {
   await maintenance.upsertJobScheduler('stale-uploads', { every: 3600_000 }, { name: 'stale-uploads' });
   await maintenance.upsertJobScheduler('recover-stuck', { every: 5 * 60_000 }, { name: 'recover-stuck' });
   // Popularity-based encoding: videos that reached HD_MIN_VIEWS get their 1080p and above.
+  // Playback quality: finished hours to the database, and the gauges the alerts read.
+  // Limited videos (AI moderator) join feeds after 3 days unless people reported them.
+  await maintenance.upsertJobScheduler('release-limited', { every: 3600_000 }, { name: 'release-limited' });
+  // Comments shown before the AI checked them, which the API did not get to (engagement/comment-check.ts).
+  await maintenance.upsertJobScheduler('comment-sweep', { every: 60_000 }, { name: 'comment-sweep' });
+  await maintenance.upsertJobScheduler('qoe-flush', { every: 5 * 60_000 }, { name: 'qoe-flush' });
   await maintenance.upsertJobScheduler('hd-upgrades', { every: 60_000 }, { name: 'hd-upgrades' });
+  // Recommendations: the feature store and pools every 5 minutes, related lists every 2 (the ones viewers needed first, then popular videos).
+  await maintenance.upsertJobScheduler('rec-signals', { every: 5 * 60_000 }, { name: 'rec-signals' });
+  await maintenance.upsertJobScheduler('rec-related', { every: 2 * 60_000 }, { name: 'rec-related' });
+  // AV1 for videos that reached AV1_MIN_VIEWS: fewer bytes for every later viewer whose device decodes it.
+  if (config.media.av1.minViews) await maintenance.upsertJobScheduler('av1-upgrades', { every: 5 * 60_000 }, { name: 'av1-upgrades' });
+  else await maintenance.removeJobScheduler('av1-upgrades').catch(() => undefined);
   // Storage saving: originals of ready videos older than SOURCE_RETENTION_DAYS (off by default).
   if (config.media.sourceRetentionDays) await maintenance.upsertJobScheduler('expire-sources', { every: 3600_000 }, { name: 'expire-sources' });
   // Money: check pending payments every minute; end memberships and share yesterday's ad revenue every 15 minutes.
@@ -144,13 +185,27 @@ async function main() {
       }
       if (ids.length) log.log({ event: 'hd_upgrades_queued', count: ids.length });
     }
+    else if (job.name === 'comment-sweep') { const r = await sweepComments(prisma, config); if (r.checked) log.log({ event: 'comments_swept', ...r }); }
+    else if (job.name === 'release-limited') { const r = await jobs.releaseLimited(); if (r.released || r.hidden) log.log({ event: 'limited_videos_settled', ...r }); }
+    else if (job.name === 'qoe-flush') { await qoe.flush(); await updateQoeGauges(); }
+    else if (job.name === 'rec-signals') { const n = await refreshSignals(prisma, recRedis, { maxActive: config.recActiveMax }); log.log({ event: 'rec_signals_built', videos: n }); }
+    else if (job.name === 'rec-related') { const n = await refreshRelated(prisma, recRedis); if (n) log.log({ event: 'rec_related_built', videos: n }); }
+    else if (job.name === 'av1-upgrades') {
+      const ids = await jobs.popularAv1();
+      for (const videoId of ids) {
+        // Not queued: clear the claim so the next run tries again.
+        try { await enqueue({ name: 'av1', videoId }); }
+        catch (e) { await prisma.video.updateMany({ where: { id: videoId }, data: { av1QueuedAt: null } }); throw e; }
+      }
+      if (ids.length) log.log({ event: 'av1_upgrades_queued', count: ids.length });
+    }
     else if (job.name === 'recover-stuck') {
       // A playable video that stopped before its higher qualities only needs the second job.
       for (const { id: videoId, playable } of await jobs.stuckVideos()) {
         const job = { name: playable ? 'upgrade' : 'transcode', videoId } as const;
         await enqueue(job);
       }
-    } else await jobs.views.flush();
+    } else await Promise.all([jobs.views.flush(), jobs.progress.flush()]); // flush-views: counts and resume positions
   }, { connection: connection(), prefix: config.media.queuePrefix, concurrency: 1 });
 
   // Live from OBS and TV encoders: nginx-rtmp (on this server) writes HLS to LIVE_RTMP_HLS_DIR; copy it to storage

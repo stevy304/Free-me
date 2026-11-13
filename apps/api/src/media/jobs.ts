@@ -1,4 +1,10 @@
 import { Logger } from '@nestjs/common';
+import { aiModerator } from '../safety/ai';
+import { recordAutomatic } from '../safety/check';
+import { frames, AUTOMATED_MATCH } from './screening';
+import { feedsChanged } from '../catalog/feed-cache';
+import { announceVideo } from '../notifications/notify';
+import { readFile } from 'node:fs/promises';
 import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
@@ -9,16 +15,18 @@ import { mediaPrefix, wantedLocation } from './keys';
 import { LATE_FOLDERS } from './captions';
 import { autoCaptions, extractSpeech } from './autocaptions';
 import { AudioOnly, probe } from './probe';
+import { ffmpegEncoders } from './filters';
 import { MediaError, VideoProcessor } from './process';
 import type { Storage } from './storage';
 import type { ChunkRunner } from './chunks';
 import { ViewCounter } from './views';
+import { ProgressBuffer } from './progress';
 
 /**
  * `transcode` makes a video playable (360p, thumbnails, seek previews); `upgrade` adds the higher qualities. Upgrades
  * have a lower priority, so a new upload never waits for another video's 1080p or 4K.
  */
-export type MediaJob = { name: 'transcode'; videoId: string } | { name: 'upgrade'; videoId: string } | { name: 'relocate'; videoId: string } | { name: 'purge'; videoId: string } | { name: 'caption'; videoId: string };
+export type MediaJob = { name: 'transcode'; videoId: string } | { name: 'upgrade'; videoId: string } | { name: 'av1'; videoId: string } | { name: 'appeal'; videoId: string } | { name: 'relocate'; videoId: string } | { name: 'purge'; videoId: string } | { name: 'caption'; videoId: string };
 
 /** Thrown when a video is busy with another job; the queue retries later. */
 export class VideoBusy extends Error {}
@@ -28,6 +36,8 @@ export class MediaJobs {
   private readonly log = new Logger('MediaJobs');
   readonly processor: VideoProcessor;
   readonly views: ViewCounter;
+  /** Resume positions saved by players, written to the database in batches with the views (see progress.ts). */
+  readonly progress: ProgressBuffer;
   private readonly localLocks = new Set<string>();
 
   constructor(private readonly prisma: PrismaClient, private readonly storage: Storage, private readonly config: AppConfig, private readonly redis: Redis | null,
@@ -37,6 +47,7 @@ export class MediaJobs {
     chunks: ChunkRunner | null = null) {
     this.processor = new VideoProcessor(prisma, storage, config, chunks);
     this.views = new ViewCounter(prisma, redis);
+    this.progress = new ProgressBuffer(prisma, redis);
   }
 
   private async withLock<T>(videoId: string, fn: (lease?: AbortSignal) => Promise<T>): Promise<T> {
@@ -249,6 +260,121 @@ export class MediaJobs {
   }
 
   /**
+   * Popular videos that get AV1 renditions (AV1_MIN_VIEWS, see av1.ts): ready, complete (no HD waiting, nothing
+   * processing), not removed, watched enough, never queued for AV1. Most watched first. Each is claimed before it is
+   * returned (av1QueuedAt), so it is queued once; nothing when AV1 is off or this ffmpeg cannot encode it.
+   */
+  async popularAv1(limit = 20, now = new Date()): Promise<string[]> {
+    const min = this.config.media.av1.minViews;
+    if (!min || !(await ffmpegEncoders(this.config.media.ffmpegPath)).has('libsvtav1')) return [];
+    const rows = await this.prisma.video.findMany({
+      where: { av1QueuedAt: null, status: 'READY', processingStage: 'Ready', hdPending: false, takenDownAt: null, hlsMasterKey: { not: null }, viewCount: { gte: BigInt(min) } },
+      orderBy: { viewCount: 'desc' }, take: limit, select: { id: true },
+    });
+    const claimed: string[] = [];
+    for (const { id } of rows) {
+      const r = await this.prisma.video.updateMany({ where: { id, av1QueuedAt: null }, data: { av1QueuedAt: now } });
+      if (r.count) claimed.push(id);
+    }
+    return claimed;
+  }
+
+  /** AV1 renditions of a popular video; the lock is held only while publishing them (see VideoProcessor.processAv1). */
+  async av1(videoId: string, signal?: AbortSignal) {
+    const added = await this.processor.processAv1(videoId, (fn) => this.withLock(videoId, fn), signal);
+    if (added.length) this.log.log(`${videoId}: AV1 ${added.join(', ')}`);
+  }
+
+  /**
+   * A creator's appeal against an automatic decision (safety/ai.ts): Claude Opus 5.5 looks again at frames and words.
+   * Accepted: the video is published (or released from "limited"), as if a moderator had cleared it. Rejected again:
+   * the decision stands and the creator sees the new reason. Without the AI moderator, a person is asked instead.
+   */
+  async appeal(videoId: string, signal?: AbortSignal) {
+    const v = await this.prisma.video.findUnique({ where: { id: videoId }, include: { tags: { select: { tag: { select: { name: true } } } } } });
+    if (!v || v.takenDownAt || !v.safetyDecision || v.safetyDecision === 'publish') return;
+    const ai = await aiModerator(this.prisma, this.config);
+    if (!ai) {
+      const open = await this.prisma.report.findFirst({ where: { videoId, reason: AUTOMATED_MATCH, status: { in: ['PENDING', 'INVESTIGATING'] } } });
+      if (!open) await this.prisma.report.create({ data: { videoId, reason: AUTOMATED_MATCH, details: `The creator appeals: ${v.safetyReason ?? v.safetyDecision}`, priority: 50 } });
+      return;
+    }
+    const work = await mkdtemp(join(this.config.media.scratchDir, `${videoId}-appeal-`));
+    try {
+      const frameList = await this.appealFrames(v, work, signal);
+      const verdict = await ai.decide({ kind: 'appeal', text: `${[v.title, v.description ?? '', ...v.tags.map((t) => t.tag.name)].join('\n')}\n\nEarlier decision: ${v.safetyDecision} — ${v.safetyReason ?? ''}`, frames: frameList }, signal);
+      const base = { safetyDecision: verdict.decision, safetyReason: verdict.reason, safetyModel: verdict.model };
+      this.log.log({ event: 'video_appeal_decided', videoId, from: v.safetyDecision, to: verdict.decision, model: verdict.model });
+      if (verdict.decision === 'reject') {
+        await this.prisma.video.update({ where: { id: videoId }, data: base });
+        await recordAutomatic(this.prisma, videoId, `Appeal not accepted by ${verdict.model}: ${verdict.reason}`, verdict.category === 'none' ? null : verdict.category);
+        return;
+      }
+      const limited = verdict.decision === 'limit' ? new Date() : null;
+      if (v.status === 'FLAGGED') {
+        // Rejected before it was ever published: processed and published now, as its creator chose.
+        await this.prisma.video.update({ where: { id: videoId }, data: { ...base, status: 'PROCESSING', processingStage: 'Queued', screeningClearedAt: new Date(), safetyCheckedAt: new Date(), safetyLimitedAt: limited } });
+        if (this.enqueue) await this.enqueue({ name: 'transcode', videoId }); else {
+          // Without a queue (development): the job that rejected it may still be letting go of the video; wait for it.
+          const run = async (): Promise<void> => {
+            for (let i = 0; ; i++) {
+              try { return await this.transcode(videoId, true, signal); }
+              catch (e) { if (!(e instanceof VideoBusy) || i >= 20) throw e; await new Promise((r) => setTimeout(r, 500)); }
+            }
+          };
+          void run().catch((e) => this.log.error(`${videoId}: ${(e as Error).message}`));
+        }
+      } else {
+        await this.prisma.video.update({ where: { id: videoId }, data: { ...base, reviewHoldAt: null, safetyLimitedAt: limited } });
+        await feedsChanged();
+        if (!limited) await announceVideo(this.prisma, videoId);
+      }
+      await recordAutomatic(this.prisma, videoId, `Appeal accepted by ${verdict.model} (${verdict.decision}): ${verdict.reason}`, null);
+    } finally {
+      await rm(work, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  /** Frames for an appeal: from the original when it is kept, else the thumbnail choices made from the video. */
+  private async appealFrames(v: { id: string; sourceFileS3Key: string | null; mediaLocation: 'PUBLIC' | 'PRIVATE'; thumbnailCandidates: string[] }, work: string, signal?: AbortSignal): Promise<string[]> {
+    if (v.sourceFileS3Key) {
+      const file = join(work, `source${extname(v.sourceFileS3Key) || '.bin'}`);
+      await this.storage.download(v.sourceFileS3Key, file, signal);
+      try { return await frames(this.config.media.ffmpegPath, file, await probe(this.config.media.ffprobePath, file), join(work, 'frames')); }
+      catch (e) { if (e instanceof AudioOnly) return []; throw e; }
+    }
+    const out: string[] = [];
+    for (const key of v.thumbnailCandidates) {
+      const file = join(work, key.replace(/\//g, '_'));
+      try { await this.storage.download(mediaPrefix(v.id, v.mediaLocation) + key, file, signal); out.push((await readFile(file)).toString('base64')); } catch { /* missing: skip */ }
+    }
+    return out;
+  }
+
+  /**
+   * Limited videos (safety/ai.ts) are released after 3 days unless people reported them: reported by 2 or more,
+   * they are hidden and a moderator is asked; otherwise they join feeds, search and recommendations.
+   */
+  async releaseLimited(now = Date.now()): Promise<{ released: number; hidden: number }> {
+    const rows = await this.prisma.video.findMany({ where: { safetyLimitedAt: { lt: new Date(now - 3 * 86_400_000) }, takenDownAt: null }, select: { id: true }, take: 500 });
+    let released = 0; let hidden = 0;
+    for (const { id } of rows) {
+      const reports = await this.prisma.report.count({ where: { videoId: id, reporterId: { not: null }, status: { in: ['PENDING', 'INVESTIGATING'] } } });
+      if (reports >= 2) {
+        const r = await this.prisma.video.updateMany({ where: { id, reviewHoldAt: null }, data: { reviewHoldAt: new Date(now) } });
+        if (r.count) hidden++;
+        await this.prisma.video.update({ where: { id }, data: { safetyLimitedAt: null } });
+      } else {
+        await this.prisma.video.update({ where: { id }, data: { safetyLimitedAt: null, safetyDecision: 'publish' } });
+        await announceVideo(this.prisma, id);
+        released++;
+      }
+    }
+    if (released || hidden) await feedsChanged();
+    return { released, hidden };
+  }
+
+  /**
    * Storage saving (SOURCE_RETENTION_DAYS): deletes the original upload of ready videos older than that, once nothing
    * still needs it: automatic captions were tried (when they are on), no job is running on the video (lock), and a
    * video still waiting for its HD qualities gives that up (it keeps up to 720p). Returns how many were removed.
@@ -280,6 +406,8 @@ export class MediaJobs {
   async run(job: MediaJob, final: boolean, signal?: AbortSignal) {
     if (job.name === 'transcode') return this.transcode(job.videoId, final, signal);
     if (job.name === 'upgrade') return this.transcode(job.videoId, final, signal, 'rest');
+    if (job.name === 'av1') return this.av1(job.videoId, signal);
+    if (job.name === 'appeal') return this.appeal(job.videoId, signal);
     if (job.name === 'caption') {
       try { return await this.backfillCaption(job.videoId, signal); }
       catch (error) {

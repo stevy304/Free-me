@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Inject, Put, Query } from '@nestjs/common';
+import { tasteChanged } from '../recommend/profile';
 import { ApiOperation, ApiProperty, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsString } from 'class-validator';
 import { PrismaService } from '../database/prisma.service';
@@ -44,6 +45,7 @@ export class HomeController {
       this.prisma.userInterest.deleteMany({ where: { userId: auth.user.id } }),
       this.prisma.userInterest.createMany({ data: slugs.map((s) => ({ userId: auth.user.id, categoryId: cats.find((c) => c.slug === s)!.id })) }),
     ]);
+    await tasteChanged(this.redis.client, auth.user.id);
     return { categories: slugs };
   }
 

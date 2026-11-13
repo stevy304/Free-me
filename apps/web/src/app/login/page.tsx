@@ -1,17 +1,18 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import { apiGet, getViewer } from '@/lib/server-api';
+import { apiGet, getT, getViewer } from '@/lib/server-api';
+import type { Key } from '@/i18n';
 import { LoginForm } from './LoginForm';
 
-export const metadata: Metadata = { title: 'Sign in' };
+export async function generateMetadata(): Promise<Metadata> { return { title: (await getT())('header.signIn') }; }
 
-const ERRORS: Record<string, string> = {
-  google_unavailable: 'Google sign-in is not available right now. Use an email code instead.',
-  google_cancelled: 'Google sign-in was cancelled.',
-  google_expired: 'The Google sign-in took too long or was opened in another browser. Please try again.',
-  google_failed: 'Google sign-in did not work. Please try again, or use an email code.',
-  google_unverified: 'Your Google account email is not verified. Use an email code instead.',
-  account_suspended: 'This account is suspended. Contact support if you think this is a mistake.',
+const ERRORS: Record<string, Key> = {
+  google_unavailable: 'login.eGoogleUnavailable',
+  google_cancelled: 'login.eGoogleCancelled',
+  google_expired: 'login.eGoogleExpired',
+  google_failed: 'login.eGoogleFailed',
+  google_unverified: 'login.eGoogleUnverified',
+  account_suspended: 'login.eSuspended',
 };
 
 const safe = (v?: string) => (v && /^\/(?!\/)[^\s\\]*$/.test(v) ? v : '/');
@@ -20,6 +21,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const { returnTo, error } = await searchParams;
   const back = safe(returnTo);
   if (await getViewer()) redirect(back);
+  const t = await getT();
   const providers = (await apiGet<{ google: boolean }>('/auth/providers')) ?? { google: false };
-  return <LoginForm returnTo={back} google={providers.google} initialError={error ? ERRORS[error] ?? 'Sign-in did not work. Please try again.' : null} />;
+  return <LoginForm returnTo={back} google={providers.google} initialError={error ? t(ERRORS[error] ?? 'login.eGeneric') : null} />;
 }

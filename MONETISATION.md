@@ -58,9 +58,26 @@ They look different on purpose. A badge anyone can buy must never be mistaken fo
 - **Priced per 1,000 views.** A campaign is still bought in days ($3 each), but each day buys a set number of views: $3 ÷ $1 per 1,000 = 3,000. The campaign gets at most that many views each UTC day, and never more than its budget in total, so a few campaigns cannot take every ad slot for a flat fee. Views not delivered in the days bought keep running for as many days again (the make-good period). Both prices are the operator's to change (`AD_PRICE_PER_DAY_USD_CENTS`, `AD_CPM_USD_CENTS`, or Administration → Money).
 - Campaigns created before per-view pricing keep the old rule (paid per day, no view limit).
 
-- Ads play **only on videos of monetised creators** (Premium members who joined monetisation).
-- **At most 2 ads per video**: one before it, and one halfway through videos of 8 minutes or more. Never on Moments.
+- **Joining monetisation works like YouTube's Partner Programme.** A Space needs:
+  - **1,000 followers**;
+  - and either **4,000 watch hours in the last 12 months** or **10 million Moments views in the last 90 days**;
+  - no video removed in the last 90 days;
+  - and, unlike YouTube, a **Premium** membership.
+
+  Administrators can change these minimums: `MONETISE_MIN_FOLLOWERS`, `MONETISE_MIN_WATCH_HOURS`,
+  `MONETISE_MIN_MOMENT_VIEWS`. A minimum of 0 turns that requirement off.
+- Ads before and during a video play **only on videos of monetised creators**.
+- **At most 2 ads per video**: one before it, and one halfway through videos of 8 minutes or more.
+- **Ads between Moments** (like ads between Shorts): one after every 6 Moments, for viewers without Plus. Viewers skip
+  by scrolling on. Only campaigns not aimed at particular videos or Spaces play there.
 - Viewers can skip after 5 seconds. A viewer is counted once per ad and video every 30 minutes, so creators cannot inflate their share by replaying.
+
+## Valid views
+
+Only valid views and watch time count, for earnings and for joining monetisation. A view needs real playback, checked by
+the server's own clock. Views from automated browsers and scripts, and floods from one network or one account, are
+recorded as "not valid" instead. Creators see that number in their statistics. Details are in SECURITY.md, under
+"Views and watch time".
 
 ## How the ad money is shared
 
@@ -69,6 +86,13 @@ Each day, the money earned from ads that day is split **60 / 30 / 10**. For camp
 - **60% to creators**, shared between monetised creators in proportion to the ads shown on their videos that day;
 - **30% runs Free Me** (servers, video delivery, payments, support, moderation);
 - **10% reserve** (refunds, chargebacks, growth).
+
+**Ads between Moments** are paid differently, as YouTube pays for Shorts:
+- The day's ad money is first divided between videos and Moments, by how many ads were shown in each place.
+- The Moments part goes into a pool, and **45% of it goes to creators**. It is shared among monetised Premium creators
+  by their Moments views that day, whichever Moment an ad happened to follow.
+- Free Me keeps the other 55%.
+- In a creator's earnings this shows as "Moments ad earnings", separate from ad earnings on videos.
 
 The split is recorded with every entry in the creator's ledger. Earnings for a day are added the next morning; creators can request a Rwanda MTN MoMo withdrawal after account review and the configured minimum. A signed preview records the outgoing RWF rate, fee and amount to receive. The amount is reserved when requested. An administrator records the reference after sending it, or returns the balance once if it is rejected. Administration → Money contains the account review queue and a separate Flutterwave test-transfer panel.
 

@@ -18,7 +18,7 @@ export interface PassStatus {
 
 /** The Creator pass, a year at a time: after a Space's free videos, uploading needs it (Premium includes it, with no limit). */
 export function PassView() {
-  const { locale } = useShell();
+  const { locale, t } = useShell();
   const router = useRouter();
   const params = useSearchParams();
   const [plans, setPlans] = useState<Plans | null>(null);
@@ -32,9 +32,9 @@ export function PassView() {
   }, []);
   useEffect(() => { void load(); }, [load]);
   const paid = useCallback((p: Payment) => {
-    if (p.status === 'SUCCEEDED') { setNotice('Your Creator pass is active. You can upload again.'); void load(); router.refresh(); }
-    else setError(p.failureReason ?? 'The payment did not go through.');
-  }, [load, router]);
+    if (p.status === 'SUCCEEDED') { setNotice(t('pass.activeNow')); void load(); router.refresh(); }
+    else setError(p.failureReason ?? t('pay.failed'));
+  }, [load, router, t]);
   const { watching, watch } = usePaymentWatch(paid);
   useEffect(() => {
     const id = params.get('payment');
@@ -49,47 +49,47 @@ export function PassView() {
     <div className="mx-auto max-w-3xl px-4 pb-16 pt-6 sm:px-6">
       {notice && <p role="status" className="mb-4 flex items-center gap-2 rounded-2xl bg-brand-soft px-4 py-3 text-[14px] font-semibold text-brand"><Icon.CheckCircle size={20} filled />{notice}</p>}
       {error && <p role="alert" className="mb-4 rounded-2xl bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p>}
-      {watching?.status === 'PENDING' && <p role="status" className="mb-4 flex items-center gap-2 rounded-2xl bg-surface px-4 py-3 text-[14px]"><Icon.Spinner size={18} className="animate-spin" />Confirming your payment…</p>}
+      {watching?.status === 'PENDING' && <p role="status" className="mb-4 flex items-center gap-2 rounded-2xl bg-surface px-4 py-3 text-[14px]"><Icon.Spinner size={18} className="animate-spin" />{t('plans.confirming')}</p>}
 
-      <Link href="/hub" className="text-[14px] font-semibold text-brand">← Creator Hub</Link>
-      <h1 className="mt-2 font-display text-[30px] font-extrabold">Creator pass</h1>
+      <Link href="/hub" className="text-[14px] font-semibold text-brand">← {t('watch.creatorHub')}</Link>
+      <h1 className="mt-2 font-display text-[30px] font-extrabold">{t('hub.creatorPass')}</h1>
       <p className="mt-1 text-[16px] text-muted">
-        <b className="text-ink">{usd(status.usdCents, locale)}</b> a year to keep uploading after your {status.freeVideos} free {status.freeVideos === 1 ? 'video' : 'videos'}.
+        <b className="text-ink">{usd(status.usdCents, locale)}</b> {t(status.freeVideos === 1 ? 'pass.intro.one' : 'pass.intro.other', { count: status.freeVideos })}
 
       </p>
 
       <ul className="mt-4 space-y-2 text-[15px]">
-        <li className="flex gap-2"><Icon.CheckCircle size={20} className="shrink-0 text-brand" />Upload up to {status.videosPerYear ?? 50} videos a year while the pass is active. Need more? <Link href="/premium" className="font-semibold text-brand">Pro</Link> has no limit.</li>
-        <li className="flex gap-2"><Icon.CheckCircle size={20} className="shrink-0 text-brand" />Your videos stay online even if the pass ends; only new uploads need it.</li>
-        <li className="flex gap-2"><Icon.CheckCircle size={20} className="shrink-0 text-brand" />Premium includes the pass, plus the Premium badge, earnings and Live Studio. <Link href="/premium" className="font-semibold text-brand">See Premium</Link></li>
+        <li className="flex gap-2"><Icon.CheckCircle size={20} className="shrink-0 text-brand" />{t('pass.perk1', { count: status.videosPerYear ?? 50 })} <Link href="/premium" className="font-semibold text-brand">Pro</Link> {t('pass.perk1b')}</li>
+        <li className="flex gap-2"><Icon.CheckCircle size={20} className="shrink-0 text-brand" />{t('pass.perk2')}</li>
+        <li className="flex gap-2"><Icon.CheckCircle size={20} className="shrink-0 text-brand" />{t('pass.perk3')} <Link href="/premium" className="font-semibold text-brand">{t('pass.seePremium')}</Link></li>
       </ul>
 
       <section className="mt-6 rounded-3xl border border-line bg-elevated p-5 sm:p-6">
         {status.pass.active ? (
-          <p className="font-semibold">{status.pass.includedWithPremium ? 'Included with Pro, with no upload limit.' : <>Active until <b>{until?.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })}</b>. {status.passLeft ?? 0} of {status.videosPerYear ?? 50} uploads left for the last 365 days.</>}</p>
+          <p className="font-semibold">{status.pass.includedWithPremium ? t('pass.includedPro') : <>{t('pass.activeUntil')} <b>{until?.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })}</b>. {t('pass.left', { left: status.passLeft ?? 0, count: status.videosPerYear ?? 50 })}</>}</p>
         ) : status.freeLeft > 0 ? (
-          <p className="font-semibold">{status.freeLeft} of {status.freeVideos} free {status.freeVideos === 1 ? 'video' : 'videos'} left. You can buy the pass now or when they are used.</p>
+          <p className="font-semibold">{t(status.freeVideos === 1 ? 'pass.freeLeft.one' : 'pass.freeLeft.other', { left: status.freeLeft, count: status.freeVideos })}</p>
         ) : (
-          <p className="font-semibold">Your free videos are used. Get the pass to upload again.</p>
+          <p className="font-semibold">{t('pass.used')}</p>
         )}
         {!status.pass.includedWithPremium && plans.methods.length > 0 && (
           <>
-            <div role="radiogroup" aria-label="Length" className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div role="radiogroup" aria-label={t('plans.length')} className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               {status.months.map((m) => (
                 <button key={m} type="button" role="radio" aria-checked={months === m} onClick={() => setMonths(m)}
                   className={`rounded-2xl border-2 px-3 py-2.5 text-left ${months === m ? 'border-brand bg-brand-soft' : 'border-line hover:border-faint'}`}>
-                  <span className="block text-[15px] font-bold">{m / 12} {m === 12 ? 'year' : 'years'}</span>
+                  <span className="block text-[15px] font-bold">{t(m === 12 ? 'pass.year.one' : 'pass.year.other', { count: m / 12 })}</span>
                   <span className="block text-[13px] text-muted">{usd(status.usdCents * (m / 12), locale)}</span>
                 </button>
               ))}
             </div>
             <div className="mt-4">
-              <PayPanel usdCents={status.usdCents * (months / 12)} plans={plans} label={status.pass.active ? 'Extend the pass' : 'Get the Creator pass'} onPaid={paid}
+              <PayPanel usdCents={status.usdCents * (months / 12)} plans={plans} label={status.pass.active ? t('pass.extend') : t('plans.getPass')} onPaid={paid}
                 start={async (method, phone) => (await api<{ payment: Payment }>('/billing/creator-pass', { body: { method, phone, months } })).payment} />
             </div>
           </>
         )}
-        {!status.pass.includedWithPremium && plans.methods.length === 0 && <p className="mt-3 text-sm text-muted">Payments are not set up on this server yet.</p>}
+        {!status.pass.includedWithPremium && plans.methods.length === 0 && <p className="mt-3 text-sm text-muted">{t('pass.noPayments')}</p>}
       </section>
     </div>
   );

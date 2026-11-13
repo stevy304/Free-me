@@ -92,7 +92,7 @@ export class UploadsController {
       await this.limits.consume(`upload:new:${auth.user.id}`, n, 24 * 3600, `New accounts can upload up to ${n} videos a day during their first week.`);
     }
     if (!body.ad) await this.prisma.channel.update({ where: { id: channel.id }, data: { uploadCount: { increment: 1 } } });
-    const video = await this.prisma.video.create({ data: { channelId: channel.id, title, status: 'UPLOADING', visibility: body.ad ? 'UNLISTED' : 'PRIVATE', isAd: !!body.ad, sourceSizeBytes: BigInt(body.sizeBytes), uploadPartBytes: BigInt(partSize), processingStage: 'Uploading' } });
+    const video = await this.prisma.video.create({ data: { channelId: channel.id, title, safetyCheckedAt: null, status: 'UPLOADING', visibility: body.ad ? 'UNLISTED' : 'PRIVATE', isAd: !!body.ad, sourceSizeBytes: BigInt(body.sizeBytes), uploadPartBytes: BigInt(partSize), processingStage: 'Uploading' } });
     const key = sourceKey(video.id, ext);
     let uploadId: string | undefined;
     try {

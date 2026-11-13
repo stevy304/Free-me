@@ -1,4 +1,6 @@
 import { cookies, headers } from 'next/headers';
+import { cache } from 'react';
+import { LANG_COOKIE, langOf, pickLang, translator, type Lang, type T } from '@/i18n';
 import type { Viewer } from './types';
 
 const API = (process.env.API_INTERNAL_URL ?? 'http://localhost:4000').replace(/\/+$/, '');
@@ -29,19 +31,33 @@ export async function apiFetch<T>(path: string): Promise<{ ok: boolean; status: 
   return { ok: res.ok, status: res.status, data: res.ok ? body as T : null, message: !res.ok && typeof body?.message === 'string' ? body.message : null };
 }
 
-/** The visitor's language from Accept-Language, as a valid tag, so server and browser format numbers and dates alike. */
-export async function getLocale(): Promise<string> {
-  const header = (await headers()).get('accept-language') ?? '';
-  for (const part of header.split(',')) {
-    try { const tag = part.split(';')[0].trim(); if (tag && tag !== '*') return Intl.getCanonicalLocales(tag)[0]; } catch { /* skip invalid tags */ }
-  }
-  return 'en';
-}
+/** The signed-in account, or null for visitors (once per request). */
+export const getViewer = cache(async (): Promise<Viewer | null> => apiGet<Viewer>('/me'));
 
-/** The signed-in account, or null for visitors. */
-export async function getViewer(): Promise<Viewer | null> {
-  return apiGet<Viewer>('/me');
-}
+/** The interface language: the language switcher's cookie, the account's language, then Accept-Language. */
+export const getLang = cache(async (): Promise<Lang> => {
+  const [c, h, viewer] = await Promise.all([cookies(), headers(), getViewer().catch(() => null)]);
+  return pickLang(c.get(LANG_COOKIE)?.value, viewer?.profile?.preferredLanguage, h.get('accept-language') ?? '');
+});
+
+/** Translations for server components: `const t = await getT(); t('home.title')`. */
+export async function getT(): Promise<T> { return translator(await getLang()); }
+
+/**
+ * The locale for numbers and dates (same on server and browser): the visitor's Accept-Language tag when it is in the
+ * interface language ("fr-FR"), otherwise the interface language itself ("rw"), so a Kinyarwanda page shows
+ * Kinyarwanda month names.
+ */
+export const getLocale = cache(async (): Promise<string> => {
+  const [h, lang] = await Promise.all([headers(), getLang()]);
+  for (const part of (h.get('accept-language') ?? '').split(',')) {
+    try {
+      const tag = part.split(';')[0].trim();
+      if (tag && tag !== '*') { const canonical = Intl.getCanonicalLocales(tag)[0]; if (langOf(canonical) === lang && canonical.toLowerCase().split('-')[0] === lang) return canonical; }
+    } catch { /* skip invalid tags */ }
+  }
+  return lang;
+});
 
 /** The site's public origin (https://freeme.example): APP_URL when set, else the address this request came to. */
 export async function siteOrigin(): Promise<string> {

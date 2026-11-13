@@ -1,9 +1,12 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
-import { getViewer } from '@/lib/server-api';
+import { getT, getViewer } from '@/lib/server-api';
 import { PlansView } from './PlansView';
 
-export const metadata: Metadata = { title: 'Plans', description: 'Free Me plans for viewers (Free, Plus, Family & TV) and for creators (Starter, Creator pass, Pro).' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('plans.title'), description: t('meta.plansDesc') };
+}
 
 export default async function PlansPage() {
   const viewer = await getViewer();

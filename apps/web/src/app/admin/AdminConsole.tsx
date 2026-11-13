@@ -9,7 +9,9 @@ import { useShell } from '@/components/shell/ShellContext';
 import { AdminMoney } from './AdminMoney';
 import { AdminSignIn } from './AdminSignIn';
 import { AdminPlaybackHealth } from './AdminPlaybackHealth';
+import { AdminQoe } from './AdminQoe';
 import { AdminLaunch } from './AdminLaunch';
+import { AdminSecrets } from './AdminSecrets';
 
 interface UserRow { id: string; email: string; roles: Role[]; status: string; createdAt: string; lastLoginAt: string | null; displayName: string | null; channelHandle: string | null }
 interface AuditRow { id: string; action: string; entityType: string; entityId: string | null; ipAddress: string | null; createdAt: string; actorEmail: string | null; detailsJson: string | null }
@@ -18,7 +20,7 @@ const EDITABLE: Role[] = ['MODERATOR', 'ADVERTISER', 'ADMIN'];
 /** Accounts (roles, suspension) and the audit log. Every change is checked and recorded by the API. */
 export function AdminConsole({ selfId }: { selfId: string }) {
   const { locale } = useShell();
-  const [tab, setTab] = useState<'users' | 'money' | 'signin' | 'launch' | 'health' | 'audit'>('users');
+  const [tab, setTab] = useState<'users' | 'money' | 'signin' | 'launch' | 'secrets' | 'health' | 'audit'>('users');
   const [q, setQ] = useState('');
   const [users, setUsers] = useState<UserRow[] | null>(null);
   const [audit, setAudit] = useState<AuditRow[] | null>(null);
@@ -44,9 +46,9 @@ export function AdminConsole({ selfId }: { selfId: string }) {
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
       <h1 className="text-[28px] font-semibold tracking-tight">Administration</h1>
-      <nav className="mt-4 flex gap-6 overflow-x-auto whitespace-nowrap border-b border-line"><button className={tabClass(tab === 'users')} onClick={() => setTab('users')}>Accounts</button><button className={tabClass(tab === 'money')} onClick={() => setTab('money')}>Money</button><button className={tabClass(tab === 'signin')} onClick={() => setTab('signin')}>Sign-in</button><button className={tabClass(tab === 'launch')} onClick={() => setTab('launch')}>Launch</button><button className={tabClass(tab === 'health')} onClick={() => setTab('health')}>Playback Health</button><button className={tabClass(tab === 'audit')} onClick={() => setTab('audit')}>Audit log</button></nav>
+      <nav className="mt-4 flex gap-6 overflow-x-auto whitespace-nowrap border-b border-line"><button className={tabClass(tab === 'users')} onClick={() => setTab('users')}>Accounts</button><button className={tabClass(tab === 'money')} onClick={() => setTab('money')}>Money</button><button className={tabClass(tab === 'signin')} onClick={() => setTab('signin')}>Sign-in</button><button className={tabClass(tab === 'launch')} onClick={() => setTab('launch')}>Launch</button><button className={tabClass(tab === 'secrets')} onClick={() => setTab('secrets')}>Secrets</button><button className={tabClass(tab === 'health')} onClick={() => setTab('health')}>Playback Health</button><button className={tabClass(tab === 'audit')} onClick={() => setTab('audit')}>Audit log</button></nav>
       {error && <p role="alert" className="mt-4 rounded-xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
-      {tab === 'health' ? <AdminPlaybackHealth /> : tab === 'money' ? <AdminMoney /> : tab === 'signin' ? <AdminSignIn /> : tab === 'launch' ? <AdminLaunch /> : tab === 'users' ? (
+      {tab === 'health' ? <><AdminQoe /><AdminPlaybackHealth /></> : tab === 'money' ? <AdminMoney /> : tab === 'signin' ? <AdminSignIn /> : tab === 'launch' ? <AdminLaunch /> : tab === 'secrets' ? <AdminSecrets /> : tab === 'users' ? (
         <>
           <form className="mt-5 flex max-w-md items-center gap-2 rounded-full border border-line px-4" onSubmit={(e) => { e.preventDefault(); void loadUsers(q); }}>
             <Icon.Search size={18} className="text-muted" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Email, name or @handle" aria-label="Find accounts" className="h-10 flex-1 bg-transparent text-[15px] outline-none" />

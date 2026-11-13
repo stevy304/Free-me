@@ -22,7 +22,7 @@ const uptime = (startedAt: string, now: number) => {
 
 /** Watching a live stream: the picture, who is live, viewers and chat; when it ends, the replay once it is ready. */
 export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[] }) {
-  const { locale, viewer } = useShell();
+  const { locale, viewer, t } = useShell();
   const [s, setS] = useState(initial);
   const [reconnecting, setReconnecting] = useState(false);
   const room = `live:${s.id}`;
@@ -66,8 +66,8 @@ export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[
             )}
             {reconnecting && (
               <div role="status" className="pointer-events-none absolute inset-x-3 top-3 w-fit rounded-xl border border-amber-400/40 bg-[#1c170f]/95 px-4 py-3 text-sm text-amber-50">
-                <strong className="block">Host reconnecting</strong>
-                <span>Stay here. The broadcast will resume if the host reconnects.</span>
+                <strong className="block">{t('live.hostReconnecting')}</strong>
+                <span>{t('live.stayHere')}</span>
               </div>
             )}
           </div>
@@ -75,23 +75,23 @@ export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[
           <div className="grid aspect-video w-full place-items-center bg-[radial-gradient(circle_at_30%_30%,#123b38,#050a0a)] px-6 text-center text-white sm:rounded-[24px]">
             <div>
               <Avatar name={s.channel.name} src={s.channel.avatarUrl} size={72} className="mx-auto" />
-              <p className="mt-4 font-display text-[22px] font-bold">{s.status === 'ENDED' ? 'This stream has ended' : 'Starting soon'}</p>
+              <p className="mt-4 font-display text-[22px] font-bold">{s.status === 'ENDED' ? t('live.ended') : t('live.startingSoon')}</p>
               {s.status !== 'ENDED' && s.scheduledFor && <p className="mt-1 text-[15px] text-white/80" suppressHydrationWarning>{new Date(s.scheduledFor).toLocaleString(locale, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}</p>}
-              {s.status === 'ENDED' && (s.replayVideoId ? <Link href={`/watch?v=${s.replayVideoId}`} className="mt-3 inline-flex h-10 items-center gap-2 rounded-xl bg-white px-4 text-[14px] font-bold text-black"><Icon.Play size={18} />Watch the replay</Link> : <p className="mt-1 text-[14px] text-white/70">{s.channel.name} may publish the recording later.</p>)}
+              {s.status === 'ENDED' && (s.replayVideoId ? <Link href={`/watch?v=${s.replayVideoId}`} className="mt-3 inline-flex h-10 items-center gap-2 rounded-xl bg-white px-4 text-[14px] font-bold text-black"><Icon.Play size={18} />{t('live.watchReplay')}</Link> : <p className="mt-1 text-[14px] text-white/70">{t('live.mayPublish', { name: s.channel.name })}</p>)}
             </div>
           </div>
         )}
         <div className="px-4 pt-4 sm:px-0">
           <div className="flex flex-wrap items-center gap-2">
-            {live && <span className="flex items-center gap-1.5 rounded-md bg-[#e5484d] px-2 py-0.5 text-[12px] font-extrabold uppercase text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />Live</span>}
-            {live && <span className="flex items-center gap-1 text-[13px] font-semibold text-muted"><Icon.Eye size={16} />{s.viewers.toLocaleString(locale)} watching</span>}
-            {live && s.startedAt && <span className="text-[13px] text-muted" suppressHydrationWarning>· Live for {uptime(s.startedAt, now)}</span>}
+            {live && <span className="flex items-center gap-1.5 rounded-md bg-[#e5484d] px-2 py-0.5 text-[12px] font-extrabold uppercase text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />{t('live.badge')}</span>}
+            {live && <span className="flex items-center gap-1 text-[13px] font-semibold text-muted"><Icon.Eye size={16} />{t('live.watching', { count: s.viewers.toLocaleString(locale) })}</span>}
+            {live && s.startedAt && <span className="text-[13px] text-muted" suppressHydrationWarning>· {t('live.for', { time: uptime(s.startedAt, now) })}</span>}
           </div>
           <h1 className="mt-2 font-display text-[22px] font-extrabold leading-tight sm:text-[26px]">{s.title}</h1>
           <div className="mt-3 flex items-center gap-3">
             <Link href={`/@${s.channel.handle}`} className="flex min-w-0 items-center gap-3"><Avatar name={s.channel.name} src={s.channel.avatarUrl} size={44} /><span className="min-w-0"><span className="flex items-center gap-1 truncate font-semibold">{s.channel.name}{s.channel.isVerified && <VerifiedBadge size={15} />}</span><span className="block text-[13px] text-muted">@{s.channel.handle}</span></span></Link>
-            <button type="button" onClick={() => void share()} className="ml-auto flex h-10 items-center gap-2 rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover"><Icon.Share size={18} />{shared ? 'Link copied' : 'Share'}</button>
-            <Link href={`/@${s.channel.handle}`} className="flex h-10 items-center rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover">Visit Space</Link>
+            <button type="button" onClick={() => void share()} className="ml-auto flex h-10 items-center gap-2 rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover"><Icon.Share size={18} />{shared ? t('live.linkCopied') : t('live.share')}</button>
+            <Link href={`/@${s.channel.handle}`} className="flex h-10 items-center rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover">{t('live.visitSpace')}</Link>
           </div>
           {live && s.poll && <div className="mt-4"><PollCard key={s.poll.id} streamId={s.id} poll={s.poll} signedIn={!!viewer} /></div>}
           {s.description && <p className="mt-4 whitespace-pre-line rounded-2xl bg-surface p-4 text-[14px] leading-relaxed">{s.description}</p>}

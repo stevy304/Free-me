@@ -6,6 +6,7 @@ import { useState } from 'react';
 import * as Icon from '@/components/icons';
 import { useShell } from '@/components/shell/ShellContext';
 import { api } from '@/lib/client-api';
+import { topicName } from '@/i18n';
 import type { HomeFeed } from './types';
 
 /**
@@ -13,7 +14,7 @@ import type { HomeFeed } from './types';
  * (no watch-behaviour tracking) decides what appears.
  */
 export function InterestsPanel({ interests }: { interests: HomeFeed['interests'] }) {
-  const { viewer } = useShell();
+  const { viewer, t } = useShell();
   const router = useRouter();
   const [picked, setPicked] = useState(new Set(interests.filter((i) => i.picked).map((i) => i.slug)));
   const [editing, setEditing] = useState(false);
@@ -37,26 +38,26 @@ export function InterestsPanel({ interests }: { interests: HomeFeed['interests']
     <aside className="flex flex-col rounded-[20px] border border-line bg-elevated p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-[17px] font-bold">Your interests</h2>
-          <p className="mt-1 text-[13px] leading-5 text-muted">Discovery comes from your topics and followed creators. Continue watching shows your unfinished videos.</p>
+          <h2 className="text-[17px] font-bold">{t('interests.title')}</h2>
+          <p className="mt-1 text-[13px] leading-5 text-muted">{t('interests.text')}</p>
         </div>
-        {viewer && !editing && <button type="button" onClick={() => setEditing(true)} className="shrink-0 rounded-lg px-2 py-1 text-[13px] font-semibold text-brand hover:bg-brand-soft">Edit</button>}
+        {viewer && !editing && <button type="button" onClick={() => setEditing(true)} className="shrink-0 rounded-lg px-2 py-1 text-[13px] font-semibold text-brand hover:bg-brand-soft">{t('interests.edit')}</button>}
       </div>
       <div className="mt-3.5 flex flex-wrap gap-2">
         {shown.map((i) => {
           const on = picked.has(i.slug);
           const cls = `rounded-[10px] px-3 py-1.5 text-[13px] font-medium ${on ? 'bg-brand-soft font-semibold text-brand' : 'bg-surface hover:bg-surface-hover'}`;
           return editing
-            ? <button key={i.slug} type="button" aria-pressed={on} onClick={() => toggle(i.slug)} className={cls}>{on && <Icon.Check size={13} strokeWidth={3} className="-ml-0.5 mr-1 inline" />}{i.name}</button>
-            : <Link key={i.slug} href={`/explore?topic=${i.slug}`} className={cls}>{i.name}</Link>;
+            ? <button key={i.slug} type="button" aria-pressed={on} onClick={() => toggle(i.slug)} className={cls}>{on && <Icon.Check size={13} strokeWidth={3} className="-ml-0.5 mr-1 inline" />}{topicName(t, i.slug, i.name)}</button>
+            : <Link key={i.slug} href={`/explore?topic=${i.slug}`} className={cls}>{topicName(t, i.slug, i.name)}</Link>;
         })}
-        {!viewer && <Link href="/login?returnTo=/" className="rounded-[10px] bg-surface px-3 py-1.5 text-[13px] font-semibold text-brand hover:bg-surface-hover">+ Pick yours</Link>}
+        {!viewer && <Link href="/login?returnTo=/" className="rounded-[10px] bg-surface px-3 py-1.5 text-[13px] font-semibold text-brand hover:bg-surface-hover">+ {t('interests.pick')}</Link>}
       </div>
       {editing && (
         <div className="mt-3 flex items-center gap-2">
-          <span className="mr-auto text-[12px] text-muted">{picked.size}/12 picked</span>
-          <button type="button" onClick={() => { setEditing(false); setPicked(new Set(interests.filter((i) => i.picked).map((i) => i.slug))); }} className="h-9 rounded-xl px-3 text-[13px] font-semibold hover:bg-surface">Cancel</button>
-          <button type="button" onClick={save} disabled={busy} className="flex h-9 items-center gap-2 rounded-xl bg-brand px-4 text-[13px] font-semibold text-on-brand hover:bg-brand-strong disabled:opacity-60">{busy && <Icon.Spinner size={14} className="animate-spin" />}Save</button>
+          <span className="mr-auto text-[12px] text-muted">{t('interests.picked', { count: picked.size })}</span>
+          <button type="button" onClick={() => { setEditing(false); setPicked(new Set(interests.filter((i) => i.picked).map((i) => i.slug))); }} className="h-9 rounded-xl px-3 text-[13px] font-semibold hover:bg-surface">{t('interests.cancel')}</button>
+          <button type="button" onClick={save} disabled={busy} className="flex h-9 items-center gap-2 rounded-xl bg-brand px-4 text-[13px] font-semibold text-on-brand hover:bg-brand-strong disabled:opacity-60">{busy && <Icon.Spinner size={14} className="animate-spin" />}{t('interests.save')}</button>
         </div>
       )}
       {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}

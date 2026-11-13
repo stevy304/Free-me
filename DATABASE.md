@@ -10,6 +10,17 @@ PostgreSQL 16 through Prisma 6. The schema is `prisma/schema.prisma`; every chan
 | `20261106000000_video_pipeline` | Storage keys instead of URLs (`hlsMasterKey`, `thumbnailKey`, rendition `playlistKey`), processing progress, stage and error, media location (public or private prefix), thumbnail choices, size and dimensions, audience flag (`madeForKids`), upload id; feed and channel indexes |
 | `20261108000000_user_interests` | `UserInterest`: the topics a person picked for their For you home |
 | `20261107000000_engagement_and_trust` | Dislike count (private to the creator), comments switch, removal fields on videos; comment reply counts, edits and soft removal; collection kind (`SAVED` or `CUSTOM`, private by default); copyright notice and counter-notice fields, timestamp and decision on reports; video on moderation actions and the `VIDEO_RESTORED` action |
+| `20261213000000_view_quality` | `VideoDailyStat.invalidViews`: views judged not valid (automated or abusive traffic), shown to creators and never counted |
+| `20261212000000_moments_ads` | `AdImpression.placement` (`PRE_ROLL` or `MOMENTS`, indexed with `createdAt`), and on `AdDaySettlement` the Moments part of the day's ad money, the creators' 45% and what was shared out |
+| `20261211000000_comment_checks` | `Comment.checkedAt` (empty while a low-risk comment, already shown, waits for the AI's check; indexed for the worker's sweep), `Comment.removedReason` |
+| `20261210000000_ai_moderation` | `Video.safetyDecision` (publish, limit or reject), `safetyReason` (shown to the creator), `safetyModel`, `safetyLimitedAt` (by link only, out of feeds and search; indexed), `appealedAt` (one appeal per video). Keys from Administration → Secrets are stored encrypted in `AppSetting` (`secrets`) |
+| `20261209000000_safety_check` | `Video.safetyCheckedAt` (empty until the automatic safety check passes; existing videos count as checked), `Report.priority` (queue order), `SafetyTerm` (words moderators add per language and category) |
+| `20261208000000_per_title` | `Video.encodeCrf` (the per-title CRF), `VideoRendition.peakKbps` and `averageKbps` (measured, declared in the master playlist) |
+| `20261207000000_qoe_hourly` | `QoeHourly`: playback quality counted per hour, country, codec, device and connection (no viewer or video) |
+| `20261206000000_search_fulltext` | A GIN index on the full-text expression search matches (title and description), so a search never reads every video (Prisma does not model expression indexes; `migrate diff` ignores it) |
+| `20261205000000_recommendations_setting` | `Profile.personalizedRecommendations` (default on): whether For you may use what the person watches and likes |
+| `20261204000000_counter_flush` | `CounterFlush`: batches of counted views and watch time already written, recorded in the same transaction, so a batch retried after a worker crash is never added twice (rows older than a week are deleted) |
+| `20261203000000_av1_renditions` | `VideoRendition` unique on (`videoId`, `resolution`, `codec`) instead of (`videoId`, `resolution`), so a quality can exist in H.264 and AV1; `Video.av1QueuedAt` (when its AV1 renditions were queued) with an index on (`av1QueuedAt`, `viewCount`). Existing rows are all `h264` (the column's default), so nothing needs a backfill |
 | `20261130000000_live_settings` | `LiveStream` description, visibility, planned start, chat mode and slow mode, live captions switch, and replay settings (keep it, and its first visibility) |
 | `20261129000000_business_verification` | `BusinessVerification` (a business's checked details, status and badge end date) and payment purpose `VERIFICATION` |
 | `20261128000000_plans` | Payment purposes `PLUS` and `FAMILY`; `User.plusUntil`, `familyUntil`, `familyOwnerId` (Family & TV members); `VideoDailyStat.plusWatchSeconds`; subscription pool columns on `AdDaySettlement` |
@@ -36,7 +47,7 @@ Reference data: `npm run db:seed` upserts the video categories. Nothing else is 
 
 ## Content
 
-`Channel` (unique `handle`, one per user), `Video` (status, visibility, publish time, counters, processing state, media location), `VideoRendition` (one per quality: size, bitrate, codecs, playlist key), `VideoFile` (the uploaded source), `Category`, `Tag`/`VideoTag`, `Subscription` (unique per user and channel), `Like`, `Comment` (threaded), `Playlist`/`PlaylistItem`, `WatchHistory`.
+`Channel` (unique `handle`, one per user), `Video` (status, visibility, publish time, counters, processing state, media location), `VideoRendition` (one per quality and codec, H.264 or AV1: size, bitrate, codecs, playlist key), `VideoFile` (the uploaded source), `Category`, `Tag`/`VideoTag`, `Subscription` (unique per user and channel), `Like`, `Comment` (threaded), `Playlist`/`PlaylistItem`, `WatchHistory`.
 
 Only videos with `status = READY`, `visibility = PUBLIC` and a `publishedAt` appear in feeds and search. Unlisted videos open by link; private ones only for their owner.
 

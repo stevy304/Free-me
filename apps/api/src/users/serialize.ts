@@ -9,6 +9,7 @@ export const publicChannel = (c: Channel) => ({
 
 export const ownProfile = (p: Profile | null) => p && ({
   displayName: p.displayName, avatarUrl: p.avatarUrl, bio: p.bio, country: p.country, city: p.city, preferredLanguage: p.preferredLanguage, timezone: p.timezone,
+  personalizedRecommendations: p.personalizedRecommendations,
 });
 
 export const ownAccount = (u: User & { profile: Profile | null; channel: Channel | null }) => ({

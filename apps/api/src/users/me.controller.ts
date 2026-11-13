@@ -1,4 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Req } from '@nestjs/common';
+import { RedisService } from '../database/redis.service';
+import { tasteChanged } from '../recommend/profile';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { isCountryCode, isLanguageCode } from '@free-me/shared';
 import { PrismaService } from '../database/prisma.service';
@@ -15,7 +17,7 @@ const validTimeZone = (tz: string) => { try { new Intl.DateTimeFormat('en', { ti
 @Controller('me')
 @RequireAuth()
 export class MeController {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly sessions: SessionService) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly sessions: SessionService, private readonly redis: RedisService) {}
 
   @Get()
   @ApiOperation({ summary: 'The signed-in account, profile and channel' })
@@ -27,7 +29,7 @@ export class MeController {
   @Patch('profile')
   @ApiOperation({ summary: 'Update the profile' })
   async updateProfile(@CurrentAuth() auth: AuthContext, @Body() body: UpdateProfileDto, @Req() req: AppRequest) {
-    const data: Record<string, string | null> = {};
+    const data: Record<string, string | boolean | null> = {};
     if (body.displayName !== undefined) { const v = body.displayName.trim(); if (!v) throw new BadRequestException('A display name cannot be empty.'); data.displayName = v; }
     if (body.bio !== undefined) data.bio = body.bio.trim() || null;
     if (body.country !== undefined) {
@@ -43,7 +45,9 @@ export class MeController {
       if (body.timezone !== null && !validTimeZone(body.timezone)) throw new BadRequestException('Choose a time zone from the list.');
       data.timezone = body.timezone;
     }
-    await this.prisma.profile.upsert({ where: { userId: auth.user.id }, update: data, create: { userId: auth.user.id, displayName: data.displayName ?? auth.user.email.split('@')[0], ...data } });
+    if (body.personalizedRecommendations !== undefined) data.personalizedRecommendations = body.personalizedRecommendations;
+    await this.prisma.profile.upsert({ where: { userId: auth.user.id }, update: data, create: { userId: auth.user.id, displayName: (data.displayName as string | undefined) ?? auth.user.email.split('@')[0], ...data } });
+    if (body.personalizedRecommendations !== undefined) await tasteChanged(this.redis.client, auth.user.id);
     await this.audit.record({ userId: auth.user.id, action: 'PROFILE_UPDATED', entityType: 'Profile', entityId: auth.user.id, req, details: { fields: Object.keys(data) } });
     return this.me(auth);
   }
