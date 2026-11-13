@@ -21,6 +21,7 @@ import type { Storage } from './storage';
 import type { ChunkRunner } from './chunks';
 import { ViewCounter } from './views';
 import { ProgressBuffer } from './progress';
+import { fingerprintFile, saveFingerprint } from './content-id';
 
 /**
  * `transcode` makes a video playable (360p, thumbnails, seek previews); `upgrade` adds the higher qualities. Upgrades
@@ -379,6 +380,34 @@ export class MediaJobs {
    * still needs it: automatic captions were tried (when they are on), no job is running on the video (lock), and a
    * video still waiting for its HD qualities gives that up (it keeps up to 720p). Returns how many were removed.
    */
+  /**
+   * Content ID for videos published before it existed: fingerprints them from their original (while it is kept), so
+   * they are protected works too. It never claims or blocks a video that is already out. Returns how many were done.
+   */
+  async backfillFingerprints(limit = 10): Promise<number> {
+    const rows = await this.prisma.video.findMany({
+      where: { status: 'READY', publishedAt: { not: null }, sourceFileS3Key: { not: null }, contentFingerprint: null, isAd: false },
+      orderBy: { viewCount: 'desc' }, take: limit, select: { id: true, sourceFileS3Key: true },
+    });
+    let done = 0;
+    for (const v of rows) {
+      const work = await mkdtemp(join(this.config.media.scratchDir, `${v.id}-fp-`));
+      try {
+        const file = join(work, `source${extname(v.sourceFileS3Key!) || '.bin'}`);
+        await this.storage.download(v.sourceFileS3Key!, file);
+        const info = await probe(this.config.media.ffprobePath, file);
+        await saveFingerprint(this.prisma, v.id, await fingerprintFile(this.config.media.ffmpegPath, file, info.hasAudio));
+        done++;
+      } catch (e) {
+        this.log.warn(`${v.id}: no fingerprint: ${(e as Error).message.slice(0, 200)}`);
+        // Unreadable: an empty fingerprint, so it is not tried again every run.
+        await this.prisma.contentFingerprint.upsert({ where: { videoId: v.id }, create: { videoId: v.id, frames: Buffer.alloc(0), audio: Buffer.alloc(0) }, update: {} }).catch(() => undefined);
+      } finally { await rm(work, { recursive: true, force: true }).catch(() => undefined); }
+    }
+    if (done) this.log.log({ event: 'fingerprints_backfilled', count: done });
+    return done;
+  }
+
   async expireSources(limit = 100, now = new Date()): Promise<number> {
     const days = this.config.media.sourceRetentionDays;
     if (!days) return 0;

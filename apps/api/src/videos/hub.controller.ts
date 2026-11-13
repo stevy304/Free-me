@@ -55,8 +55,9 @@ export class HubController {
       language: v.language, category: v.category ? { slug: v.category.slug, name: v.category.name } : null, tags: v.tags?.map((t) => t.tag.name) ?? [],
       durationSeconds: v.durationSeconds, width: v.width, height: v.height, processingProgress: v.processingProgress, processingStage: v.processingStage,
       // The automatic safety decision (safety/ai.ts), what the creator reads, and whether they can still appeal.
-      safety: { decision: v.safetyDecision, reason: v.safetyReason, limited: !!v.safetyLimitedAt, appealedAt: v.appealedAt,
-        canAppeal: !v.appealedAt && !v.takenDownAt && (v.safetyDecision === 'reject' || v.safetyDecision === 'limit') },
+      // A block by a rights claim (Content ID) is disputed with the owner (Creator Hub → Rights), not appealed.
+      safety: { decision: v.safetyDecision, reason: v.safetyReason, limited: !!v.safetyLimitedAt, appealedAt: v.appealedAt, rightsClaim: v.safetyModel === 'content-id',
+        canAppeal: v.safetyModel !== 'content-id' && !v.appealedAt && !v.takenDownAt && (v.safetyDecision === 'reject' || v.safetyDecision === 'limit') },
       processingError: v.processingError, viewCount: v.viewCount.toString(), likeCount: v.likeCount, dislikeCount: v.dislikeCount, commentCount: v.commentCount, commentsEnabled: v.commentsEnabled,
       takenDownAt: v.takenDownAt, takedownReason: v.takedownReason,
       createdAt: v.createdAt, publishedAt: v.publishedAt, thumbnailUrl: await this.urls.thumb(v), customThumbnail: v.customThumbnail,
@@ -146,6 +147,7 @@ export class HubController {
     const v = await this.mine(auth, id);
     if (v.takenDownAt) throw new BadRequestException('A moderator removed this video; reply to the removal email to ask for a review.');
     if (v.safetyDecision !== 'reject' && v.safetyDecision !== 'limit') throw new BadRequestException('There is nothing to appeal on this video.');
+    if (v.safetyModel === 'content-id') throw new BadRequestException('This video matches someone else\'s work. Dispute the claim in Creator Hub → Rights.');
     if (v.appealedAt) throw new ConflictException('You already appealed this decision.');
     await this.prisma.video.update({ where: { id }, data: { appealedAt: new Date() } });
     await this.queue.add({ name: 'appeal', videoId: id });

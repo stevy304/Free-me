@@ -1,5 +1,6 @@
 'use client';
 
+import { HubRights } from './HubRights';
 import * as Icon from '@/components/icons';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -21,7 +22,7 @@ const VIS = { PUBLIC: ['details.public', Icon.Globe], UNLISTED: ['details.unlist
 export function HubContent({ handle }: { handle: string }) {
   const { locale, t } = useShell();
   const params = useSearchParams();
-  const [tab, setTab] = useState<'videos' | 'stats' | 'money' | 'notices'>(((t) => (t === 'notices' || t === 'stats' || t === 'money' ? t : 'videos'))(params.get('tab')));
+  const [tab, setTab] = useState<'videos' | 'stats' | 'money' | 'rights' | 'notices'>(((t) => (t === 'notices' || t === 'stats' || t === 'money' || t === 'rights' ? t : 'videos'))(params.get('tab')));
   // The Create button on phones opens the upload straight away.
   useEffect(() => { if (params.get('upload') === '1') openDialog(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const { openDialog, items } = useUploads();
@@ -66,7 +67,8 @@ export function HubContent({ handle }: { handle: string }) {
       return (
         <span className={`flex flex-col items-start gap-1 ${rejected ? 'text-danger' : 'text-accent'}`}>
           <span className="flex items-start gap-1.5"><Icon.Warning size={15} className="mt-0.5 shrink-0" /><span><b>{t(rejected ? 'hub.notPublished' : 'hub.limited')}:</b> {s.reason}</span></span>
-          {s.appealedAt ? <span className="text-muted">{t('hub.appealed')}</span>
+          {s.rightsClaim ? <Link href="/hub?tab=rights" onClick={() => setTab('rights')} className="rounded-full bg-surface px-3 py-1 text-[12px] font-semibold text-ink hover:bg-elevated">{t('upload.dispute')}</Link>
+            : s.appealedAt ? <span className="text-muted">{t('hub.appealed')}</span>
             : s.canAppeal && <button type="button" disabled={appealing === v.id} onClick={() => void appeal(v)} className="rounded-full bg-surface px-3 py-1 text-[12px] font-semibold text-ink hover:bg-elevated disabled:opacity-60">{t('hub.appeal')}</button>}
         </span>
       );
@@ -91,11 +93,11 @@ export function HubContent({ handle }: { handle: string }) {
         </p>
       )}
       <div role="tablist" className="mt-5 flex gap-1 overflow-x-auto border-b border-line [scrollbar-width:none]">
-        {([['videos', 'hub.tabVideos', Icon.Videos], ['stats', 'hub.tabStats', Icon.Trail], ['money', 'hub.tabMoney', Icon.Wallet], ['notices', 'hub.tabNotices', Icon.Shield]] as const).map(([k, l, I]) => (
+        {([['videos', 'hub.tabVideos', Icon.Videos], ['stats', 'hub.tabStats', Icon.Trail], ['money', 'hub.tabMoney', Icon.Wallet], ['rights', 'hub.tabRights', Icon.Scale], ['notices', 'hub.tabNotices', Icon.Shield]] as const).map(([k, l, I]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`-mb-px flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-[14px] font-medium ${tab === k ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'}`}><I size={18} filled={tab === k} />{t(l)}</button>
         ))}
       </div>
-      {tab === 'stats' ? <HubStats /> : tab === 'money' ? <HubMoney /> : tab === 'notices' ? <HubNotices /> : <>
+      {tab === 'stats' ? <HubStats /> : tab === 'money' ? <HubMoney /> : tab === 'rights' ? <HubRights /> : tab === 'notices' ? <HubNotices /> : <>
       {error && <p role="alert" className="mt-4 rounded-xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
       {!videos ? <Icon.Spinner className="mx-auto mt-16 animate-spin text-muted" /> : !videos.length ? (
         <div className="mx-auto mt-16 max-w-sm text-center">

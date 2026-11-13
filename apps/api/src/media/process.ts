@@ -1,3 +1,5 @@
+import { fingerprintFile } from './content-id';
+import { blockedReason, claimUpload } from '../rights/claims';
 import { Logger } from '@nestjs/common';
 import type { Prisma, PrismaClient, Video } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -260,9 +262,32 @@ export class VideoProcessor {
       return false;
     }
     const now = new Date();
+    // Content ID (rights/claims.ts): fingerprints of the picture and sound, matched against protected works. A match
+    // whose owner blocks copies stops it here, like a safety rejection: not published, the reason shown at once.
+    const rights = await this.contentId(video, source, info, signal);
+    if (rights?.blocked) {
+      await this.prisma.video.update({ where: { id: video.id }, data: { safetyDecision: 'reject', safetyReason: blockedReason(rights.blocked), safetyModel: 'content-id', safetyCheckedAt: now,
+        status: 'FLAGGED', processingStage: 'Not published', processingProgress: 0 } });
+      this.log.log({ event: 'video_blocked_by_claim', videoId: video.id, reference: rights.blocked.referenceVideoId, matched: rights.blocked.matched, seconds: rights.blocked.seconds });
+      return false;
+    }
     await this.prisma.video.update({ where: { id: video.id }, data: { ...decided, safetyCheckedAt: now, safetyLimitedAt: verdict.action === 'limit' ? now : null } });
     video.safetyCheckedAt = now;
     return true;
+  }
+
+  /** Fingerprints the upload and records claims; a failure never stops publishing (it is logged and retried by the backfill). */
+  private async contentId(video: Video, source: string, info: ProbeResult, signal?: AbortSignal) {
+    try {
+      const fp = await fingerprintFile(this.config.media.ffmpegPath, source, info.hasAudio, signal);
+      const r = await claimUpload(this.prisma, { id: video.id, channelId: video.channelId, createdAt: video.createdAt, durationSeconds: Math.round(info.durationSeconds) }, fp);
+      if (r.claims.length) this.log.log({ event: 'video_claimed', videoId: video.id, claims: r.claims.map((c) => ({ reference: c.referenceVideoId, policy: c.policy, matched: c.matched, seconds: c.seconds })) });
+      return r;
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      this.log.warn(`${video.id}: Content ID check failed: ${(e as Error).message.slice(0, 200)}`);
+      return null;
+    }
   }
 
   /** The video's per-title CRF: the one chosen before, else measured now from samples (off: PER_TITLE_ENCODING=false). */

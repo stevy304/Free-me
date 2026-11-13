@@ -141,6 +141,8 @@ async function main() {
   await maintenance.upsertJobScheduler('release-limited', { every: 3600_000 }, { name: 'release-limited' });
   // Comments shown before the AI checked them, which the API did not get to (engagement/comment-check.ts).
   await maintenance.upsertJobScheduler('comment-sweep', { every: 60_000 }, { name: 'comment-sweep' });
+  // Content ID: fingerprint videos published before it existed (a few at a time, most watched first).
+  await maintenance.upsertJobScheduler('fingerprint-backfill', { every: 10 * 60_000 }, { name: 'fingerprint-backfill' });
   await maintenance.upsertJobScheduler('qoe-flush', { every: 5 * 60_000 }, { name: 'qoe-flush' });
   await maintenance.upsertJobScheduler('hd-upgrades', { every: 60_000 }, { name: 'hd-upgrades' });
   // Recommendations: the feature store and pools every 5 minutes, related lists every 2 (the ones viewers needed first, then popular videos).
@@ -185,6 +187,7 @@ async function main() {
       }
       if (ids.length) log.log({ event: 'hd_upgrades_queued', count: ids.length });
     }
+    else if (job.name === 'fingerprint-backfill') await jobs.backfillFingerprints();
     else if (job.name === 'comment-sweep') { const r = await sweepComments(prisma, config); if (r.checked) log.log({ event: 'comments_swept', ...r }); }
     else if (job.name === 'release-limited') { const r = await jobs.releaseLimited(); if (r.released || r.hidden) log.log({ event: 'limited_videos_settled', ...r }); }
     else if (job.name === 'qoe-flush') { await qoe.flush(); await updateQoeGauges(); }

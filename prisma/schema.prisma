@@ -232,6 +232,8 @@ model Channel {
   country               String?           // ISO 3166-1 alpha-2
   defaultLanguage       String?           // BCP 47
   isVerified            Boolean           @default(false)
+  /// A rights holder an administrator checked (Content ID): may choose "earn" or "track" for its works, not only "block"
+  rightsVerifiedAt      DateTime?
   /// Why the badge shows: "PREMIUM" (removed when membership ends) or "ADMIN" (kept).
   verificationSource    String?
   supportEnabled        Boolean           @default(false)
@@ -254,6 +256,9 @@ model Channel {
   payoutAccount         PayoutAccount?
   payouts               Payout[]
   revenueRecords        RevenueLedger[]
+
+  contentReferences     ContentReference[]
+  claimsOwned           ContentClaim[]    @relation("ClaimOwner")
 
   @@index([handle])
   @@index([isVerified])
@@ -347,6 +352,10 @@ model Video {
   /// When followers were told about this video (once, the first time it is public and ready).
   announcedAt           DateTime?
   likes                 Like[]
+  contentFingerprint    ContentFingerprint?
+  contentReference      ContentReference?
+  claims                ContentClaim[]    @relation("ClaimedVideo")
+  claimsAsReference     ContentClaim[]    @relation("ClaimReference")
   comments              Comment[]
   playlistItems         PlaylistItem[]
   watchHistories        WatchHistory[]
@@ -1205,4 +1214,81 @@ model UserBlock {
 
   @@id([blockerId, blockedId])
   @@index([blockedId])
+}
+
+// -------------------------------------------------------------
+// CONTENT ID (media/content-id.ts, rights/): fingerprints of every upload's picture and sound, protected works, and
+// claims when an upload matches someone else's work.
+// -------------------------------------------------------------
+
+/// A video's fingerprints: one 64-bit picture hash per second (8 bytes each) and Chromaprint sound values (4 bytes each).
+model ContentFingerprint {
+  videoId               String            @id
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  frames                Bytes
+  audio                 Bytes
+  createdAt             DateTime          @default(now())
+}
+
+/// The search index: short keys taken from the fingerprints, and where in the video they occur.
+model FingerprintKey {
+  key                   BigInt
+  videoId               String
+  at                    Int
+
+  @@id([key, videoId, at])
+  @@index([videoId])
+}
+
+enum RightsPolicy {
+  BLOCK
+  MONETIZE
+  TRACK
+}
+
+/// How a work is protected. Published videos are protected (block) without a row; a row changes that (another policy,
+/// protection off) or makes a private video a reference work.
+model ContentReference {
+  videoId               String            @id
+  video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  channelId             String
+  channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  policy                RightsPolicy      @default(BLOCK)
+  active                Boolean           @default(true)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([channelId])
+}
+
+enum ClaimStatus {
+  ACTIVE
+  DISPUTED
+  RELEASED
+}
+
+/// An upload that matches someone else's work, and what the owner's policy does to it.
+model ContentClaim {
+  id                    String            @id @default(uuid())
+  videoId               String
+  video                 Video             @relation("ClaimedVideo", fields: [videoId], references: [id], onDelete: Cascade)
+  referenceVideoId      String
+  reference             Video             @relation("ClaimReference", fields: [referenceVideoId], references: [id], onDelete: Cascade)
+  ownerChannelId        String
+  owner                 Channel           @relation("ClaimOwner", fields: [ownerChannelId], references: [id], onDelete: Cascade)
+  policy                RightsPolicy
+  /// What matched: "picture", "sound" or "picture and sound"
+  matched               String
+  matchedSeconds        Int
+  uploadStart           Int
+  referenceStart        Int
+  status                ClaimStatus       @default(ACTIVE)
+  disputeReason         String?
+  disputedAt            DateTime?
+  resolvedAt            DateTime?
+  createdAt             DateTime          @default(now())
+
+  @@unique([videoId, referenceVideoId])
+  @@index([ownerChannelId, createdAt])
+  @@index([videoId, status])
 }

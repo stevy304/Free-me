@@ -68,6 +68,7 @@ closes as soon as it is saved. Only the names of changed keys go into the audit 
 | Pictures (frames across the video) | While it is transcoded, when an engine is configured | Held before it is ever shown |
 | No picture engine configured | While it is transcoded | First videos of new Spaces (under a week old or under 3 published videos) wait for a person (`SAFETY_UNSCANNED_REVIEW`) |
 | Videos copied from other apps, platforms or TV | While it is transcoded | Not published, and the creator is told at once on the upload screen. Decided by the marks in the file, or by the AI moderator when it sees another service's logo |
+| Copies of protected works (Content ID, RIGHTS.md) | While it is transcoded | The picture and sound are fingerprinted and matched against every published video and registered work. A copy is blocked (or, for verified rights holders who chose it, published with its ad money going to them). The uploader can dispute; the owner decides |
 | Edits to title, description, tags | Before they are saved | The video is hidden at the same moment, and a moderator is asked |
 | What is said (automatic transcript) | When captions are made, after publishing | AI: limited or hidden with a reason (appealable). Without it: hidden and a moderator is asked |
 | Comments | Before they are posted; with the AI moderator, low-risk ones (established accounts, nothing the word rules notice) are shown at once and checked by the AI within seconds | Not posted, and the writer is told why; or removed just after it was shown. Edits are checked before they are saved |
