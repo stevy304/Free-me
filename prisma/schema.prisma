@@ -482,6 +482,10 @@ model Comment {
   isPinned              Boolean           @default(false)
   editedAt              DateTime?
   deletedAt             DateTime?         // removed by its author, the creator or a moderator; kept while it has replies
+  /// Checked by the AI moderator. Empty while a low-risk comment, already shown, waits for its check (engagement/comment-check.ts).
+  checkedAt             DateTime?         @default(now())
+  /// Why the automatic check removed it (kept for the record and for moderators).
+  removedReason         String?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
@@ -494,6 +498,7 @@ model Comment {
   @@index([userId])
   @@index([videoId, parentId, createdAt])
   @@index([parentId, createdAt])
+  @@index([checkedAt])
 }
 
 model Playlist {

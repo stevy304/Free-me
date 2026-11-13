@@ -49,6 +49,15 @@ closes as soon as it is saved. Only the names of changed keys go into the audit 
   appeal.
 - **If Anthropic cannot be reached,** the built-in rules and the unscanned-video rule apply, as without the AI.
 - **Live chat** uses the built-in rules only, so it stays instant.
+- **Comments at scale** (`engagement/comment-check.ts`): waiting for the AI on every comment would slow posting and cost
+  the most of all checks, so comments are split by risk:
+  - **High risk** (the word rules noticed something, or the account is under a week old): the AI decides before the
+    comment is posted.
+  - **Low risk:** the comment is shown at once and the AI checks it right after. If it breaks the rules, it is
+    removed. The creator, or the person answered, is notified only after the check passes.
+  - If the API stops before checking a comment, the worker checks it within a few minutes.
+  - `SAFETY_AI_COMMENTS_PER_DAY` caps the AI's comment checks per day. Over the cap, low-risk comments get the word
+    rules only.
 
 ## What is checked, and when
 
@@ -60,7 +69,7 @@ closes as soon as it is saved. Only the names of changed keys go into the audit 
 | No picture engine configured | While it is transcoded | First videos of new Spaces (under a week old or under 3 published videos) wait for a person (`SAFETY_UNSCANNED_REVIEW`) |
 | Edits to title, description, tags | Before they are saved | The video is hidden at the same moment, and a moderator is asked |
 | What is said (automatic transcript) | When captions are made, after publishing | AI: limited or hidden with a reason (appealable). Without it: hidden and a moderator is asked |
-| Comments | Before they are posted | Not posted; the writer is told why |
+| Comments | Before they are posted; with the AI moderator, low-risk ones (established accounts, nothing the word rules notice) are shown at once and checked by the AI within seconds | Not posted, and the writer is told why; or removed just after it was shown. Edits are checked before they are saved |
 | Live chat | Before it reaches anyone | Not sent; the writer is told why (built-in rules only, so chat stays instant) |
 | Reports from people | Any time | Several established accounts hide the video until a moderator decides (`REPORT_HOLD_THRESHOLD`) |
 

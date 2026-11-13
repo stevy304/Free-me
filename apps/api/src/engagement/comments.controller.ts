@@ -1,6 +1,8 @@
 import { Inject, BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { APP_CONFIG, type AppConfig } from '../config/config';
 import { checkText, refusal } from '../safety/check';
+import { aiModerator } from '../safety/ai';
+import { checkCommentSoon, lowRisk, removeComment } from './comment-check';
 import { badgeOf } from '../catalog/serialize';
 import { notifyComment } from '../notifications/notify';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
@@ -50,6 +52,22 @@ export class CommentsController {
       },
       can: { edit: mine && !deleted, delete: !deleted && (mine || owner || isModerator(auth)), pin: owner && !c.parentId && !deleted },
     };
+  }
+
+  /**
+   * How a new comment is checked: 'ai' before it is posted (high risk, or no AI moderator: then the rules and any
+   * classifier decide as before); 'later' shown at once and checked by the AI just after (low risk); 'rules' low risk
+   * but over the day's AI budget (SAFETY_AI_COMMENTS_PER_DAY): the word rules alone.
+   */
+  private async howToCheck(content: string, auth: AuthContext): Promise<'ai' | 'later' | 'rules'> {
+    if (!(await aiModerator(this.prisma, this.config))) return 'ai';
+    if (!(await lowRisk(this.prisma, content, auth.user))) return 'ai';
+    const budget = this.config.safety.aiCommentsPerDay;
+    if (budget) {
+      try { await this.limits.consume(`ai:comments:${new Date().toISOString().slice(0, 10)}`, budget, 86_400); }
+      catch { return 'rules'; }
+    }
+    return 'later';
   }
 
   private async comment(id: string) {
@@ -106,8 +124,12 @@ export class CommentsController {
     const v = await watchable(this.prisma, id, auth);
     if (!v.commentsEnabled || v.madeForKids) throw new ForbiddenException('Comments are turned off for this video.');
     const content = clean(body.content);
-    // Checked before anyone sees it (safety/): over the line, it is not posted and the writer is told why.
-    const verdict = await checkText(this.prisma, this.config, content);
+    // Checked before anyone sees it (safety/): over the line, it is not posted and the writer is told why. With the AI
+    // moderator, low-risk comments are shown at once (the rules decide) and the AI checks them just after
+    // (engagement/comment-check.ts); everything else waits for the AI.
+    const how = await this.howToCheck(content, auth);
+    const later = how === 'later';
+    const verdict = await checkText(this.prisma, this.config, content, undefined, how === 'ai' ? { kind: 'comment' } : { ai: false, engine: false });
     if (verdict.hold) throw new BadRequestException(refusal(verdict, 'comment'));
     let parentId: string | null = null;
     let replyingTo: string | null = null;
@@ -119,12 +141,13 @@ export class CommentsController {
       replyingTo = p.userId; // the person answered, even inside a thread
     }
     const created = await this.prisma.$transaction(async (tx) => {
-      const c = await tx.comment.create({ data: { videoId: id, userId: auth.user.id, parentId, content }, include: AUTHOR });
+      const c = await tx.comment.create({ data: { videoId: id, userId: auth.user.id, parentId, content, checkedAt: later ? null : new Date() }, include: AUTHOR });
       await tx.video.update({ where: { id }, data: { commentCount: { increment: 1 } } });
       if (parentId) await tx.comment.update({ where: { id: parentId }, data: { replyCount: { increment: 1 } } });
       return c;
     });
-    await notifyComment(this.prisma, created, replyingTo);
+    // Notifications wait for the AI's check of a low-risk comment (sent by it), so nobody is told about one it removes.
+    if (later) checkCommentSoon(this.prisma, this.config, created.id, replyingTo); else await notifyComment(this.prisma, created, replyingTo);
     publish(room.video(id), 'comments', { videoId: id, parentId });
     return { comment: this.view(created, v, auth) };
   }
@@ -135,7 +158,11 @@ export class CommentsController {
   async edit(@Param('id', ParseUUIDPipe) id: string, @Body() body: EditCommentDto, @CurrentAuth() auth: AuthContext) {
     const c = await this.comment(id);
     if (c.userId !== auth.user.id || c.deletedAt) throw new ForbiddenException('You can only edit your own comments.');
-    const updated = await this.prisma.comment.update({ where: { id }, data: { content: clean(body.content), editedAt: new Date() }, include: AUTHOR });
+    const content = clean(body.content);
+    // An edit is checked before it is saved, like a new comment (otherwise a harmless comment could be edited into abuse).
+    const verdict = await checkText(this.prisma, this.config, content, undefined, { kind: 'comment' });
+    if (verdict.hold) throw new BadRequestException(refusal(verdict, 'comment').replace('was not posted', 'was not saved'));
+    const updated = await this.prisma.comment.update({ where: { id }, data: { content, editedAt: new Date(), checkedAt: new Date() }, include: AUTHOR });
     return { comment: this.view(updated, c.video, auth) };
   }
 
@@ -147,17 +174,7 @@ export class CommentsController {
     const c = await this.comment(id);
     if (c.deletedAt) return { removed: true };
     if (c.userId !== auth.user.id && c.video.channel.userId !== auth.user.id && !isModerator(auth)) throw new ForbiddenException('You cannot remove this comment.');
-    await this.prisma.$transaction(async (tx) => {
-      await tx.video.update({ where: { id: c.videoId }, data: { commentCount: { decrement: 1 } } });
-      // A comment with replies stays as "removed" so the thread still makes sense.
-      if (!c.parentId && c.replyCount > 0) { await tx.comment.update({ where: { id }, data: { deletedAt: new Date(), content: '', isPinned: false } }); return; }
-      await tx.comment.delete({ where: { id } });
-      if (c.parentId) {
-        const p = await tx.comment.update({ where: { id: c.parentId }, data: { replyCount: { decrement: 1 } } });
-        if (p.deletedAt && p.replyCount <= 0) await tx.comment.delete({ where: { id: p.id } });
-      }
-    });
-    publish(room.video(c.videoId), 'comments', { videoId: c.videoId });
+    await removeComment(this.prisma, c);
     return { removed: true };
   }
 

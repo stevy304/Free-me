@@ -28,6 +28,8 @@ export interface SafetyConfig {
   unscannedReview: 'new' | 'all' | 'none';
   /** For tests and proxies: where the Anthropic API is (its own address by default). */
   anthropicUrl: string | null;
+  /** Comments the AI moderator checks per day at most (0: no limit); over it, low-risk comments get the word rules only. */
+  aiCommentsPerDay: number;
 }
 
 /** Prices and payment providers (see ENVIRONMENT.md → Payments). Money is in US cents unless named otherwise. */
@@ -372,7 +374,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       newAccountDailyUploads: Math.max(1, Number(env.NEW_ACCOUNT_DAILY_UPLOADS) || 5),
       reportHoldThreshold: count('REPORT_HOLD_THRESHOLD', 5),
       engine: (['openai', 'http'].includes(env.SAFETY_ENGINE?.trim() ?? '') ? env.SAFETY_ENGINE!.trim() : env.SAFETY_SCAN_URL?.trim() ? 'http' : 'none') as SafetyConfig['engine'],
-      openaiKey: env.SAFETY_OPENAI_KEY?.trim() || null, anthropicUrl: env.SAFETY_ANTHROPIC_URL?.trim() || null, openaiUrl: env.SAFETY_OPENAI_URL?.trim() || null,
+      openaiKey: env.SAFETY_OPENAI_KEY?.trim() || null, anthropicUrl: env.SAFETY_ANTHROPIC_URL?.trim() || null, aiCommentsPerDay: Math.max(0, Number(env.SAFETY_AI_COMMENTS_PER_DAY) || 0), openaiUrl: env.SAFETY_OPENAI_URL?.trim() || null,
       unscannedReview: (['new', 'all', 'none'].includes(env.SAFETY_UNSCANNED_REVIEW?.trim() ?? '') ? env.SAFETY_UNSCANNED_REVIEW!.trim() : nodeEnv === 'test' ? 'none' : 'new') as SafetyConfig['unscannedReview'],
     },
   };

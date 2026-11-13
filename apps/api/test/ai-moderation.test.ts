@@ -8,6 +8,7 @@ import request from 'supertest';
 import { makeApp, resetDb, signIn, WEB } from './helpers';
 import { checkTranscript } from '../src/safety/check';
 import { forgetSecrets } from '../src/settings/secrets';
+import { sweepComments } from '../src/engagement/comment-check';
 import { MediaQueue } from '../src/media/queue';
 import type { MediaJobs } from '../src/media/jobs';
 
@@ -220,4 +221,50 @@ describe('AI moderator', () => {
     await request(ctx.http).get(`/api/videos/${id}`).expect(404);
     expect((await agent.get(`/api/hub/videos/${id}`)).body.video.safety).toMatchObject({ decision: 'reject', reason: 'It calls for violence against an ethnic group.', canAppeal: true });
   });
+  test('comments from established accounts are shown at once and checked just after; edits are checked before they are saved', async () => {
+    await admin();
+    const { agent: creator, id } = await upload('talk');
+    await settle(creator, id);
+    const viewer = (await signIn(ctx.http, ctx.mail, 'regular@example.com')).agent;
+    await ctx.prisma.user.update({ where: { email: 'regular@example.com' }, data: { createdAt: new Date(Date.now() - 30 * 86_400_000) } });
+    wordsToo = true;
+    answer = (_m, text) => (/idiot/.test(text) ? { decision: 'reject', category: 'harassment', confidence: 0.95, reason: 'It insults another person.' } : { decision: 'publish' });
+    const before = calls.length;
+
+    // Posted without waiting for the AI; checked right after, and removed.
+    const bad = (await viewer.post(`/api/videos/${id}/comments`).set('Origin', WEB).send({ content: 'What an idiot' }).expect(201)).body.comment;
+    const good = (await viewer.post(`/api/videos/${id}/comments`).set('Origin', WEB).send({ content: 'Lovely place, thank you' }).expect(201)).body.comment;
+    for (let i = 0; i < 100 && (await ctx.prisma.comment.count({ where: { checkedAt: null } })) > 0; i++) await new Promise((r) => setTimeout(r, 100));
+    expect(calls.length - before).toBe(2);
+    expect(await ctx.prisma.comment.findUnique({ where: { id: bad.id } })).toBeNull();
+    expect((await ctx.prisma.comment.findUniqueOrThrow({ where: { id: good.id } })).checkedAt).not.toBeNull();
+    expect((await ctx.prisma.video.findUniqueOrThrow({ where: { id } })).commentCount).toBe(1);
+    // The creator hears only about the comment that stayed.
+    const told = await ctx.prisma.notification.findMany({ where: { type: 'COMMENT', videoId: id } });
+    expect(told.map((n) => n.commentId)).toEqual([good.id]);
+
+    // An edit into an insult is refused before it is saved.
+    expect((await viewer.patch(`/api/comments/${good.id}`).set('Origin', WEB).send({ content: 'You are an idiot' }).expect(400)).body.message).toBe('Your comment was not saved: It insults another person.');
+    expect((await ctx.prisma.comment.findUniqueOrThrow({ where: { id: good.id } })).content).toBe('Lovely place, thank you');
+
+    // Comments the API did not get to (it stopped): the worker's sweep checks them.
+    const missed = await ctx.prisma.comment.create({ data: { videoId: id, userId: (await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'regular@example.com' } })).id, content: 'idiot again', checkedAt: null, createdAt: new Date(Date.now() - 5 * 60_000) } });
+    await ctx.prisma.video.update({ where: { id }, data: { commentCount: { increment: 1 } } });
+    expect(await sweepComments(ctx.prisma, ctx.config)).toEqual({ checked: 1, removed: 1 });
+    expect(await ctx.prisma.comment.findUnique({ where: { id: missed.id } })).toBeNull();
+
+    // Words the rules notice still wait for the AI (and over the day's budget, low-risk ones get the rules only).
+    const sync = calls.length;
+    const flagged = (await viewer.post(`/api/videos/${id}/comments`).set('Origin', WEB).send({ content: 'sexy dance tonight' }).expect(201)).body.comment;
+    expect(calls.length).toBe(sync + 1); // asked before posting: the AI judges what the rules noticed
+    expect(calls.at(-1)!.text).toMatch(/Automatic word checks noticed/);
+    expect((await ctx.prisma.comment.findUniqueOrThrow({ where: { id: flagged.id } })).checkedAt).not.toBeNull();
+    ctx.config.safety.aiCommentsPerDay = 1;
+    await viewer.post(`/api/videos/${id}/comments`).set('Origin', WEB).send({ content: 'Nice one' }).expect(201);
+    await viewer.post(`/api/videos/${id}/comments`).set('Origin', WEB).send({ content: 'Another nice one' }).expect(201);
+    for (let i = 0; i < 50 && (await ctx.prisma.comment.count({ where: { checkedAt: null } })) > 0; i++) await new Promise((r) => setTimeout(r, 100));
+    expect(calls.length - sync).toBe(2);
+    ctx.config.safety.aiCommentsPerDay = 0;
+  }, 60_000);
+
 });

@@ -73,6 +73,7 @@ Values for local development are in [.env.example](.env.example). In production 
 | `WHISPER_THREADS` | | `4` | CPU threads for one transcription |
 | `ANTHROPIC_API_KEY` | | | Turns on the AI moderator (Claude). Better entered in Administration → Secrets (stored encrypted, never shown again); this variable is used only when none is saved there. `SAFETY_OPENAI_KEY` and `SAFETY_SCAN_TOKEN` can be entered there too |
 | `SAFETY_ANTHROPIC_URL` | | Anthropic's API | Another address for the Messages API (a gateway, or a stand-in in tests) |
+| `SAFETY_AI_COMMENTS_PER_DAY` | | `0` (no limit) | The most low-risk comments the AI moderator checks per day. Over it they get the word rules only. Comments the rules notice, and comments from new accounts, always go to the AI |
 | `SAFETY_SCAN_URL` | | off | Optional outside matching service for uploads (e.g. a PDQ/TMK service such as Meta's Hasher-Matcher-Actioner behind a small adapter, or a vendor). Receives `POST { videoId, sha256, md5, durationSeconds, frames: [base64 JPEG] }`, answers `{ match: boolean, label? }` |
 | `SAFETY_ENGINE` | | `none` (`http` when `SAFETY_SCAN_URL` is set) | What looks at pictures (and text) beyond the built-in rules: `openai`, `http` or `none`. See TRUST_AND_SAFETY.md |
 | `SAFETY_OPENAI_KEY` | with `SAFETY_ENGINE=openai` | | OpenAI API key for its moderation model (free to use). Frames and text are sent to OpenAI |
