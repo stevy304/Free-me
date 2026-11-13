@@ -64,7 +64,7 @@ redisTest('watch time: heartbeats after the view count real time only, at most 2
   await back(30);
   expect(await counter.addWatch(video.id, 'viewer-a', 60, 600)).toBe(60); // 2x speed: 60 s of video in 30 s
   await back(10);
-  expect(await counter.addWatch(video.id, 'viewer-a', 120, 600)).toBe(22); // 10 s at 2x, plus 2 s of slack
+  expect(await counter.addWatch(video.id, 'viewer-a', 120, 600)).toBe(20); // 10 s at 2x; repeated requests cannot each claim extra slack
   // Never more than the video's length (plus a minute) per viewer.
   for (let i = 0; i < 8; i++) { await back(150); await counter.addWatch(video.id, 'viewer-a', 150, 600); }
   expect(Number(await redis.hget(`fm:beat:${video.id}:viewer-a`, 'total'))).toBe(660);

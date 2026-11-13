@@ -142,7 +142,7 @@ export class PlaybackController {
       const t = readTicket(this.config.sessionSecret, body.ticket, id, ticketHolder(auth?.user.id ?? null, userAgent(req) ?? null));
       if (!t) return { counted: false, reason: 'ticket' };
       const elapsed = (Date.now() - t.issuedAt) / 1000;
-      if (elapsed + 2 < minimum) return { counted: false, reason: 'too-soon' };
+      if (elapsed * 2 + 2 < minimum) return { counted: false, reason: 'too-soon' };
       if (!(await spendTicket(this.redis, t.nonce))) return { counted: false, reason: 'ticket-used' };
       watched = Math.min(watched, elapsed * 2 + 2); // at most double speed since playback started
       invalid = await invalidReason(this.redis, { videoId: id, userId: auth?.user.id ?? null, ip: clientIp(req) ?? null, userAgent: userAgent(req) ?? null }, this.config.views);
@@ -151,7 +151,7 @@ export class PlaybackController {
     // Watch time of Plus, Family and Premium members shares their subscription money with creators.
     const plus = !!auth && await hasPlus(this.prisma, auth.user);
     const counted = await this.views.record(id, viewer, watched, plus, invalid);
-    return invalid ? { counted: false, reason: 'invalid' } : { counted };
+    return invalid ? { counted: false, reason: 'invalid' } : { counted, ...(counted ? {} : { reason: 'duplicate' }) };
   }
 
   @Post(':id/watch')
