@@ -274,7 +274,9 @@ describe('AI moderator', () => {
     const { agent, id } = await upload('screenrec', 'Funny dance');
     const v = await settle(agent, id);
     // The moderator is told to look for other apps' watermarks in every corner.
-    expect(calls[0].system).toMatch(/Re-uploads from other apps/);
+    expect(calls[0].system).toMatch(/Videos from other apps, platforms, streaming services or TV/);
+    expect(calls[0].system).toMatch(/YouTube or YouTube Shorts.*Netflix.*TV channels/s);
+    expect(calls[0].system).toMatch(/Graphic injuries and gore.*always rejected/);
     expect(calls[0].system).toMatch(/TikTok/);
     expect(v).toMatchObject({ status: 'FLAGGED', processingStage: 'Not published' });
     expect(v.safety).toMatchObject({ decision: 'reject', reason, canAppeal: true });

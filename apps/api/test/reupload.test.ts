@@ -22,6 +22,12 @@ test('the app a video was downloaded from, by the marks in its file', async () =
   expect(madeByApp([{ aigc_info: '{"aigc_label_type":0}' }])).toBe('TikTok');
   expect(madeByApp([{ major_brand: 'isom' }, { handler_name: 'VideoHandler', vendor_id: '[0][0][0][0]' }])).toBeNull();
   expect(madeByApp([{ comment: 'My holiday in Musanze' }])).toBeNull();
+  // Download tools write the page they took it from.
+  expect(madeByApp([{ comment: 'https://www.youtube.com/watch?v=abc123' }])).toBe('YouTube');
+  expect(madeByApp([{ purl: 'https://www.instagram.com/reel/Cxyz/' }])).toBe('Instagram');
+  expect(madeByApp([{ comment: 'https://x.com/someone/status/123' }])).toBe('X');
+  expect(madeByApp([{ purl: 'https://vimeo.com/123456' }])).toBe('Vimeo');
+  expect(madeByApp([{ comment: 'https://t.me/somechannel/42' }])).toBe('Telegram');
   // Read from a real file.
   expect((await probe('ffprobe', clip('tiktok-probe.mp4', ['comment=vid:v0d044g50000cqk3abcdeflmn']))).madeBy).toBe('TikTok');
   expect((await probe('ffprobe', clip('own-probe.mp4'))).madeBy).toBeNull();

@@ -28,6 +28,7 @@ export function UploadDialog() {
   const { dialog, closeDialog, items, start, openDialog } = useUploads();
   const t = useT();
   const [drag, setDrag] = useState(false);
+  const [appealing, setAppealing] = useState(false);
   const [kind, setKind] = useState<UploadKind>(dialog.kind);
   useEffect(() => { if (dialog.open) setKind(dialog.kind); }, [dialog.open, dialog.kind]);
   // Podcasts: the cover picture, sent as soon as the upload exists (the podcast video is made from it).
@@ -52,7 +53,8 @@ export function UploadDialog() {
       const r = await api<{ video: HubVideo }>(`/hub/videos/${snap.videoId}`).catch(() => null);
       if (stop) return;
       if (r) setVideo((cur) => (cur && cur.status === r.video.status && cur.processingStage === r.video.processingStage && cur.processingError === r.video.processingError && cur.renditions.join() === r.video.renditions.join() && cur.processingProgress === r.video.processingProgress && cur.thumbnailCandidates.length === r.video.thumbnailCandidates.length && cur.thumbnailUrl === r.video.thumbnailUrl && (cur.captions?.length ?? 0) === (r.video.captions?.length ?? 0) ? cur : r.video));
-      if (!r || !['FAILED', 'SUSPENDED'].includes(r.video.status) && r.video.processingStage !== 'Ready') timer = setTimeout(tick, 2500);
+      // Stops once the video is finished, failed, or the safety check decided not to publish it.
+      if (!r || !['FAILED', 'SUSPENDED'].includes(r.video.status) && r.video.processingStage !== 'Ready' && r.video.safety?.decision !== 'reject') timer = setTimeout(tick, 2500);
     };
     void tick();
     return () => { stop = true; clearTimeout(timer); };
@@ -99,6 +101,14 @@ export function UploadDialog() {
   };
 
   const playable = video?.status === 'READY' && !!video.playbackUrl;
+  // The safety check decided not to publish it (another app's video, gore, ...): said at once, with the reason.
+  const rejected = video?.status === 'FLAGGED' && video.safety?.decision === 'reject' ? video.safety : null;
+  const appeal = async () => {
+    if (!video) return;
+    setAppealing(true);
+    try { await api(`/hub/videos/${video.id}/appeal`, { method: 'POST', body: {} }); setVideo({ ...video, safety: { ...video.safety!, appealedAt: new Date().toISOString(), canAppeal: false } }); }
+    catch { /* the Hub shows the state; nothing to add here */ } finally { setAppealing(false); }
+  };
   const phase = snap?.state === 'done' ? (playable ? 2 : 1) : 0;
   let status: React.ReactNode = null;
   if (snap) {
@@ -109,6 +119,7 @@ export function UploadDialog() {
     else if (snap.state === 'compressing') status = <span className="tabular-nums">{t('upload.compressing', { pct: Math.floor((snap.compress?.progress ?? 0) * 100), size: formatBytes(snap.compress?.originalBytes ?? snap.total) })}</span>;
     else if (snap.state !== 'done') status = <span className="tabular-nums">{snap.state === 'paused' ? t('upload.paused') : snap.state === 'finishing' ? t('upload.finishing') : snap.state === 'starting' ? t('upload.starting') : t('upload.uploadingPct', { pct })} · {t('upload.of', { sent: formatBytes(snap.sent), total: formatBytes(snap.total) })}{snap.compress?.savedBytes ? ` ${t('upload.was', { size: formatBytes(snap.compress.originalBytes) })}` : ''}{snap.state === 'uploading' && snap.bytesPerSecond ? ` · ${formatBytes(snap.bytesPerSecond)}/s · ${formatEta(snap.secondsLeft)}` : ''}</span>;
     else if (video?.status === 'FAILED') status = <span className="flex items-center gap-2 text-danger"><Icon.Warning size={16} />{video.processingError ?? t('upload.failed')}</span>;
+    else if (rejected) status = <span className="flex items-center gap-2 font-semibold text-danger"><Icon.Warning size={16} />{t('upload.notPublishedShort')}</span>;
     else if (video?.status === 'FLAGGED') status = t('upload.held');
     else if (video?.status === 'SUSPENDED') status = t('upload.unavailable');
     else if (playable && video.processingError) status = <span className="flex items-center gap-2 text-muted"><Icon.Warning size={16} />{t('upload.step3')} · {video.processingError}</span>;
@@ -161,6 +172,17 @@ export function UploadDialog() {
               </>
             )}
             <p className="mt-8 max-w-md text-[12px] leading-5 text-faint">{kind === 'podcast' ? t('upload.podcastLong') : t('upload.formats')}</p>
+          </div>
+        ) : rejected ? (
+          <div role="alert" className="m-6 flex flex-1 flex-col items-center justify-center rounded-2xl bg-danger/5 px-6 py-12 text-center">
+            <span className="grid h-16 w-16 place-items-center rounded-full bg-danger/15 text-danger"><Icon.Warning size={34} /></span>
+            <h3 className="mt-5 max-w-lg font-display text-[22px] font-bold">{t('upload.notPublishedTitle')}</h3>
+            {rejected.reason && <p className="mt-3 max-w-lg text-[15px] leading-6">{rejected.reason}</p>}
+            <p className="mt-3 max-w-lg text-[13px] text-muted">{rejected.appealedAt ? t('hub.appealed') : t('upload.notPublishedNext')}</p>
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
+              {rejected.canAppeal && <button type="button" disabled={appealing} onClick={() => void appeal()} className="h-10 rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover disabled:opacity-60">{t('hub.appeal')}</button>}
+              <button type="button" onClick={closeDialog} className="h-10 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand hover:opacity-90">{t('upload.close')}</button>
+            </div>
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col-reverse gap-6 overflow-y-auto px-6 py-6 lg:flex-row">

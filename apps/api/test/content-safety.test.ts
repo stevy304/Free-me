@@ -112,8 +112,21 @@ describe('with an AI engine looking at pictures', () => {
     await request(ctx.http).get(`/api/videos/${id}`).expect(200);
   });
 
-  test('sexual content is held before anyone sees it, first in the moderators\' queue', async () => {
-    verdict = { sexual: 0.97, violence: 0.1 };
+  test('graphic injuries the classifier is sure of are not published, at once, and the creator reads why', async () => {
+    verdict = { 'violence/graphic': 0.96 };
+    const { agent, id } = await upload('bloody');
+    const v = await settle(agent, id);
+    expect(v).toMatchObject({ status: 'FLAGGED', processingStage: 'Not published' });
+    expect(v.safety).toMatchObject({ decision: 'reject', canAppeal: true });
+    expect(v.safety.reason).toMatch(/graphic injuries, blood or gore/);
+    // Kept on record (resolved). (This stand-in classifier also scores the title as gore, so the title check opened a report too.)
+    expect(await ctx.prisma.report.findFirstOrThrow({ where: { videoId: id, status: 'RESOLVED' } })).toMatchObject({ priority: 80, details: expect.stringMatching(/^Rejected automatically/) });
+    await request(ctx.http).get(`/api/videos/${id}`).expect(404);
+    expect(existsSync(join(dir, 'storage', 'pub', id))).toBe(false);
+  });
+
+  test('sexual content over the line but not certain is held before anyone sees it, first in the moderators\' queue', async () => {
+    verdict = { sexual: 0.75, violence: 0.1 };
     const { agent, id } = await upload('flagged');
     const v = await settle(agent, id);
     expect(v.status).toBe('FLAGGED');

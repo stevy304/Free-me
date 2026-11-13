@@ -10,6 +10,11 @@ import { hdrOf, type Hdr } from './filters';
 const APP_MARKS: Array<[RegExp, string]> = [
   [/^vid:v[0-9a-z]{6,}/i, 'TikTok'], [/aigc_info|tiktok|musical\.ly|bytedance/i, 'TikTok'], [/douyin/i, 'Douyin'],
   [/\bkwai\b|kuaishou/i, 'Kwai'], [/\blikee\b/i, 'Likee'], [/snapchat/i, 'Snapchat'], [/\btriller\b/i, 'Triller'],
+  // Download tools write the page they took the video from (e.g. a "comment" or "purl" tag).
+  [/(?:youtube\.com|youtu\.be)\//i, 'YouTube'], [/instagram\.com\//i, 'Instagram'], [/(?:facebook\.com|fb\.watch)\//i, 'Facebook'], [/(?:twitter\.com|x\.com)\/\w+\/status/i, 'X'],
+  [/vimeo\.com\//i, 'Vimeo'], [/dailymotion\.com\/|dai\.ly\//i, 'Dailymotion'], [/twitch\.tv\//i, 'Twitch'], [/pinterest\.\w+\/|pin\.it\//i, 'Pinterest'],
+  [/threads\.net\//i, 'Threads'], [/(?:^|\/\/)t\.me\//i, 'Telegram'], [/snackvideo\.com\//i, 'Snack Video'], [/bigo\.tv\//i, 'Bigo Live'], [/kick\.com\//i, 'Kick'],
+  [/netflix\.com\//i, 'Netflix'], [/showmax\.com\//i, 'Showmax'],
 ];
 /** The app a downloaded video came from, by the marks in its file (container and stream tags), or null. */
 export function madeByApp(tags: Array<Record<string, unknown> | undefined>): string | null {
