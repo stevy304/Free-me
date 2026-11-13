@@ -136,6 +136,8 @@ async function main() {
   await maintenance.upsertJobScheduler('recover-stuck', { every: 5 * 60_000 }, { name: 'recover-stuck' });
   // Popularity-based encoding: videos that reached HD_MIN_VIEWS get their 1080p and above.
   // Playback quality: finished hours to the database, and the gauges the alerts read.
+  // Limited videos (AI moderator) join feeds after 3 days unless people reported them.
+  await maintenance.upsertJobScheduler('release-limited', { every: 3600_000 }, { name: 'release-limited' });
   await maintenance.upsertJobScheduler('qoe-flush', { every: 5 * 60_000 }, { name: 'qoe-flush' });
   await maintenance.upsertJobScheduler('hd-upgrades', { every: 60_000 }, { name: 'hd-upgrades' });
   // Recommendations: the feature store and pools every 5 minutes, related lists every 2 (the ones viewers needed first, then popular videos).
@@ -180,6 +182,7 @@ async function main() {
       }
       if (ids.length) log.log({ event: 'hd_upgrades_queued', count: ids.length });
     }
+    else if (job.name === 'release-limited') { const r = await jobs.releaseLimited(); if (r.released || r.hidden) log.log({ event: 'limited_videos_settled', ...r }); }
     else if (job.name === 'qoe-flush') { await qoe.flush(); await updateQoeGauges(); }
     else if (job.name === 'rec-signals') { const n = await refreshSignals(prisma, recRedis, { maxActive: config.recActiveMax }); log.log({ event: 'rec_signals_built', videos: n }); }
     else if (job.name === 'rec-related') { const n = await refreshRelated(prisma, recRedis); if (n) log.log({ event: 'rec_related_built', videos: n }); }

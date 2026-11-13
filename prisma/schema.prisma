@@ -319,6 +319,16 @@ model Video {
   /// stay off the public CDN, until it is set. Uploads and live recordings start without it; rows made any other way
   /// (seeds, before this existed) count as checked.
   safetyCheckedAt       DateTime?         @default(now())
+  /// The automatic decision (safety/ai.ts): publish, limit (watchable by its link only, kept out of feeds, search and
+  /// recommendations until it proves itself) or reject (not published; the creator sees why and can appeal).
+  safetyDecision        String?
+  /// Why, in words the creator reads; and which model decided.
+  safetyReason          String?
+  safetyModel           String?
+  /// Set while the video is limited (see safetyDecision); cleared when it is released.
+  safetyLimitedAt       DateTime?
+  /// When the creator asked for the decision to be looked at again (once per video).
+  appealedAt            DateTime?
   publishedAt           DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
@@ -352,6 +362,7 @@ model Video {
   @@index([status, visibility, isShort, publishedAt])
   @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "Video_title_trgm_idx")
   @@index([sourceSha256])
+  @@index([safetyLimitedAt])
 }
 
 model VideoRendition {

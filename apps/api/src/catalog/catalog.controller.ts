@@ -134,7 +134,7 @@ export class CatalogController {
           UNION SELECT vt."videoId" FROM "Tag" t JOIN "VideoTag" vt ON vt."tagId" = t.id WHERE t.name = ANY(${words})
         )
         SELECT v.id FROM found f JOIN "Video" v ON v.id = f.id JOIN "Channel" c ON c.id = v."channelId", q
-        WHERE v.status = 'READY' AND v.visibility = 'PUBLIC' AND v."mediaLocation" = 'PUBLIC' AND v."publishedAt" IS NOT NULL AND v."takenDownAt" IS NULL AND v."reviewHoldAt" IS NULL AND v."safetyCheckedAt" IS NOT NULL
+        WHERE v.status = 'READY' AND v.visibility = 'PUBLIC' AND v."mediaLocation" = 'PUBLIC' AND v."publishedAt" IS NOT NULL AND v."takenDownAt" IS NULL AND v."reviewHoldAt" IS NULL AND v."safetyCheckedAt" IS NOT NULL AND v."safetyLimitedAt" IS NULL
         ORDER BY (
             ts_rank(to_tsvector('simple', v.title), q.tsq) * 4
           + ts_rank(to_tsvector('simple', coalesce(v.description, '')), q.tsq)

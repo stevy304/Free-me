@@ -14,20 +14,52 @@ Code: `apps/api/src/safety/` (rules, engines, policy, checks), `apps/api/src/med
   - its files stay behind signed links, never on the public CDN, even if the creator already set it to Public.
 - The check runs **while the video is transcoded**, so a clean video is not delayed. The first playable version is
   only published once the answer is in.
-- A video that does not pass is **held**: it is not published, and it goes into the moderators' queue, most serious
-  first. A person always makes the final decision: nothing is deleted automatically, and the creator can ask for a
-  review.
+- With the **AI moderator** on (an Anthropic key in Administration → Secrets), it decides alone, with a reason the
+  creator reads: **publish**, **limit** (by link only, out of feeds, search and recommendations) or **reject** (not
+  shown). No person is needed, and every creator can appeal once.
+- Without it, a video over a line is **held** for the moderators' queue, most serious first, and a person decides.
+- Child sexual abuse material never goes to an AI: fingerprint matches and partner-scanner findings are held for a
+  person (see below).
+
+## The AI moderator (Claude)
+
+Code: `apps/api/src/safety/ai.ts`. Turned on by saving an **Anthropic API key** in **Administration → Secrets**.
+The key is checked, stored encrypted (AES-256-GCM), and never shown again, not even to administrators. The form
+closes as soon as it is saved. Only the names of changed keys go into the audit log.
+
+| Step | Model | When | Cost (about) |
+| --- | --- | --- | --- |
+| First look | Claude Haiku 5.5, low effort | Every video (frames plus title, description and tags), comment, edited title and transcript | $0.0005 a video; less for words |
+| Careful look | Claude Opus 5.5, high effort | When Haiku is unsure (confidence under 0.75), chooses "limit", or declines to answer | A few cents |
+| Appeal | Claude Opus 5.5, high effort | Once per video, when its creator asks (Creator Hub → "Ask for another look") | A few cents |
+
+- **What it reads:** the Community Guidelines and Rwanda's law on genocide ideology and divisionism, in the system
+  prompt (cached for an hour, so it is paid for once).
+  - It also weighs what the built-in word rules and any picture classifier noticed.
+  - Users' words are wrapped and marked as content to judge, never instructions to follow.
+- **Decisions:**
+  - **publish:** shown as usual.
+  - **limit:** watchable by its link, but not recommended or found in search. After 3 days it is released, unless 2 or
+    more people reported it; then it is hidden for a moderator.
+  - **reject:** not published, or hidden if it was already published (transcripts, edits). The creator sees the
+    reason in the Creator Hub and can appeal once. If the appeal is accepted, the video is published as the creator
+    chose.
+  - Each decision is kept as a resolved report, so moderators can look over the AI's work.
+- **If both models decline to look,** the content is rejected (a refusal is a strong sign), and the creator can
+  appeal.
+- **If Anthropic cannot be reached,** the built-in rules and the unscanned-video rule apply, as without the AI.
+- **Live chat** uses the built-in rules only, so it stays instant.
 
 ## What is checked, and when
 
 | What | When | If it is over the line |
 | --- | --- | --- |
 | The uploaded file's fingerprint (SHA-256, MD5) | Before anything else | Held (priority 100). Matches videos moderators removed and imported lists |
-| Title, description, tags | While it is transcoded | Held before it is ever shown |
+| Title, description, tags, and pictures with the AI moderator | While it is transcoded | AI: published, limited or rejected with a reason. Without it: held before it is ever shown |
 | Pictures (frames across the video) | While it is transcoded, when an engine is configured | Held before it is ever shown |
 | No picture engine configured | While it is transcoded | First videos of new Spaces (under a week old or under 3 published videos) wait for a person (`SAFETY_UNSCANNED_REVIEW`) |
 | Edits to title, description, tags | Before they are saved | The video is hidden at the same moment, and a moderator is asked |
-| What is said (automatic transcript) | When captions are made, after publishing | The video is hidden and a moderator is asked |
+| What is said (automatic transcript) | When captions are made, after publishing | AI: limited or hidden with a reason (appealable). Without it: hidden and a moderator is asked |
 | Comments | Before they are posted | Not posted; the writer is told why |
 | Live chat | Before it reaches anyone | Not sent; the writer is told why (built-in rules only, so chat stays instant) |
 | Reports from people | Any time | Several established accounts hide the video until a moderator decides (`REPORT_HOLD_THRESHOLD`) |
@@ -101,6 +133,7 @@ No platform builds its own detector for this, and Free Me must not try. What is 
 
 - The Community Guidelines (`/legal/guidelines`) say what is not allowed. The automatic check enforces them; it does
   not add new rules.
-- Machines make mistakes both ways. Every hold is decided by a person, and every creator can ask for a review.
+- Machines make mistakes both ways. With the AI moderator, creators can appeal every rejection or limit once, and
+  moderators can review its decisions (kept as resolved reports). Without it, every hold is decided by a person.
 - Moderators who speak Kinyarwanda, French, English and Swahili are needed from day one: they decide held videos
   and keep the term lists current.

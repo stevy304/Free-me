@@ -49,8 +49,28 @@ export function HubContent({ handle }: { handle: string }) {
     try { await api(`/hub/videos/${v.id}`, { method: 'DELETE', body: {} }); setVideos((list) => list!.filter((x) => x.id !== v.id)); } catch (e) { setError((e as Error).message); }
   };
 
+  const [appealing, setAppealing] = useState<string | null>(null);
+  const appeal = async (v: HubVideo) => {
+    if (!window.confirm(t('hub.appealConfirm'))) return;
+    setAppealing(v.id); setError(null);
+    try {
+      await api(`/hub/videos/${v.id}/appeal`, { method: 'POST', body: {} });
+      setVideos((list) => list!.map((x) => (x.id === v.id && x.safety ? { ...x, safety: { ...x.safety, appealedAt: new Date().toISOString(), canAppeal: false } } : x)));
+    } catch (e) { setError((e as Error).message); } finally { setAppealing(null); }
+  };
   const statusCell = (v: HubVideo) => {
     if (v.takenDownAt) return <button type="button" onClick={() => setTab('notices')} className="flex items-start gap-1.5 text-left text-danger hover:underline"><Icon.Warning size={15} className="mt-0.5 shrink-0" />{t('hub.removed')} {v.takedownReason === 'COPYRIGHT' ? t('hub.copyrightNotice') : t('hub.guidelines')}</button>;
+    const s = v.safety;
+    if (s && (s.decision === 'reject' || s.limited) && s.reason) {
+      const rejected = s.decision === 'reject';
+      return (
+        <span className={`flex flex-col items-start gap-1 ${rejected ? 'text-danger' : 'text-accent'}`}>
+          <span className="flex items-start gap-1.5"><Icon.Warning size={15} className="mt-0.5 shrink-0" /><span><b>{t(rejected ? 'hub.notPublished' : 'hub.limited')}:</b> {s.reason}</span></span>
+          {s.appealedAt ? <span className="text-muted">{t('hub.appealed')}</span>
+            : s.canAppeal && <button type="button" disabled={appealing === v.id} onClick={() => void appeal(v)} className="rounded-full bg-surface px-3 py-1 text-[12px] font-semibold text-ink hover:bg-elevated disabled:opacity-60">{t('hub.appeal')}</button>}
+        </span>
+      );
+    }
     if (v.status === 'FAILED') return <span className="flex items-start gap-1.5 text-danger"><Icon.Warning size={15} className="mt-0.5 shrink-0" />{v.processingError ?? t('hub.processingFailed')}</span>;
     if (v.status === 'UPLOADING') return <span className="text-muted">{t('hub.notFinished')}</span>;
     if (v.status === 'FLAGGED') return <span className="flex items-start gap-1.5 text-accent" title={t('hub.reviewTitle')}><Icon.Clock size={15} className="mt-0.5 shrink-0" />{t('hub.beingReviewed')}</span>;

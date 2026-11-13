@@ -71,6 +71,8 @@ Values for local development are in [.env.example](.env.example). In production 
 | `WHISPER_CPP_PATH`, `WHISPER_MODEL` | | off | Automatic captions on the media server: the whisper.cpp program (e.g. `/opt/whisper.cpp/build/bin/whisper-cli`) and a model file (e.g. `ggml-small.bin`). Set both or neither. See DEPLOYMENT.md → Automatic captions |
 | `AUTO_CAPTIONS_ENGLISH` | | `true` | With automatic captions: videos spoken in another language also get English captions (Whisper's translation). Use a multilingual model (not an `.en` one). `false` keeps only the spoken language |
 | `WHISPER_THREADS` | | `4` | CPU threads for one transcription |
+| `ANTHROPIC_API_KEY` | | | Turns on the AI moderator (Claude). Better entered in Administration → Secrets (stored encrypted, never shown again); this variable is used only when none is saved there. `SAFETY_OPENAI_KEY` and `SAFETY_SCAN_TOKEN` can be entered there too |
+| `SAFETY_ANTHROPIC_URL` | | Anthropic's API | Another address for the Messages API (a gateway, or a stand-in in tests) |
 | `SAFETY_SCAN_URL` | | off | Optional outside matching service for uploads (e.g. a PDQ/TMK service such as Meta's Hasher-Matcher-Actioner behind a small adapter, or a vendor). Receives `POST { videoId, sha256, md5, durationSeconds, frames: [base64 JPEG] }`, answers `{ match: boolean, label? }` |
 | `SAFETY_ENGINE` | | `none` (`http` when `SAFETY_SCAN_URL` is set) | What looks at pictures (and text) beyond the built-in rules: `openai`, `http` or `none`. See TRUST_AND_SAFETY.md |
 | `SAFETY_OPENAI_KEY` | with `SAFETY_ENGINE=openai` | | OpenAI API key for its moderation model (free to use). Frames and text are sent to OpenAI |

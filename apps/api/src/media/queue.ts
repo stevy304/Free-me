@@ -24,7 +24,7 @@ export function jobOptions(job: MediaJob) {
     ...(name === 'upgrade' ? { priority: 10 } : {}),
     // AV1 (popular videos) waits behind every upgrade; it only saves bytes, nobody is waiting for it.
     ...(name === 'av1' ? { priority: 50, deduplication: { id: `av1:${videoId}` } } : {}),
-    attempts: encoding || name === 'av1' ? 3 : 20,
+    attempts: encoding || name === 'av1' || name === 'appeal' ? 3 : 20,
     backoff: { type: 'exponential' as const, delay: encoding || name === 'av1' ? 30_000 : 5_000 },
     removeOnComplete: { age: 24 * 3600, count: 1000 },
     removeOnFail: { age: 7 * 24 * 3600 },

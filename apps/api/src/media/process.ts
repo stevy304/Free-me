@@ -11,7 +11,7 @@ import { mediaPrefix, wantedLocation } from './keys';
 import { LATE_FOLDERS } from './captions';
 import { extractSpeech } from './autocaptions';
 import { frames, hold, screen } from './screening';
-import { checkVideo } from '../safety/check';
+import { checkVideo, recordAutomatic } from '../safety/check';
 import { announceVideo } from '../notifications/notify';
 import type { Storage } from './storage';
 import { publish, room } from '../realtime/publish';
@@ -232,10 +232,18 @@ export class VideoProcessor {
     if (video.screeningClearedAt) { await this.prisma.video.update({ where: { id: video.id }, data: { safetyCheckedAt: new Date() } }); return true; }
     const verdict = await checkVideo(this.prisma, this.config, video, () => frames(this.config.media.ffmpegPath, source, info, join(work, 'safety')), signal);
     signal?.throwIfAborted();
-    this.log.log({ event: 'video_safety_checked', videoId: video.id, hold: verdict.hold, category: verdict.category, scanned: verdict.scanned, unscanned: verdict.unscanned, scores: verdict.scores });
-    if (verdict.hold) { await hold(this.prisma, video.id, verdict.reason ?? 'Held by the automatic check', verdict.priority); return false; }
-    await this.prisma.video.update({ where: { id: video.id }, data: { safetyCheckedAt: new Date() } });
-    video.safetyCheckedAt = new Date();
+    this.log.log({ event: 'video_safety_checked', videoId: video.id, action: verdict.action, model: verdict.model, category: verdict.category, scanned: verdict.scanned, unscanned: verdict.unscanned, scores: verdict.scores });
+    const decided = { safetyDecision: verdict.action === 'hold' ? null : verdict.action, safetyReason: verdict.model ? verdict.reason : null, safetyModel: verdict.model };
+    if (verdict.action === 'hold') { await hold(this.prisma, video.id, verdict.reason ?? 'Held by the automatic check', verdict.priority); return false; }
+    if (verdict.action === 'reject') {
+      // Decided by the AI alone: not published, the creator sees why and can appeal. Kept on record (resolved).
+      await this.prisma.video.update({ where: { id: video.id }, data: { ...decided, status: 'FLAGGED', processingStage: 'Not published', processingProgress: 0 } });
+      await recordAutomatic(this.prisma, video.id, `Rejected automatically by ${verdict.model}: ${verdict.reason}`, verdict.category);
+      return false;
+    }
+    const now = new Date();
+    await this.prisma.video.update({ where: { id: video.id }, data: { ...decided, safetyCheckedAt: now, safetyLimitedAt: verdict.action === 'limit' ? now : null } });
+    video.safetyCheckedAt = now;
     return true;
   }
 
