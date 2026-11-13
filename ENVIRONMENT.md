@@ -125,8 +125,9 @@ To make someone an administrator (everything, including every Premium feature su
 | `VERIFICATION_PRICE_USD_CENTS` | | `1000` ($10) | Verified business badge, per year, paid after an administrator approved the business |
 | `AD_CPM_USD_CENTS` | | `100` ($1) | Price of 1,000 ad views. A paid day buys `AD_PRICE_PER_DAY_USD_CENTS × 1000 / AD_CPM_USD_CENTS` views at most (3,000 by default); views not delivered in the days bought keep running for as many days again. Administrators can change it in the app |
 | `PAYOUT_MINIMUM_USD_CENTS` | | `1000` ($10) | Smallest withdrawal a creator can ask for |
-| `MONETISE_MIN_WATCH_HOURS` | | `0` (none) | Watch hours a Space needs in the last 12 months to join monetisation. Watch time is counted by the player's heartbeats, checked against real time |
-| `MONETISE_MIN_FOLLOWERS` | | `0` (none) | Followers a Space needs to join monetisation |
+| `MONETISE_MIN_WATCH_HOURS` | | `4000` (YouTube's) | Watch hours a Space needs in the last 12 months to join monetisation. Watch time is counted by the player's heartbeats, checked against real time |
+| `MONETISE_MIN_FOLLOWERS` | | `1000` (YouTube's) | Followers a Space needs to join monetisation |
+| `MONETISE_MIN_MOMENT_VIEWS` | | `10000000` (YouTube's 10 million Shorts views) | Moments views in the last 90 days that count instead of the watch hours. `0` turns this way in off; with both at `0`, only the followers count |
 | `MOMO_SUBSCRIPTION_KEY`, `MOMO_API_USER`, `MOMO_API_KEY` | for MTN MoMo | off | MTN MoMo **Collections** product: the primary subscription key and the API user and key from momodeveloper.mtn.com (sandbox) or the MTN partner portal (live). Set all three or none |
 | `MOMO_BASE_URL` | | `https://sandbox.momodeveloper.mtn.com` | Live: the address MTN gives you (e.g. `https://proxy.momoapi.mtn.com`) |
 | `MOMO_TARGET_ENVIRONMENT` | | `sandbox` | Live: your market, e.g. `mtnrwanda` |

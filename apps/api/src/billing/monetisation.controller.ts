@@ -43,13 +43,24 @@ export class MonetisationController {
              SUM(s."views")::bigint AS v365, SUM(s."views") FILTER (WHERE s."day" >= ${from28.toISOString().slice(0, 10)}::date)::bigint AS v28,
              SUM(s."watchSeconds") FILTER (WHERE s."day" = ${today.toISOString().slice(0, 10)}::date)::bigint AS "wToday"
       FROM "VideoDailyStat" s JOIN "Video" v ON v."id" = s."videoId" WHERE v."channelId" = ${ch.id} AND s."day" >= ${from365.toISOString().slice(0, 10)}::date`;
+    // Moments views of the last 90 days: the other way in, like Shorts views on YouTube.
+    const from90 = new Date(today.getTime() - 89 * 86_400_000);
+    const [m] = await this.prisma.$queryRaw<Array<{ v90: bigint | null }>>`
+      SELECT SUM(s."views")::bigint AS v90 FROM "VideoDailyStat" s JOIN "Video" v ON v."id" = s."videoId"
+      WHERE v."channelId" = ${ch.id} AND v."isShort" AND s."day" >= ${from90.toISOString().slice(0, 10)}::date`;
     const hours = (x: bigint | null | undefined) => Math.floor(Number(x ?? 0n) / 36) / 100; // two decimals
     const need = this.config.monetisation;
     const watchHours365 = hours(r?.w365);
+    const momentViews90 = Number(m?.v90 ?? 0n);
+    // YouTube's rule: the followers, and either the watch hours (12 months) or the Moments views (90 days). A minimum
+    // of 0 turns that way off (both 0: no audience needed).
+    const audienceOk = (!need.minWatchHours && !need.minMomentViews)
+      || (need.minWatchHours > 0 && watchHours365 >= need.minWatchHours) || (need.minMomentViews > 0 && momentViews90 >= need.minMomentViews);
     return {
       watchHours365, watchHours28: hours(r?.w28), watchHoursToday: hours(r?.wToday), views365: Number(r?.v365 ?? 0n), views28: Number(r?.v28 ?? 0n), followers: ch.subscriberCount,
-      required: { watchHours: need.minWatchHours, followers: need.minFollowers },
-      meetsRequirements: watchHours365 >= need.minWatchHours && ch.subscriberCount >= need.minFollowers,
+      momentViews90,
+      required: { watchHours: need.minWatchHours, followers: need.minFollowers, momentViews: need.minMomentViews },
+      meetsRequirements: ch.subscriberCount >= need.minFollowers && audienceOk,
     };
   }
 
@@ -94,13 +105,15 @@ export class MonetisationController {
       this.prisma.$queryRaw<Array<{ campaignId: string; campaign: string; videoId: string; video: string; impressions: bigint }>>`
         SELECT c.id AS "campaignId", c.headline AS campaign, v.id AS "videoId", v.title AS video, count(*)::bigint AS impressions
         FROM "AdImpression" i JOIN "Campaign" c ON c.id = i."campaignId" JOIN "Video" v ON v.id = i."videoId"
-        WHERE v."channelId" = ${ch.id} AND i."createdAt" >= ${day.toISOString()}::timestamp
+        WHERE i."placement" = 'PRE_ROLL' AND v."channelId" = ${ch.id} AND i."createdAt" >= ${day.toISOString()}::timestamp
         GROUP BY c.id, v.id ORDER BY impressions DESC, c.id, v.id LIMIT 20`,
     ]);
     return {
       day: day.toISOString().slice(0, 10),
-      estimatedCents: Number(estimate.shares[ch.id] ?? 0n),
+      estimatedCents: Number((estimate.shares[ch.id] ?? 0n) + (estimate.moments.shares[ch.id] ?? 0n)),
       impressions: Number(estimate.rows.find((row) => row.channelId === ch.id)?.n ?? 0n),
+      // Moments: paid from the Moments pool by today's Moments views (so far).
+      moments: { estimatedCents: Number(estimate.moments.shares[ch.id] ?? 0n), views: Number(estimate.moments.rows.find((row) => row.channelId === ch.id)?.views ?? 0n) },
       activity: activity.map((row) => ({ ...row, impressions: Number(row.impressions) })),
     };
   }
@@ -116,8 +129,12 @@ export class MonetisationController {
     if (strikes) throw new ForbiddenException('A video of yours was removed in the last 90 days. You can join once 90 days have passed since the last removal.');
     const a = await this.audience(ch);
     if (!a.meetsRequirements) {
-      const missing = [a.watchHours365 < a.required.watchHours ? `${a.required.watchHours.toLocaleString('en')} watch hours in the last 12 months (you have ${a.watchHours365.toLocaleString('en')})` : null,
-        ch.subscriberCount < a.required.followers ? `${a.required.followers.toLocaleString('en')} followers (you have ${ch.subscriberCount.toLocaleString('en')})` : null].filter(Boolean);
+      const n = (x: number) => x.toLocaleString('en');
+      const hoursNeed = a.required.watchHours > 0 ? `${n(a.required.watchHours)} watch hours in the last 12 months (you have ${n(a.watchHours365)})` : null;
+      const momentsNeed = a.required.momentViews > 0 ? `${n(a.required.momentViews)} Moments views in the last 90 days (you have ${n(a.momentViews90)})` : null;
+      const audienceShort = (hoursNeed || momentsNeed) && !(a.required.watchHours > 0 && a.watchHours365 >= a.required.watchHours) && !(a.required.momentViews > 0 && a.momentViews90 >= a.required.momentViews);
+      const missing = [audienceShort ? [hoursNeed, momentsNeed].filter(Boolean).join(' or ') : null,
+        ch.subscriberCount < a.required.followers ? `${n(a.required.followers)} followers (you have ${n(ch.subscriberCount)})` : null].filter(Boolean);
       throw new ForbiddenException(`To join, a Space needs ${missing.join(' and ')}.`);
     }
     await this.prisma.creatorEligibility.upsert({

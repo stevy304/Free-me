@@ -43,7 +43,12 @@ class VerificationDto {
 class FundsDto extends PayDto {
   @ApiProperty({ description: 'Funds to add, in US cents (at least the minimum ad budget)' }) @IsInt() @Min(100) @Max(100_000_000) usdCents!: number;
 }
-class ImpressionDto { @ApiProperty() @IsUUID() campaignId!: string; @ApiProperty() @IsUUID() videoId!: string }
+class ImpressionDto {
+  @ApiProperty() @IsUUID() campaignId!: string;
+  /** The video it played with; between Moments, the Moment just before it. */
+  @ApiProperty() @IsUUID() videoId!: string;
+  @ApiPropertyOptional({ enum: ['PRE_ROLL', 'MOMENTS'] }) @IsOptional() @IsIn(['PRE_ROLL', 'MOMENTS']) placement?: 'PRE_ROLL' | 'MOMENTS';
+}
 class AdEventDto { @ApiProperty({ enum: ['COMPLETE', 'SKIP', 'CLICK'] }) @IsIn(['COMPLETE', 'SKIP', 'CLICK']) type!: string; @ApiProperty() @IsInt() @Min(0) @Max(3_600_000) ms!: number }
 
 /** A campaign can show: running, inside its period (or its make-good period), with views left in its budget. */
@@ -262,21 +267,53 @@ export class AdsController {
     };
   }
 
+  @Get('moments/ads')
+  @ApiOperation({ summary: 'An ad to show between Moments (none for Plus members, or when no campaign can show)' })
+  async forMoments(@CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
+    if (auth && await hasPlus(this.prisma, auth.user)) return { ad: null };
+    const now = new Date();
+    const country = await this.viewerCountry(auth, req);
+    // Only campaigns not aimed at particular videos or Spaces: the Moments feed is shared by every creator (paid from a pool).
+    const candidates = await this.prisma.campaign.findMany({
+      where: { status: 'ACTIVE', startDate: { lte: now }, targetVideoIds: { isEmpty: true }, targetChannelIds: { isEmpty: true }, AND: [
+        { OR: [{ endDate: { gt: now } }, { deliverUntil: { gt: now } }] },
+        country ? { OR: [{ targetCountries: { isEmpty: true } }, { targetCountries: { has: country } }] } : { targetCountries: { isEmpty: true } },
+      ] },
+      include: { advertiser: true }, take: 50,
+    });
+    const ads = await this.prisma.video.findMany({ where: { id: { in: candidates.map((c) => c.videoId!).filter(Boolean) }, ...LINKED_VIDEO, mediaLocation: 'PUBLIC' } });
+    const byId = new Map(ads.map((a) => [a.id, a]));
+    const today = await this.redis.peek(candidates.map((c) => adDayKey(c.id, now)));
+    const usable = candidates.filter((c, i) => { const l = adViewLimits(c); return running(c, now) && (!l || today[i] < l.perDay) && c.videoId && byId.has(c.videoId); });
+    const c = usable[Math.floor(Math.random() * usable.length)];
+    if (!c) return { ad: null };
+    const a = byId.get(c.videoId!)!;
+    return { ad: { campaignId: c.id, headline: c.headline, businessName: c.advertiser.businessName, destinationUrl: c.destinationUrl, playbackUrl: this.urls.playback(a), thumbnailUrl: this.urls.publicThumb(a), durationSeconds: a.durationSeconds } };
+  }
+
   @Post('ads/impressions')
   @ApiOperation({ summary: 'An ad started playing (counted once per viewer, campaign and video every 30 minutes)' })
   async impression(@Body() body: ImpressionDto, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
     const who = auth?.user.id ?? clientIp(req) ?? 'unknown';
     await this.limits.consume(`ads:imp:${who}`, 120, 86_400, 'Too many ads today.');
     if (auth && await hasPlus(this.prisma, auth.user)) return { impressionId: null };
+    const moments = body.placement === 'MOMENTS';
     const c = await this.prisma.campaign.findUnique({ where: { id: body.campaignId } });
-    const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, isShort: false, isAd: false }, include: { channel: { include: { eligibility: true, user: true } } } });
+    const v = await this.prisma.video.findFirst({ where: { id: body.videoId, ...LINKED_VIDEO, isShort: moments, isAd: false }, include: { channel: { include: { eligibility: true, user: true } } } });
     const now = new Date();
-    if (!c || !v || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now) || c.videoId === v.id || !running(c, now)) return { impressionId: null };
-    if ((c.targetVideoIds.length || c.targetChannelIds.length) &&
-        (v.visibility !== 'PUBLIC' || (!c.targetVideoIds.includes(v.id) && !c.targetChannelIds.includes(v.channelId)))) return { impressionId: null };
+    if (!c || !v || c.videoId === v.id || !running(c, now)) return { impressionId: null };
+    if (moments) {
+      // Between Moments: any public Moment; untargeted campaigns only. Creators are paid from the Moments pool.
+      if (v.visibility !== 'PUBLIC' || c.targetVideoIds.length || c.targetChannelIds.length) return { impressionId: null };
+    } else {
+      if (!v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now)) return { impressionId: null };
+      if ((c.targetVideoIds.length || c.targetChannelIds.length) &&
+          (v.visibility !== 'PUBLIC' || (!c.targetVideoIds.includes(v.id) && !c.targetChannelIds.includes(v.channelId)))) return { impressionId: null };
+    }
     const country = await this.viewerCountry(auth, req);
     if (c.targetCountries.length && (!country || !c.targetCountries.includes(country))) return { impressionId: null };
-    const { count } = await this.redis.hit(`ads:seen:${who}:${c.id}:${v.id}`, 1800);
+    // Once per viewer and campaign every 30 minutes: per video before videos, across the whole feed between Moments.
+    const { count } = await this.redis.hit(`ads:seen:${who}:${c.id}:${moments ? 'moments' : v.id}`, 1800);
     if (count > 1) return { impressionId: null };
     // Pacing: a campaign priced per 1,000 views gets at most its share of views each day.
     const limits = adViewLimits(c);
@@ -287,7 +324,7 @@ export class AdsController {
         UPDATE "Campaign" SET "impressionsCount" = "impressionsCount" + 1, "spentAmountCents" = (("impressionsCount" + 1) * "cpmRateCents") / 1000, "updatedAt" = now()
         WHERE "id" = ${c.id} AND ("cpmRateCents" = 0 OR ("impressionsCount" + 1) * "cpmRateCents" <= "budgetAmountCents" * 1000)`;
       if (!charged) return null;
-      return tx.adImpression.create({ data: { campaignId: c.id, videoId: v.id, viewerCountry: country, watchedDurationMs: 0, currency: c.currency, costChargedCents: 0, creatorShareCents: 0, platformShareCents: 0, reinvestShareCents: 0 } });
+      return tx.adImpression.create({ data: { campaignId: c.id, videoId: v.id, placement: moments ? 'MOMENTS' : 'PRE_ROLL', viewerCountry: country, watchedDurationMs: 0, currency: c.currency, costChargedCents: 0, creatorShareCents: 0, platformShareCents: 0, reinvestShareCents: 0 } });
     });
     return { impressionId: imp?.id ?? null };
   }

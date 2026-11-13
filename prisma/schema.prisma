@@ -634,6 +634,8 @@ model AdImpression {
   completed             Boolean           @default(false)
   currency              String            // ISO 4217
   costChargedCents      Int
+  /// Where it played: before or halfway through a video (its creator's ad share), or between Moments (the Moments pool)
+  placement             AdPlacement       @default(PRE_ROLL)
   creatorShareCents     Int               // creator pool share under the split in force
   platformShareCents    Int
   reinvestShareCents    Int
@@ -644,6 +646,12 @@ model AdImpression {
   @@index([campaignId])
   @@index([videoId])
   @@index([createdAt])
+  @@index([placement, createdAt])
+}
+
+enum AdPlacement {
+  PRE_ROLL
+  MOMENTS
 }
 
 model AdEvent {
@@ -1050,6 +1058,10 @@ model AdDaySettlement {
   /// Plus and Family money of the day set aside for creators, and what was shared out (by members' watch time)
   subscriptionPoolCents BigInt            @default(0)
   subscriptionAllocatedCents BigInt       @default(0)
+  /// Ads shown between Moments: their part of the day's ad money, the creators' 45%, and what was shared out (by Moments views)
+  momentsGrossCents     BigInt            @default(0)
+  momentsPoolCents      BigInt            @default(0)
+  momentsAllocatedCents BigInt            @default(0)
   createdAt             DateTime          @default(now())
 }
 

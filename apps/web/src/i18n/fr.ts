@@ -621,6 +621,8 @@ export const fr: Partial<Record<Key, string>> = {
   'money.dailyAria': 'Gains quotidiens, {count} derniers jours',
   'money.today': 'Aujourd’hui',
   'money.hours12': 'Heures de visionnage sur les 12 derniers mois',
+  'money.momentViews90': 'Vues de Moments sur les 90 derniers jours',
+  'money.or': 'ou',
   'money.followers': 'Abonnés',
   'money.watchHours': 'Heures de visionnage',
   'money.counted': 'Comptées pendant le visionnage, vérifiées en temps réel',

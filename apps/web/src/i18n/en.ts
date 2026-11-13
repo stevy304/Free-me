@@ -633,6 +633,8 @@ export const en = {
   'money.dailyAria': 'Daily earnings, last {count} days',
   'money.today': 'Today',
   'money.hours12': 'Watch hours in the last 12 months',
+  'money.momentViews90': 'Moments views in the last 90 days',
+  'money.or': 'or',
   'money.followers': 'Followers',
   'money.watchHours': 'Watch hours',
   'money.counted': 'Counted while people watch, checked against real time',

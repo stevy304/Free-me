@@ -30,6 +30,9 @@ export function msisdn(raw: string, currency: string): string | null {
   return /^[1-9]\d{8,14}$/.test(d) ? d : null;
 }
 
+/** Creators' part of the money from ads between Moments (YouTube gives 45% of Shorts ad money). */
+export const MOMENTS_CREATOR_SHARE_BPS = 4500;
+
 export const isPremium = (u: Pick<User, 'premiumUntil'>, now = new Date()) => !!u.premiumUntil && u.premiumUntil > now;
 /** Premium features (Live Studio, monetisation): members, and administrators, who can use everything. */
 export const hasPremiumAccess = (u: Pick<User, 'premiumUntil' | 'roles'>, now = new Date()) => isPremium(u, now) || u.roles.includes('ADMIN');
@@ -482,13 +485,30 @@ export class Billing {
       const ran = Math.min(end.getTime(), c.endDate.getTime()) - Math.max(day.getTime(), c.startDate.getTime());
       if (ran > 0) gross += (BigInt(c.dailyRateCents) * BigInt(ran)) / BigInt(DAY);
     }
-    const split = splitRevenue(gross, PROPOSED_SPLIT);
+    // The day's money is divided between the two places ads play, by how many were shown in each.
+    const [placed] = await this.prisma.$queryRaw<Array<{ all: bigint; moments: bigint }>>`
+      SELECT count(*)::bigint AS all, count(*) FILTER (WHERE "placement" = 'MOMENTS')::bigint AS moments FROM "AdImpression"
+      WHERE "createdAt" >= ${day.toISOString()}::timestamp AND "createdAt" < ${end.toISOString()}::timestamp`;
+    const momentsGross = placed && placed.all > 0n ? (gross * placed.moments) / placed.all : 0n;
+    // Before and during videos: 60% to the creators whose videos the ads played with, by ads shown.
+    const split = splitRevenue(gross - momentsGross, PROPOSED_SPLIT);
     const rows = await this.prisma.$queryRaw<Array<{ channelId: string; n: bigint }>>`
       SELECT v."channelId", count(*)::bigint AS n FROM "AdImpression" i JOIN "Video" v ON v.id = i."videoId"
       JOIN "CreatorEligibility" e ON e."channelId" = v."channelId" AND e."isEligible"
-      WHERE i."createdAt" >= ${day.toISOString()}::timestamp AND i."createdAt" < ${end.toISOString()}::timestamp GROUP BY v."channelId"`;
+      WHERE i."placement" = 'PRE_ROLL' AND i."createdAt" >= ${day.toISOString()}::timestamp AND i."createdAt" < ${end.toISOString()}::timestamp GROUP BY v."channelId"`;
     const shares = allocatePool(rows.length ? split.creatorPool : 0n, Object.fromEntries(rows.map((r) => [r.channelId, r.n])));
-    return { gross, split, rows, shares };
+    // Between Moments (like Shorts on YouTube): MOMENTS_CREATOR_SHARE (45%) is shared by the monetised creators'
+    // Moments views that day, whoever's Moment the ad followed.
+    const momentsPool = (momentsGross * BigInt(MOMENTS_CREATOR_SHARE_BPS)) / 10_000n;
+    const momentRows = momentsGross > 0n ? await this.prisma.$queryRaw<Array<{ channelId: string; views: bigint }>>`
+      SELECT v."channelId", sum(s."views")::bigint AS views FROM "VideoDailyStat" s JOIN "Video" v ON v.id = s."videoId"
+      JOIN "CreatorEligibility" e ON e."channelId" = v."channelId" AND e."isEligible"
+      JOIN "Channel" ch ON ch.id = v."channelId" JOIN "User" u ON u.id = ch."userId"
+      WHERE s."day" = ${day.toISOString().slice(0, 10)}::date AND v."isShort" AND s."views" > 0
+        AND (u."premiumUntil" > ${day.toISOString()}::timestamp OR 'ADMIN' = ANY(u."roles"))
+      GROUP BY v."channelId"` : [];
+    const momentShares = allocatePool(momentRows.length ? momentsPool : 0n, Object.fromEntries(momentRows.map((r) => [r.channelId, r.views])));
+    return { gross, split, rows, shares, moments: { gross: momentsGross, pool: momentsPool, rows: momentRows, shares: momentShares } };
   }
 
   /**
@@ -521,7 +541,7 @@ export class Billing {
   }
 
   private async settleDay(day: Date) {
-    const { gross, split, rows, shares } = await this.adDayShares(day);
+    const { gross, split, rows, shares, moments } = await this.adDayShares(day);
     const subs = await this.subscriptionDayShares(day);
     const label = day.toISOString().slice(0, 10);
     await this.prisma.$transaction(async (tx) => {
@@ -529,7 +549,21 @@ export class Billing {
         day, currency: EARNINGS_CURRENCY, grossCents: gross, creatorPoolCents: split.creatorPool, allocatedCents: Object.values(shares).reduce((a, b) => a + b, 0n),
         platformCents: split.platform, reinvestCents: split.reinvestment, impressions: rows.reduce((a, r) => a + Number(r.n), 0), channels: rows.length,
         subscriptionPoolCents: subs.pool, subscriptionAllocatedCents: Object.values(subs.shares).reduce((a, b) => a + b, 0n),
+        momentsGrossCents: moments.gross, momentsPoolCents: moments.pool, momentsAllocatedCents: Object.values(moments.shares).reduce((a, b) => a + b, 0n),
       } });
+      for (const r of moments.rows) {
+        const amount = moments.shares[r.channelId] ?? 0n;
+        if (amount <= 0n) continue;
+        const bal = await tx.creatorBalance.upsert({
+          where: { channelId: r.channelId }, create: { channelId: r.channelId, currency: EARNINGS_CURRENCY, confirmedBalanceCents: amount, lifetimeEarningsCents: amount },
+          update: { confirmedBalanceCents: { increment: amount }, lifetimeEarningsCents: { increment: amount } },
+        });
+        await tx.revenueLedger.create({ data: {
+          channelId: r.channelId, sourceType: 'AD_SHARE_MOMENTS', referenceId: label, currency: EARNINGS_CURRENCY, grossAmountCents: amount, creatorShareCents: amount,
+          platformShareCents: 0n, reinvestShareCents: 0n, splitBps: `${MOMENTS_CREATOR_SHARE_BPS}/${10_000 - MOMENTS_CREATOR_SHARE_BPS}/0`,
+          balanceAfterCents: bal.confirmedBalanceCents, description: `Moments ad earnings for ${label} (${r.views} Moments ${r.views === 1n ? 'view' : 'views'})`,
+        } });
+      }
       for (const r of subs.rows) {
         const amount = subs.shares[r.channelId] ?? 0n;
         if (amount <= 0n) continue;

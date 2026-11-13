@@ -31,7 +31,8 @@ export function AnimatedMoney({ cents, locale, className = '' }: { cents: number
 
 export interface Audience {
   watchHours365: number; watchHours28: number; watchHoursToday: number; views365: number; views28: number; followers: number;
-  required: { watchHours: number; followers: number }; meetsRequirements: boolean;
+  momentViews90?: number;
+  required: { watchHours: number; followers: number; momentViews?: number }; meetsRequirements: boolean;
 }
 
 /**
@@ -84,8 +85,10 @@ export function WatchHours({ a, locale, joined }: { a: Audience; locale: string;
   const t = useT();
   const n = (x: number, digits = 0) => x.toLocaleString(locale, { maximumFractionDigits: digits, minimumFractionDigits: 0 });
   const bars: Array<[Key, number, number]> = [];
-  if (!joined && a.required.watchHours > 0) bars.push(['money.hours12', a.watchHours365, a.required.watchHours]);
+  // Like YouTube: the followers, and either the watch hours (12 months) or the Moments views (90 days).
   if (!joined && a.required.followers > 0) bars.push(['money.followers', a.followers, a.required.followers]);
+  if (!joined && a.required.watchHours > 0) bars.push(['money.hours12', a.watchHours365, a.required.watchHours]);
+  if (!joined && a.required.watchHours > 0 && (a.required.momentViews ?? 0) > 0) bars.push(['money.momentViews90', a.momentViews90 ?? 0, a.required.momentViews!]);
   return (
     <section aria-labelledby="watch-heading" className="rounded-3xl border border-line bg-elevated p-5 sm:p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -102,6 +105,7 @@ export function WatchHours({ a, locale, joined }: { a: Audience; locale: string;
           <p className="text-[14px] font-semibold">{a.meetsRequirements ? t('money.meets') : t('money.toJoin')}</p>
           {bars.map(([label, have, need]) => (
             <div key={label}>
+              {label === 'money.momentViews90' && <p className="mb-2 text-center text-[12px] font-semibold uppercase tracking-wide text-muted">{t('money.or')}</p>}
               <div className="flex justify-between text-[13px]"><span>{t(label)}</span><span className="tabular-nums text-muted">{n(have, 1)} / {n(need)}</span></div>
               <div className="mt-1 h-2 overflow-hidden rounded-full bg-surface"><div className={`h-full rounded-full ${have >= need ? 'bg-brand' : 'bg-accent'}`} style={{ width: `${Math.min(100, (have / need) * 100)}%` }} /></div>
             </div>

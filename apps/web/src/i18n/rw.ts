@@ -625,6 +625,8 @@ export const rw: Partial<Record<Key, string>> = {
   'money.dailyAria': 'Ibyinjiye buri munsi, iminsi {count} ishize',
   'money.today': 'Uyu munsi',
   'money.hours12': 'Amasaha yo kureba mu mezi 12 ashize',
+  'money.momentViews90': 'Abarebye Moments mu minsi 90 ishize',
+  'money.or': 'cyangwa',
   'money.followers': 'Abakurikira',
   'money.watchHours': 'Amasaha yo kureba',
   'money.counted': 'Abarwa abantu bareba, agenzurwa n’igihe nyacyo',
