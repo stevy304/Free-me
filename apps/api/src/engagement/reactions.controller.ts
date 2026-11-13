@@ -38,6 +38,8 @@ export class ReactionsController {
     await watchable(this.prisma, id, auth);
     const userId = auth.user.id;
     const counts = await this.prisma.$transaction(async (tx) => {
+      // Serialize all reactions for this video, including first-time reactions where no Like row exists.
+      await tx.$queryRaw`SELECT "id" FROM "Video" WHERE "id" = ${id} FOR UPDATE`;
       // Each count change matches a row that this request really removed or inserted, so racing requests cannot drift.
       const removed = await tx.$queryRaw<Array<{ isLike: boolean }>>`DELETE FROM "Like" WHERE "userId" = ${userId} AND "videoId" = ${id} RETURNING "isLike"`;
       const inserted = body.value === 'none' ? [] : await tx.$queryRaw<Array<{ isLike: boolean }>>`

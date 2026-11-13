@@ -35,9 +35,23 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   const [theater, setTheater] = useState(false);
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState(initialViewer.reaction);
+  const [views, setViews] = useState(v.viewCount);
   const [likes, setLikes] = useState(v.likeCount);
+  const reacting = useRef(false);
   // Sparks from other viewers show up at once.
   useRealtime<{ likeCount: number }>('reactions', (d) => setLikes(d.likeCount), `video:${v.id}`);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const data = await api<{ video: { viewCount: string; likeCount: number } }>(`/videos/${v.id}`);
+        if (!cancelled) { setViews(data.video.viewCount); setLikes(data.video.likeCount); }
+      } catch { /* Counts refresh on the next interval. */ }
+    };
+    const timer = setInterval(() => { void refresh(); }, 30_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [v.id]);
   const [saved, setSaved] = useState(initialViewer.saved);
   const [dialog, setDialog] = useState<null | 'save' | 'report'>(null);
   const [menu, setMenu] = useState(false);
@@ -53,12 +67,15 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   };
   const react = async (value: 'like' | 'dislike') => {
     if (!initialViewer.signedIn) { router.push(login); return; }
+    if (reacting.current) return;
+    reacting.current = true;
     const next = reaction === value ? 'none' : value;
     const before = { reaction, likes };
     // Show the change at once; the server's count replaces the guess.
     setReaction(next); setLikes(likes + (next === 'like' ? 1 : 0) - (reaction === 'like' ? 1 : 0)); setError(null);
     try { const r = await api<{ likeCount: number }>(`/videos/${v.id}/reaction`, { method: 'PUT', body: { value: next } }); setLikes(r.likeCount); }
     catch (e) { setReaction(before.reaction); setLikes(before.likes); setError((e as Error).message); }
+    finally { reacting.current = false; }
   };
   const progress = useCallback((seconds: number, ended: boolean) => {
     time.current = seconds;
@@ -153,7 +170,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
       <Link role="menuitem" href="/trail" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] hover:bg-surface"><Icon.Trail size={20} />{t('watch.yourTrail')}</Link>
     </>
   );
-  const meta = <span suppressHydrationWarning>{viewsLabel(v.viewCount, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : t('watch.notPublished')}</span>;
+  const meta = <span suppressHydrationWarning>{viewsLabel(views, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : t('watch.notPublished')}</span>;
   const tabBtn = (k: typeof tab, label: string) => <button type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`-mb-px border-b-2 px-3.5 py-2.5 text-[14px] font-semibold ${tab === k ? 'border-brand text-ink' : 'border-transparent text-muted hover:text-ink'}`}>{label}</button>;
 
   return (
@@ -203,7 +220,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
             {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#9fb0ad]">Up to {v.qualityLimit}p · <Link href="/plans" className="font-semibold text-[#2bb5ab] hover:underline">every quality and no ads with Plus</Link></p> : null}
             <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
               <p className="text-[14px] text-[#9fb0ad]" suppressHydrationWarning>
-                {viewsLabel(v.viewCount, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : t('watch.notPublished')}
+                {viewsLabel(views, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : t('watch.notPublished')}
                 {v.category && <> · <Link href={`/explore?topic=${v.category.slug}`} className="font-semibold text-[#2bb5ab] hover:underline">{v.category.name}</Link></>}
               </p>
               <div className="flex flex-wrap items-center gap-2.5">
@@ -267,7 +284,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
           <button type="button" onClick={() => openSheet('about')} className="block w-full text-left">
             <h1 className="line-clamp-2 text-[18px] font-extrabold leading-[1.25]">{v.title}</h1>
             <p className="mt-1 text-[12px] text-[#9fb0ad]" suppressHydrationWarning>
-              {viewsLabel(v.viewCount, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : t('watch.notPublished')}{v.category ? <> · <span className="text-[#2bb5ab]">#{v.category.name.replace(/\s+/g, '')}</span></> : null} <span className="font-semibold text-white">…more</span>
+              {viewsLabel(views, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : t('watch.notPublished')}{v.category ? <> · <span className="text-[#2bb5ab]">#{v.category.name.replace(/\s+/g, '')}</span></> : null} <span className="font-semibold text-white">…more</span>
             </p>
           </button>
           {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#9fb0ad]">Up to {v.qualityLimit}p · <Link href="/plans" className="font-semibold text-[#2bb5ab] hover:underline">every quality and no ads with Plus</Link></p> : null}
@@ -335,7 +352,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
                 <h2 className="text-[18px] font-bold leading-tight">{v.title}</h2>
                 <div className="mt-4 grid grid-cols-3 text-center">
                   <div><p className="text-[17px] font-bold" suppressHydrationWarning>{compactNumber(likes, locale)}</p><p className="text-[12px] text-muted">{t('watch.sparks')}</p></div>
-                  <div><p className="text-[17px] font-bold" suppressHydrationWarning>{compactNumber(v.viewCount, locale)}</p><p className="text-[12px] text-muted">{t('watch.views')}</p></div>
+                  <div><p className="text-[17px] font-bold" suppressHydrationWarning>{compactNumber(views, locale)}</p><p className="text-[12px] text-muted">{t('watch.views')}</p></div>
                   <div><p className="text-[17px] font-bold" suppressHydrationWarning>{v.publishedAt ? fullDate(v.publishedAt, locale) : '—'}</p><p className="text-[12px] text-muted">{t('watch.published')}</p></div>
                 </div>
                 {v.category && <Link href={`/explore?topic=${v.category.slug}`} className="mt-4 inline-flex rounded-full bg-surface px-3 py-1 text-[13px] font-semibold text-brand">#{v.category.name.replace(/\s+/g, '')}</Link>}
