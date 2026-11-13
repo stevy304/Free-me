@@ -6,7 +6,7 @@
  * automatically; a person always decides. Videos are held before anyone else can see them; comments and chat
  * messages over the line are refused with the reason.
  */
-export const CATEGORIES = ['sexual/minors', 'sexual', 'violence/graphic', 'violence', 'hate', 'harassment', 'self-harm', 'illicit', 'spam'] as const;
+export const CATEGORIES = ['sexual/minors', 'sexual', 'violence/graphic', 'violence', 'hate', 'harassment', 'self-harm', 'illicit', 'spam', 'reupload'] as const;
 export type Category = typeof CATEGORIES[number];
 export type Scores = Partial<Record<Category, number>>;
 
@@ -22,6 +22,9 @@ export const POLICY: Record<Category, Rule> = {
   'harassment': { hold: 0.8, priority: 40, label: 'Harassment or bullying' },
   'illicit': { hold: 0.85, priority: 40, label: 'Weapons, drugs or other illegal goods' },
   'spam': { hold: 0.9, priority: 20, label: 'Spam or scam' },
+  // Downloaded from another app (TikTok and others): its watermark or the app's marks in the file. Not published; the
+  // creator can upload their original instead, or appeal.
+  'reupload': { hold: 0.6, priority: 30, label: 'Re-uploaded from another app' },
 };
 
 export interface Decision { hold: boolean; category: Category | null; score: number; priority: number; reason: string | null; scores: Scores }

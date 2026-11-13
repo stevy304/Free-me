@@ -5,10 +5,11 @@ import * as Icon from '@/components/icons';
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MomentAd, type MomentAdData } from './MomentAd';
+import { Comments } from '@/components/engagement/Comments';
 import type Hls from 'hls.js';
 import { Avatar } from '@/components/Avatar';
 import { useShell } from '@/components/shell/ShellContext';
-import { viewsLabel } from '@/lib/format';
+import { compactNumber, viewsLabel } from '@/lib/format';
 import type { VideoCardData, VideoPage } from '@/lib/types';
 
 /** One Moment: plays when it fills the screen, pauses when scrolled away, reports a view after real watching. */
@@ -50,51 +51,90 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
     counts.current?.sample(video.currentTime, d, active && !video.paused && !video.seeking && document.visibilityState === 'visible', video.playbackRate);
   };
   const share = async () => { const url = `${location.origin}/watch?v=${v.id}`; try { if (navigator.share) await navigator.share({ title: v.title, url }); else { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1800); } } catch { /* dismissed */ } };
-  // Spark state is read the first time this Moment comes on screen.
-  const [spark, setSpark] = useState<{ on: boolean; count: number } | null>(null);
+  // Likes and dislikes (both shown on Moments) are read the first time this Moment comes on screen.
+  const [votes, setVotes] = useState<{ mine: 'like' | 'dislike' | 'none'; likes: number; dislikes: number } | null>(null);
+  const [comments, setComments] = useState<number | null>(null);
+  // The conversation opens inside the Moment: beside it on computers, as a sheet from the bottom on phones.
+  const [talk, setTalk] = useState(false);
+  useEffect(() => { if (!active) setTalk(false); }, [active]);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
-    if (!active || spark) return;
-    fetch(`/api/videos/${v.id}`).then((r) => r.ok ? r.json() : null).then((d) => d && setSpark({ on: d.viewer?.reaction === 'like', count: d.video.likeCount })).catch(() => undefined);
+    if (!active || votes) return;
+    fetch(`/api/videos/${v.id}`).then((r) => r.ok ? r.json() : null).then((d) => { if (!d) return; setVotes({ mine: d.viewer?.reaction ?? 'none', likes: d.video.likeCount, dislikes: d.video.dislikeCount ?? 0 }); setComments(d.video.commentCount ?? 0); }).catch(() => undefined);
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
-  const sparking = useRef(false);
-  const toggleSpark = async () => {
-    if (sparking.current) return;
-    if (!viewer) { window.location.href = `/login?returnTo=${encodeURIComponent('/moments')}`; return; }
-    sparking.current = true;
-    const cur = spark ?? { on: false, count: 0 };
-    const next = { on: !cur.on, count: cur.count + (cur.on ? -1 : 1) };
-    setSpark(next);
-    const r = await fetch(`/api/videos/${v.id}/reaction`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value: next.on ? 'like' : 'none' }) }).catch(() => null);
-    if (r?.ok) { const d = await r.json(); setSpark({ on: next.on, count: d.likeCount }); } else setSpark(cur);
-    sparking.current = false;
+  const signIn = () => { window.location.href = `/login?returnTo=${encodeURIComponent(`/moments#${v.id}`)}`; };
+  // One reaction at a time: a second tap waits for the first to finish (counts stay exact).
+  const voting = useRef(false);
+  const vote = async (value: 'like' | 'dislike') => {
+    if (!viewer) { signIn(); return; }
+    if (voting.current) return;
+    voting.current = true;
+    const cur = votes ?? { mine: 'none' as const, likes: 0, dislikes: 0 };
+    const mine: 'like' | 'dislike' | 'none' = cur.mine === value ? 'none' : value;
+    // Shown at once; the server's counts replace the guess.
+    const next = { mine, likes: cur.likes + (mine === 'like' ? 1 : 0) - (cur.mine === 'like' ? 1 : 0), dislikes: cur.dislikes + (mine === 'dislike' ? 1 : 0) - (cur.mine === 'dislike' ? 1 : 0) };
+    setVotes(next);
+    const at = el.current?.currentTime;
+    const r = await fetch(`/api/videos/${v.id}/reaction`, { method: 'PUT', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value: mine, ...(mine === 'like' && at !== undefined ? { at: Math.floor(at) } : {}) }) }).catch(() => null);
+    if (r?.ok) { const d = await r.json(); setVotes({ mine, likes: d.likeCount, dislikes: d.dislikeCount ?? next.dislikes }); } else setVotes(cur);
+    voting.current = false;
   };
-  const action = 'grid h-12 w-12 place-items-center rounded-2xl backdrop-blur';
+  /** Opens (or starts) a conversation with whoever posted this Moment. */
+  const message = async () => {
+    if (!viewer) { signIn(); return; }
+    window.location.href = `/messages?to=${encodeURIComponent(v.channel.handle)}`;
+  };
+  const action = 'grid h-10 w-10 place-items-center rounded-full backdrop-blur sm:h-11 sm:w-11 sm:rounded-2xl';
 
   return (
-    <section className="relative flex h-full snap-start snap-always items-center justify-center gap-4 py-3" aria-label={v.title}>
-      <div className="relative aspect-[9/16] h-full max-h-[calc(100dvh-8rem)] overflow-hidden rounded-[26px] bg-black shadow-[var(--shadow)]">
+    <section className="relative flex h-full snap-start snap-always items-center justify-center gap-4 sm:py-3" aria-label={v.title}>
+      <div className="relative h-full w-full overflow-hidden bg-black sm:aspect-[9/16] sm:w-auto sm:max-h-[calc(100dvh-6.5rem)] sm:rounded-[26px] sm:shadow-[var(--shadow)]">
         <video ref={el} loop playsInline poster={v.thumbnailUrl ?? undefined} className="h-full w-full object-cover"
           onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} onPlay={() => setPaused(false)} onPause={() => { setPaused(true); void counts.current?.flush(); }} onTimeUpdate={onTime} />
         <div className="absolute inset-x-0 top-0 flex justify-between p-3">
-          <button type="button" onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} aria-label={paused ? 'Play' : 'Pause'} className="grid h-10 w-10 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{paused ? <Icon.Play size={20} /> : <Icon.Pause size={20} />}</button>
-          <button type="button" onClick={() => setMuted(!muted)} aria-label={muted ? 'Unmute' : 'Mute'} className="grid h-10 w-10 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{muted ? <Icon.VolumeOff size={20} /> : <Icon.VolumeHigh size={20} />}</button>
+          <button type="button" onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} aria-label={paused ? 'Play' : 'Pause'} className="grid h-9 w-9 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{paused ? <Icon.Play size={20} /> : <Icon.Pause size={20} />}</button>
+          <button type="button" onClick={() => setMuted(!muted)} aria-label={muted ? 'Unmute' : 'Mute'} className="grid h-9 w-9 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{muted ? <Icon.VolumeOff size={20} /> : <Icon.VolumeHigh size={20} />}</button>
         </div>
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-4 pt-16 text-white">
-          <Link href={`/@${v.channel.handle}`} className="flex items-center gap-2 text-[14px] font-semibold"><Avatar name={v.channel.name} src={v.channel.avatarUrl} size={32} />@{v.channel.handle}</Link>
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-4 pr-16 pt-16 text-white sm:pr-4">
+          <div className="flex items-center gap-2">
+            <Link href={`/@${v.channel.handle}`} className="flex min-w-0 items-center gap-2 text-[14px] font-semibold"><Avatar name={v.channel.name} src={v.channel.avatarUrl} size={32} /><span className="truncate">@{v.channel.handle}</span></Link>
+            {viewer?.channel?.handle !== v.channel.handle && (
+              <button type="button" onClick={message} className="flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-3 text-[12.5px] font-semibold backdrop-blur hover:bg-white/25">
+                <Icon.Message size={16} />Message
+              </button>
+            )}
+          </div>
           <p className="mt-2 line-clamp-2 text-[14px]">{v.title}</p>
           <p className="mt-1 text-[12px] opacity-80" suppressHydrationWarning>{viewsLabel(v.viewCount, locale)}</p>
         </div>
         <div className="absolute inset-x-4 bottom-2 h-1 overflow-hidden rounded-full bg-white/25"><div className="h-full rounded-full bg-[#f5b95c]" style={{ width: `${progress * 100}%` }} /></div>
       </div>
       {/* Actions: beside the video on wide screens, over it on phones. */}
-      <div className="absolute bottom-24 right-5 flex flex-col items-center gap-3 text-[11px] font-semibold text-white sm:static sm:self-end sm:pb-6 sm:text-ink">
-        <button type="button" onClick={toggleSpark} aria-pressed={!!spark?.on} aria-label="Spark" className={`${action} ${spark?.on ? 'bg-accent-soft text-accent' : 'bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover'}`}><Icon.Spark size={24} filled={!!spark?.on} /></button>
-        <span suppressHydrationWarning>{spark ? spark.count : ''}</span>
-        <Link href={`/watch?v=${v.id}`} aria-label="Conversation" className={`${action} bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover`}><Icon.Comment size={22} /></Link>
-        <button type="button" onClick={share} aria-label="Pass along" className={`${action} bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover`}><Icon.PassAlong size={22} /></button>
+      <div className="absolute bottom-20 right-2.5 flex flex-col items-center gap-1 text-[11px] [text-shadow:0_1px_3px_rgb(0_0_0/0.6)] font-semibold text-white sm:static sm:gap-3 sm:self-end sm:pb-6 sm:text-ink">
+        {/* Who posted it: their Space. */}
+        <Link href={`/@${v.channel.handle}`} aria-label={`${v.channel.name}'s Space`} title={v.channel.name} className="relative mb-2 rounded-full ring-2 ring-white shadow-[0_4px_14px_rgb(0_0_0/0.35)] transition-transform hover:scale-105 sm:ring-[#2bb5ab]">
+          <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={38} />
+          <span aria-hidden className="absolute -bottom-1.5 left-1/2 grid h-4 w-4 -translate-x-1/2 place-items-center rounded-full bg-[#2bb5ab] text-[#04201e]"><Icon.Play size={9} /></span>
+        </Link>
+        <button type="button" onClick={() => vote('like')} aria-pressed={votes?.mine === 'like'} aria-label={`Like (${votes?.likes ?? 0})`} className={`${action} ${votes?.mine === 'like' ? 'bg-[#e8505b] text-white' : 'bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover'}`}><Icon.Like size={19} filled={votes?.mine === 'like'} /></button>
+        <span suppressHydrationWarning>{votes ? compactNumber(votes.likes, locale) : ''}</span>
+        <button type="button" onClick={() => vote('dislike')} aria-pressed={votes?.mine === 'dislike'} aria-label={`Dislike (${votes?.dislikes ?? 0})`} className={`${action} ${votes?.mine === 'dislike' ? 'bg-[#5b6b8a] text-white' : 'bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover'}`}><Icon.Dislike size={19} filled={votes?.mine === 'dislike'} /></button>
+        <span suppressHydrationWarning>{votes ? compactNumber(votes.dislikes, locale) : ''}</span>
+        <button type="button" onClick={() => setTalk((x) => !x)} aria-expanded={talk} aria-label={`Comments (${comments ?? 0})`} className={`${action} ${talk ? 'bg-[#2bb5ab] text-[#04201e]' : 'bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover'}`}><Icon.Comment size={19} filled={talk} /></button>
+        <span suppressHydrationWarning>{comments !== null ? compactNumber(comments, locale) : ''}</span>
+        <button type="button" onClick={share} aria-label="Pass along" className={`${action} bg-[rgb(16_32_31/0.55)] text-white sm:bg-surface sm:text-ink sm:hover:bg-surface-hover`}><Icon.PassAlong size={19} /></button>
         <span>{copied ? 'Copied' : 'Pass'}</span>
       </div>
+      {talk && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/50 sm:hidden" onClick={() => setTalk(false)} />
+          <aside aria-label="Comments" className="fixed inset-x-0 bottom-0 z-50 h-[72dvh] rounded-t-[26px] bg-[#0f1817] p-5 pt-3 text-white sm:pt-5 shadow-[0_-12px_40px_rgb(0_0_0/0.45)] sm:static sm:z-auto sm:h-full sm:max-h-[calc(100dvh-8rem)] sm:w-[380px] sm:shrink-0 sm:rounded-[26px] sm:shadow-[0_0_0_1px_rgb(43_181_171/0.3),0_0_28px_rgb(43_181_171/0.12)]">
+            <button type="button" onClick={() => setTalk(false)} aria-label="Close comments" className="absolute right-3 top-2 z-10 grid h-8 w-8 place-items-center rounded-full bg-white/10 hover:bg-white/20 sm:hidden"><Icon.Close size={18} /></button>
+            <div className="mx-auto mb-7 mt-1 h-1.5 w-10 rounded-full bg-white/25 sm:hidden" aria-hidden />
+            <div className="h-[calc(100%-2.75rem)] sm:h-full"><Comments videoId={v.id} initialCount={comments ?? 0} variant="card" /></div>
+          </aside>
+        </>
+      )}
     </section>
   );
 }

@@ -67,11 +67,43 @@ closes as soon as it is saved. Only the names of changed keys go into the audit 
 | Title, description, tags, and pictures with the AI moderator | While it is transcoded | AI: published, limited or rejected with a reason. Without it: held before it is ever shown |
 | Pictures (frames across the video) | While it is transcoded, when an engine is configured | Held before it is ever shown |
 | No picture engine configured | While it is transcoded | First videos of new Spaces (under a week old or under 3 published videos) wait for a person (`SAFETY_UNSCANNED_REVIEW`) |
+| Videos copied from other apps, platforms or TV | While it is transcoded | Not published, and the creator is told at once on the upload screen. Decided by the marks in the file, or by the AI moderator when it sees another service's logo |
 | Edits to title, description, tags | Before they are saved | The video is hidden at the same moment, and a moderator is asked |
 | What is said (automatic transcript) | When captions are made, after publishing | AI: limited or hidden with a reason (appealable). Without it: hidden and a moderator is asked |
 | Comments | Before they are posted; with the AI moderator, low-risk ones (established accounts, nothing the word rules notice) are shown at once and checked by the AI within seconds | Not posted, and the writer is told why; or removed just after it was shown. Edits are checked before they are saved |
+| Direct messages | Before they are delivered | Not sent; the writer is told why. Either person can block the other (no messages either way). New conversations are limited to 20 a day per account, and messages to 60 an hour |
 | Live chat | Before it reaches anyone | Not sent; the writer is told why (built-in rules only, so chat stays instant) |
 | Reports from people | Any time | Several established accounts hide the video until a moderator decides (`REPORT_HOLD_THRESHOLD`) |
+
+## Videos copied from other apps, platforms or TV
+
+Free Me does not publish videos copied from elsewhere. They take someone else's work, and they carry another
+service's logo and the original account's name. The creator is told at once, on the upload screen: "Unfortunately,
+we are not going to publish this video", with the reason and how to fix it. They can ask for another look once.
+
+- **Marks in the file** (`media/probe.ts`, `madeByApp`). These decide at once, with no AI and no person:
+  - TikTok and Douyin write a `vid:` comment and other tags into every video saved from the app;
+  - Kwai, Likee, Snapchat and Triller name themselves in a tag;
+  - download tools write the page they took the video from: YouTube, Instagram, Facebook, X, Vimeo, Dailymotion,
+    Twitch, Pinterest, Threads, Telegram, Snack Video, Bigo Live, Kick, Netflix or Showmax.
+- **Logos in the pictures** (the AI moderator, category `reupload`): any well-known app's, platform's, streaming
+  service's or TV channel's watermark, logo, @name tag, channel badge or end screen, in any corner and in the last
+  frames. This catches screen recordings, which carry no marks in the file.
+- **Allowed:** a logo that is part of the scene (a brand on clothing, a product, a shop sign, a stadium advert), or the
+  creator's own name or logo.
+- **Without the AI moderator,** a screen recording with no marks in its file is not caught automatically. People can
+  report it.
+
+## Graphic injuries and gore
+
+Real blood, open or bleeding wounds, burns, severed or broken body parts, and dead or dying people or animals with
+visible injuries are never published, in any context, news included. Fake film blood and make-up is allowed.
+Upsetting news without visible injuries can be published.
+
+- With the AI moderator, these are rejected (never "limited"), and the creator reads why.
+- Without it, a picture classifier that is at least 90% sure of gore, or of explicit sexual content, rejects the
+  video at once. Below that, a video over the line waits for a moderator.
+- Possible child sexual abuse material is always held for a person, never decided by a machine.
 
 ## Categories and lines
 
@@ -89,6 +121,7 @@ holds the video (or refuses the comment). The queue puts the most serious first.
 | Harassment or bullying | 0.8 | 40 |
 | Weapons, drugs, other illegal goods | 0.85 | 40 |
 | Spam or scam | 0.9 | 20 |
+| Re-uploaded from another app | 0.6 | 30 |
 
 ## Engines
 

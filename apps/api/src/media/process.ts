@@ -59,7 +59,13 @@ export class VideoProcessor {
 
   private async setProgress(id: string, progress: number, stage: string, extra: Partial<Video> = {}) {
     const p = Math.max(0, Math.min(100, Math.round(progress)));
-    await this.prisma.video.update({ where: { id }, data: { processingProgress: p, processingStage: stage, ...extra } as never });
+    // Never over a video the safety check stopped ("Not published" or held): a late progress report must not hide that.
+    const r = await this.prisma.video.updateMany({ where: { id, status: { not: 'FLAGGED' } }, data: { processingProgress: p, processingStage: stage, ...extra } as never });
+    if (!r.count) {
+      // Deleted meanwhile: stop processing, as before (only a stopped video is skipped quietly).
+      if (!(await this.prisma.video.count({ where: { id } }))) throw new Error(`Video ${id} no longer exists`);
+      return;
+    }
     publish(room.video(id), 'processing', { progress: p, stage });
   }
 
@@ -132,16 +138,27 @@ export class VideoProcessor {
         signal?.throwIfAborted();
         if (held) { await hold(this.prisma, videoId, held, 100); this.log.warn(`${videoId}: held for review: ${held}`); return { speech: null, more: false }; }
         // The safety check (safety/) runs while the first version is encoded; nothing is published before its answer.
-        const safety = this.safetyGate(video, source2, info, work, signal);
+        // A "no" stops the encoding at once: no work wasted, and the creator is told straight away (the encoder's
+        // progress never writes over "Not published").
+        const refused = new AbortController();
+        const encoding = signal ? AbortSignal.any([signal, refused.signal]) : refused.signal;
+        const safety = this.safetyGate(video, source2, info, work, signal).then((ok) => { if (!ok) refused.abort(); return ok; });
         safety.catch(() => undefined); // awaited below; an early failure must not be an unhandled rejection meanwhile
-        // These steps use independent video and audio streams. Keep the two-pass loudness target.
-        const [thumbs, loud] = await Promise.all([
-          timed('thumbnailsMs', () => this.thumbnails(source2, work, info, hdr, signal)),
-          info.hasAudio ? timed('loudnessMs', () => measureLoudness(this.config.media.ffmpegPath, source2, signal)) : null,
-        ]);
-        signal?.throwIfAborted();
-        await timed('sdEncodeMs', () => this.encode(source2, work, fast, info, hdr, info.hasAudio ? { loudness: loud } : null, (f) => this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined), signal, { videoId, sourceKey: podcast ? null : video.sourceFileS3Key!, background: false }));
-        signal?.throwIfAborted();
+        let thumbs: Awaited<ReturnType<VideoProcessor['thumbnails']>>;
+        try {
+          // These steps use independent video and audio streams. Keep the two-pass loudness target.
+          let loud: Awaited<ReturnType<typeof measureLoudness>> | null;
+          [thumbs, loud] = await Promise.all([
+            timed('thumbnailsMs', () => this.thumbnails(source2, work, info, hdr, encoding)),
+            info.hasAudio ? timed('loudnessMs', () => measureLoudness(this.config.media.ffmpegPath, source2, encoding)) : null,
+          ]);
+          encoding.throwIfAborted();
+          await timed('sdEncodeMs', () => this.encode(source2, work, fast, info, hdr, info.hasAudio ? { loudness: loud! } : null, (f) => { if (!refused.signal.aborted) void this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined); }, encoding, { videoId, sourceKey: podcast ? null : video.sourceFileS3Key!, background: false }));
+          encoding.throwIfAborted();
+        } catch (e) {
+          if (refused.signal.aborted && !signal?.aborted) return { speech: null, more: false };
+          throw e;
+        }
         if (!(await timed('safetyMs', () => safety))) return { speech: null, more: false };
         const playable = await timed('sdPublishMs', () => this.publish(videoId, work, fast, info, done, thumbs, passes.length ? 'Playable · adding qualities' : 'Playable · preparing seek previews', 5 + fastWeight));
         if (playable !== null && !video.hlsMasterKey) this.log.log({ event: 'video_first_playable', videoId, processingToPlayableMs: Math.round(playable - started), ...timings });
@@ -230,15 +247,16 @@ export class VideoProcessor {
   private async safetyGate(video: Video, source: string, info: ProbeResult, work: string, signal?: AbortSignal): Promise<boolean> {
     if (video.safetyCheckedAt) return true;
     if (video.screeningClearedAt) { await this.prisma.video.update({ where: { id: video.id }, data: { safetyCheckedAt: new Date() } }); return true; }
-    const verdict = await checkVideo(this.prisma, this.config, video, () => frames(this.config.media.ffmpegPath, source, info, join(work, 'safety')), signal);
+    const verdict = await checkVideo(this.prisma, this.config, video, () => frames(this.config.media.ffmpegPath, source, info, join(work, 'safety')), signal, { madeBy: info.madeBy });
     signal?.throwIfAborted();
     this.log.log({ event: 'video_safety_checked', videoId: video.id, action: verdict.action, model: verdict.model, category: verdict.category, scanned: verdict.scanned, unscanned: verdict.unscanned, scores: verdict.scores });
-    const decided = { safetyDecision: verdict.action === 'hold' ? null : verdict.action, safetyReason: verdict.model ? verdict.reason : null, safetyModel: verdict.model };
+    // The reason is written for the creator when a machine decided alone (the AI, or the file's own marks).
+    const decided = { safetyDecision: verdict.action === 'hold' ? null : verdict.action, safetyReason: verdict.model || verdict.action === 'reject' ? verdict.reason : null, safetyModel: verdict.model };
     if (verdict.action === 'hold') { await hold(this.prisma, video.id, verdict.reason ?? 'Held by the automatic check', verdict.priority); return false; }
     if (verdict.action === 'reject') {
       // Decided by the AI alone: not published, the creator sees why and can appeal. Kept on record (resolved).
       await this.prisma.video.update({ where: { id: video.id }, data: { ...decided, status: 'FLAGGED', processingStage: 'Not published', processingProgress: 0 } });
-      await recordAutomatic(this.prisma, video.id, `Rejected automatically by ${verdict.model}: ${verdict.reason}`, verdict.category);
+      await recordAutomatic(this.prisma, video.id, `Rejected automatically by ${verdict.model ?? 'the automatic check'}: ${verdict.reason}`, verdict.category);
       return false;
     }
     const now = new Date();

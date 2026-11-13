@@ -9,6 +9,7 @@ import { VerifiedBadge } from '../VerifiedBadge';
 import { AccountMenu } from './AccountMenu';
 import { CreateMenu } from './CreateMenu';
 import { FindPanel } from './FindPanel';
+import { MessagesButton } from './MessagesButton';
 import { NotificationBell } from './NotificationBell';
 import { useShell } from './ShellContext';
 import { LanguageMenu } from './LanguageMenu';
@@ -73,6 +74,7 @@ export function Header() {
               ) : (
                 <Link href="/premium" className="flex h-10 items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-3 text-[14px] font-bold text-[#2a1a02] shadow-[0_2px_10px_rgb(227_154_42/0.35)] hover:brightness-105 sm:px-4"><Icon.PremiumStar size={18} filled /><span className="hidden min-[400px]:inline">{t('header.upgrade')}</span></Link>
               )}
+              <MessagesButton />
               <NotificationBell />
               <AccountMenu viewer={viewer} />
             </>

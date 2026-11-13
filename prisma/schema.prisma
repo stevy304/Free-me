@@ -142,6 +142,11 @@ model User {
   pushSubscriptions     PushSubscription[]
   moderatorActions      ModerationAction[]
   auditLogs             AuditLog[]
+  conversationsA        Conversation[]    @relation("ConversationA")
+  conversationsB        Conversation[]    @relation("ConversationB")
+  messagesSent          DirectMessage[]
+  blocking              UserBlock[]       @relation("Blocker")
+  blockedBy             UserBlock[]       @relation("Blocked")
 
   @@index([status])
 
@@ -463,6 +468,8 @@ model Like {
   userId                String
   videoId               String
   isLike                Boolean           @default(true) // true for like, false for dislike
+  /// Where in the video the Spark was given (seconds): the most Sparked moments are marked on the progress bar
+  atSeconds             Int?
   user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
   createdAt             DateTime          @default(now())
@@ -1150,4 +1157,52 @@ model BusinessVerification {
   updatedAt             DateTime          @updatedAt
 
   @@index([status])
+}
+
+// -------------------------------------------------------------
+// DIRECT MESSAGES (engagement/messages.controller.ts): any signed-in account can message another; every message
+// passes the safety check, and a block stops messages both ways.
+// -------------------------------------------------------------
+
+/// A conversation between two accounts: userAId is the smaller id, so a pair has one conversation.
+model Conversation {
+  id                    String            @id @default(uuid())
+  userAId               String
+  userBId               String
+  userA                 User              @relation("ConversationA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB                 User              @relation("ConversationB", fields: [userBId], references: [id], onDelete: Cascade)
+  lastMessageAt         DateTime          @default(now())
+  /// When each side last read it (unread: a message from the other side after this)
+  aReadAt               DateTime?
+  bReadAt               DateTime?
+  createdAt             DateTime          @default(now())
+  messages              DirectMessage[]
+
+  @@unique([userAId, userBId])
+  @@index([userAId, lastMessageAt])
+  @@index([userBId, lastMessageAt])
+}
+
+model DirectMessage {
+  id                    String            @id @default(uuid())
+  conversationId        String
+  conversation          Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId              String
+  sender                User              @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  body                  String
+  createdAt             DateTime          @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+/// One account blocking another: no messages either way.
+model UserBlock {
+  blockerId             String
+  blockedId             String
+  blocker               User              @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked               User              @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt             DateTime          @default(now())
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
 }

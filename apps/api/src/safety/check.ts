@@ -14,6 +14,8 @@ import { feedsChanged } from '../catalog/feed-cache';
  * an optional picture classifier and the unscanned-video rule decide, and anything over a line waits for a moderator.
  */
 const log = new Logger('Safety');
+/** A picture classifier's score from which it decides alone (without the AI moderator) that a video is not published. */
+const SURE = 0.9;
 
 /** The picture classifier or outside scanner, with keys from Administration → Secrets (else the environment). */
 async function engineOf(prisma: PrismaClient, config: AppConfig): Promise<Engine | null> {
@@ -123,10 +125,16 @@ export interface VideoVerdict extends Decision {
  * JPEGs across the video (base64), taken once and shared by every engine.
  */
 export async function checkVideo(prisma: PrismaClient, config: AppConfig, video: { id: string; title: string; description: string | null; channelId: string; durationSeconds?: number },
-  frames: () => Promise<string[]>, signal?: AbortSignal): Promise<VideoVerdict> {
+  frames: () => Promise<string[]>, signal?: AbortSignal, file: { madeBy?: string | null } = {}): Promise<VideoVerdict> {
   const tags = (await prisma.videoTag.findMany({ where: { videoId: video.id }, select: { tag: { select: { name: true } } } })).map((t) => t.tag.name);
   const text = videoText({ ...video, tags });
   const { scores } = scoreText(text, await moderatorTerms(prisma));
+  // Downloaded from another app: its marks are in the file. Certain, so decided at once (no AI, no person), and the
+  // creator is told how to fix it. They can appeal (e.g. when it is their own video: then they upload the original).
+  if (file.madeBy) {
+    const reason = `This video was downloaded from ${file.madeBy}: the file carries ${file.madeBy}'s marks, and usually its logo and the original account's name. Free Me does not publish videos taken from other apps. If it is your own video, upload the original from your phone's camera or editing app, without ${file.madeBy}'s logo.`;
+    return { hold: true, category: 'reupload', score: 1, priority: POLICY.reupload.priority, reason, scores: { ...scores, reupload: 1 }, action: 'reject', model: null, scanned: true, unscanned: false };
+  }
   let pictures: string[] | null = null;
   const pics = async () => (pictures ??= await frames());
 
@@ -163,7 +171,14 @@ export async function checkVideo(prisma: PrismaClient, config: AppConfig, video:
     }
   }
 
-  // Without it: rules and classifier lines; a person decides what is over them.
+  // Without it: a classifier that is very sure of gore or explicit sexual content rejects at once (the creator is told
+  // why and can appeal); anything else over a line waits for a person.
+  const sure = (['violence/graphic', 'sexual'] as const).find((c) => (engineScores[c] ?? 0) >= SURE);
+  if (sure) {
+    const what = sure === 'sexual' ? 'explicit sexual content or nudity' : 'graphic injuries, blood or gore';
+    return { ...combined, hold: true, action: 'reject', category: sure, score: engineScores[sure]!, priority: POLICY[sure].priority, model: null, scanned, unscanned: false,
+      reason: `The automatic check found ${what} in this video, which the Community Guidelines do not allow. If this is a mistake, you can ask for another look.` };
+  }
   if (combined.hold) return { ...combined, action: 'hold', reason: note ?? combined.reason, model: null, scanned, unscanned: false };
   if (!scanned && engine?.images && config.safety.failClosed) {
     return { ...combined, hold: true, action: 'hold', priority: 40, reason: 'The automatic check could not run; held until a moderator looks at it', model: null, scanned: false, unscanned: true };

@@ -75,12 +75,13 @@ test('like, save, comment, history, report; a moderator removes the video; the c
   await viewer.getByLabel('Join the conversation…').fill('What a peaceful place.');
   await viewer.getByRole('button', { name: 'Post', exact: true }).click();
   await expect(viewer.getByText('What a peaceful place.')).toBeVisible();
-  await expect(viewer.getByRole('heading', { name: 'Conversation 1' })).toBeVisible();
+  // Wide screens: the conversation is in the Comments card beside the video.
+  await expect(viewer.getByRole('heading', { name: /^Comments\s*1$/ })).toBeVisible();
   await viewer.getByRole('button', { name: 'Reply' }).first().click();
   await viewer.getByLabel('Add a reply…').fill('Where was this filmed?');
   await viewer.getByRole('button', { name: 'Reply', exact: true }).last().click();
   await expect(viewer.getByText('Where was this filmed?')).toBeVisible();
-  await expect(viewer.getByRole('heading', { name: 'Conversation 2' })).toBeVisible();
+  await expect(viewer.getByRole('heading', { name: /^Comments\s*2$/ })).toBeVisible();
 
   // Watching is remembered in History. Playwright's Chromium has no H.264 decoder, so the test sends the position
   // the way the player does after 10 seconds of playback.
