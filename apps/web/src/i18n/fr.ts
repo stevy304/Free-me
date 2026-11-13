@@ -703,4 +703,21 @@ export const fr: Partial<Record<Key, string>> = {
   'login.eGoogleUnverified': 'L’e-mail de votre compte Google n’est pas vérifié. Utilisez plutôt un code par e-mail.',
   'login.eSuspended': 'Ce compte est suspendu. Contactez l’assistance si vous pensez qu’il s’agit d’une erreur.',
   'login.eGeneric': 'La connexion n’a pas fonctionné. Veuillez réessayer.',
+
+  // For you
+  'foryou.title': 'Pour vous',
+  'foryou.note': 'choisi d’après ce que vous regardez, aimez et suivez',
+  'foryou.more': 'Afficher plus',
+  'foryou.related': 'Parce que vous avez regardé {title}',
+  'foryou.topic': 'Plus de {topic}',
+  'foryou.following': 'D’un Space que vous suivez',
+  'foryou.trending': 'Très regardé en ce moment',
+  'foryou.new': 'Nouveau sur Free Me',
+  'foryou.popular': 'Les spectateurs la regardent jusqu’au bout',
+  'foryou.setting': 'Utiliser ce que je regarde et aime pour « Pour vous »',
+  'foryou.settingHint': 'Désactivé : seuls les sujets choisis et les Spaces suivis comptent. Votre historique est conservé dans tous les cas.',
+  'foryou.settingTitle': 'Recommandations',
+
+  // For you (visitors)
+  'foryou.noteVisitor': 'ce que les spectateurs regardent jusqu’au bout ; connectez-vous pour le personnaliser',
 };

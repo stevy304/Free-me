@@ -11,6 +11,7 @@ Values for local development are in [.env.example](.env.example). In production 
 | `API_PROCESSES` | | `1` | API processes sharing the port; `auto` = one per CPU core (a Node process uses one core). Set `auto` on app servers |
 | `FEED_CACHE_SECONDS` | | `60` (`0` in tests) | How long parts of the home page and Rising that are the same for everyone are reused. New videos appear on the home page within this time |
 | `SESSION_CACHE_SECONDS` | | `15` (`0` in tests), at most `60` | How long each API process keeps a signed-in session and its account, so requests do not each read them from the database. Sign-outs, suspensions, role and plan changes are announced to every process over Redis and seen at once; this is only the longest a change could lag if such a message were lost. `0` reads them on every request |
+| `REC_ACTIVE_MAX` | | `200000` | How many videos the recommendation feature store keeps (the active part of the catalogue: published in the last 90 days or watched in the last 7, most watched first). Raise it with Redis memory (about 300 bytes a video) |
 | `DATABASE_URL` | yes | | PostgreSQL connection string (private address of server 3) |
 | `REDIS_URL` | production | | Redis: shared rate limits, the video job queue and view counting. Without it (development only) limits are per process and the API processes uploads itself |
 | `APP_URL` | production | `http://localhost:3000` | Public origin of the web app, e.g. `https://freeme.example`. Must be https in production |

@@ -207,6 +207,8 @@ model Profile {
   city                  String?
   preferredLanguage     String            @default("en") // BCP 47
   timezone              String?           // IANA, e.g. "Africa/Kigali", "America/New_York"
+  /// "For you" may use what this person watches and likes (on by default; off: only picked topics and followed Spaces)
+  personalizedRecommendations Boolean     @default(true)
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 

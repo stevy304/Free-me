@@ -715,6 +715,23 @@ export const en = {
   'login.eGoogleUnverified': 'Your Google account email is not verified. Use an email code instead.',
   'login.eSuspended': 'This account is suspended. Contact support if you think this is a mistake.',
   'login.eGeneric': 'Sign-in did not work. Please try again.',
+
+  // For you
+  'foryou.title': 'For you',
+  'foryou.note': 'picked from what you watch, like and follow',
+  'foryou.more': 'Show more',
+  'foryou.related': 'Because you watched {title}',
+  'foryou.topic': 'More {topic}',
+  'foryou.following': 'From a Space you follow',
+  'foryou.trending': 'Watched a lot right now',
+  'foryou.new': 'New on Free Me',
+  'foryou.popular': 'Viewers keep watching this',
+  'foryou.setting': 'Use what I watch and like for “For you”',
+  'foryou.settingHint': 'Off: only the topics you pick and the Spaces you follow are used. Your History is kept either way.',
+  'foryou.settingTitle': 'Recommendations',
+
+  // For you (visitors)
+  'foryou.noteVisitor': 'what viewers watch to the end; sign in to make it yours',
 } as const;
 
 export type Key = keyof typeof en;

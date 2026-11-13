@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { tasteChanged } from '../recommend/profile';
 import { notifySpark } from '../notifications/notify';
 import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsIn, IsNumber, IsOptional, Max, Min } from 'class-validator';
@@ -25,7 +26,7 @@ class ProgressDto {
 @Controller()
 export class ReactionsController {
   private readonly positions: ProgressBuffer;
-  constructor(private readonly prisma: PrismaService, private readonly limits: RateLimitService, private readonly urls: MediaUrls, redis: RedisService) {
+  constructor(private readonly prisma: PrismaService, private readonly limits: RateLimitService, private readonly urls: MediaUrls, private readonly redis: RedisService) {
     this.positions = new ProgressBuffer(prisma, redis.client);
   }
 
@@ -49,6 +50,7 @@ export class ReactionsController {
     });
     if (counts.sparked) await notifySpark(this.prisma, id, userId);
     publish(room.video(id), 'reactions', { likeCount: counts.likeCount });
+    await tasteChanged(this.redis.client, userId);
     return { reaction: body.value, likeCount: counts.likeCount };
   }
 
@@ -103,6 +105,7 @@ export class ReactionsController {
   async forget(@Param('videoId', ParseUUIDPipe) videoId: string, @CurrentAuth() auth: AuthContext) {
     const pending = (await this.positions.recent(auth.user.id)).has(videoId);
     await this.positions.forget(auth.user.id, videoId);
+    await tasteChanged(this.redis.client, auth.user.id);
     const r = await this.prisma.watchHistory.deleteMany({ where: { userId: auth.user.id, videoId } });
     return { removed: r.count || (pending ? 1 : 0) };
   }
@@ -116,6 +119,7 @@ export class ReactionsController {
     const recent = [...(await this.positions.recent(auth.user.id)).keys()];
     const stored = recent.length ? new Set((await this.prisma.watchHistory.findMany({ where: { userId: auth.user.id, videoId: { in: recent } }, select: { videoId: true } })).map((h) => h.videoId)) : new Set<string>();
     await this.positions.forget(auth.user.id);
+    await tasteChanged(this.redis.client, auth.user.id);
     const r = await this.prisma.watchHistory.deleteMany({ where: { userId: auth.user.id } });
     return { removed: r.count + recent.filter((v) => !stored.has(v)).length };
   }

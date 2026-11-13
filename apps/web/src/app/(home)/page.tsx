@@ -4,6 +4,7 @@ import * as Icon from '@/components/icons';
 import { Avatar } from '@/components/Avatar';
 import { EmptyState } from '@/components/EmptyState';
 import { InterestsPanel } from '@/components/home/InterestsPanel';
+import { ForYou, type ForYouPage } from '@/components/home/ForYou';
 import type { HomeFeed } from '@/components/home/types';
 import { MomentCard, VideoCard } from '@/components/video/VideoCard';
 import { apiGet, getLocale, getT, getViewer } from '@/lib/server-api';
@@ -20,7 +21,7 @@ function regionName(code: string, locale: string) {
 
 /** Current: a spotlight, the interests panel, one shelf per topic, a Moments ribbon and the newest uploads. */
 export default async function Current() {
-  const [feed, viewer, locale, live, t] = await Promise.all([apiGet<HomeFeed>('/feed/home'), getViewer(), getLocale(), apiGet<{ streams: LiveInfo[] }>('/live').catch(() => null), getT()]);
+  const [feed, viewer, locale, live, t, forYou] = await Promise.all([apiGet<HomeFeed>('/feed/home'), getViewer(), getLocale(), apiGet<{ streams: LiveInfo[] }>('/live').catch(() => null), getT(), apiGet<ForYouPage>('/feed/for-you').catch(() => null)]);
   const liveNow = live?.streams ?? [];
   if (!feed || (!feed.spotlight && !feed.moments.length)) {
     return (
@@ -77,6 +78,8 @@ export default async function Current() {
         {/* On phones the panel comes after Trending, so the first screens are videos. */}
         <div className="hidden lg:block"><InterestsPanel interests={feed.interests} /></div>
       </div>
+
+      {forYou && forYou.videos.length >= 4 && <ForYou initial={forYou} signedIn={!!viewer} />}
 
       {feed.fromCreators.length > 0 && (
         <section aria-labelledby="following-heading" className="mt-9">

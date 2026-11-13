@@ -45,8 +45,10 @@ function device(ua: string | null) {
 
 export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessions: SessionRow[] }) {
   const router = useRouter();
-  const { locale } = useShell();
+  const { locale, t } = useShell();
   const p = viewer.profile;
+  const [personal, setPersonal] = useState(p?.personalizedRecommendations !== false);
+  const [recMsg, setRecMsg] = useState<string | null>(null);
   const [profile, setProfile] = useState({ displayName: p?.displayName ?? '', bio: p?.bio ?? '', country: p?.country ?? null, city: p?.city ?? '', preferredLanguage: p?.preferredLanguage ?? 'en', timezone: p?.timezone ?? null });
   const [pBusy, setPBusy] = useState(false);
   const [pMsg, setPMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -64,6 +66,11 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
     setPBusy(true); setPMsg(null);
     try { await api('/me/profile', { method: 'PATCH', body: { ...profile, city: profile.city || null } }); setPMsg({ ok: true, text: 'Saved' }); router.refresh(); }
     catch (e) { setPMsg({ ok: false, text: e instanceof Error ? e.message : 'Could not save.' }); } finally { setPBusy(false); }
+  };
+  const savePersonal = async (on: boolean) => {
+    setPersonal(on); setRecMsg(null);
+    try { await api('/me/profile', { method: 'PATCH', body: { personalizedRecommendations: on } }); setRecMsg('Saved'); }
+    catch (e) { setPersonal(!on); setRecMsg(e instanceof Error ? e.message : 'Could not save.'); }
   };
   const saveChannel = async () => {
     setCBusy(true); setCMsg(null);
@@ -115,6 +122,14 @@ export function Settings({ viewer, sessions: initial }: { viewer: Viewer; sessio
             </div>
             <div className="sm:col-span-2"><SaveBar busy={pBusy} message={pMsg} /></div>
           </form>
+        </Section>
+
+        <Section id="recommendations" title={t('foryou.settingTitle')}>
+          <label className="flex cursor-pointer items-start gap-3">
+            <input type="checkbox" checked={personal} onChange={(e) => void savePersonal(e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
+            <span><span className="block text-[15px] font-medium">{t('foryou.setting')}</span><span className="block text-[13px] text-muted">{t('foryou.settingHint')}</span></span>
+          </label>
+          {recMsg && <p role="status" className="mt-2 text-[13px] text-brand">{recMsg}</p>}
         </Section>
 
         {c && (

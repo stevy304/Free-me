@@ -707,4 +707,21 @@ export const rw: Partial<Record<Key, string>> = {
   'login.eGoogleUnverified': 'Imeyili ya konti yawe ya Google ntiremezwa. Koresha kode ya imeyili.',
   'login.eSuspended': 'Iyi konti yarahagaritswe. Vugana n’abadufasha niba utekereza ko ari ikosa.',
   'login.eGeneric': 'Kwinjira ntibyakunze. Ongera ugerageze.',
+
+  // For you
+  'foryou.title': 'Ibyawe',
+  'foryou.note': 'byatoranyijwe hashingiwe ku byo ureba, ukunda n’abo ukurikira',
+  'foryou.more': 'Erekana ibindi',
+  'foryou.related': 'Kubera ko warebye {title}',
+  'foryou.topic': '{topic} n’ibindi',
+  'foryou.following': 'Bivuye kuri Space ukurikira',
+  'foryou.trending': 'Birarebwa cyane ubu',
+  'foryou.new': 'Gishya kuri Free Me',
+  'foryou.popular': 'Abareba barayikunda',
+  'foryou.setting': 'Koresha ibyo ndeba n’ibyo nkunda muri “Ibyawe”',
+  'foryou.settingHint': 'Bifunze: hakoreshwa gusa ingingo wahisemo na Spaces ukurikira. Amateka yawe arabikwa uko byagenda kose.',
+  'foryou.settingTitle': 'Ibyo tugusabira',
+
+  // For you (visitors)
+  'foryou.noteVisitor': 'ibyo abareba barangiza kureba; injira ngo bibe ibyawe',
 };

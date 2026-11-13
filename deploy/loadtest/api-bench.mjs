@@ -5,6 +5,7 @@
 //
 //   node deploy/loadtest/api-bench.mjs https://freeme.example 50 60     # 50 at once for 60 seconds
 //   node deploy/loadtest/api-bench.mjs http://127.0.0.1:4000 200 30     # straight to one API process
+//   SESSIONS=sessions.txt node deploy/loadtest/api-bench.mjs …            # as signed-in viewers (make-sessions.mjs)
 //
 // Run it from a machine outside your servers for real numbers. It prints one line per endpoint and a total, and
 // exits with 1 if more than 1% of requests failed or 95% of them took longer than 800 ms.
@@ -25,17 +26,23 @@ const ids = (list.videos ?? []).map((v) => v.id);
 if (!ids.length) { console.error('No public videos: publish some first.'); process.exit(2); }
 const words = (list.videos ?? []).flatMap((v) => v.title.split(/\s+/)).filter((w) => w.length > 3).slice(0, 20);
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
+// Signed-in viewers (a test database's sessions): each request as a random one, from its own address (TRUST_PROXY=1).
+const tokens = process.env.SESSIONS ? (await import('node:fs')).readFileSync(process.env.SESSIONS, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean) : [];
+const headers = () => (tokens.length ? { cookie: `${process.env.SESSION_COOKIE ?? 'fm_session'}=${pick(tokens)}`, 'x-forwarded-for': `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${1 + Math.floor(Math.random() * 250)}` } : {});
 
 /** What one visitor does, weighted like real traffic: most people browse and watch, fewer search. */
 const steps = [
   { name: 'home', weight: 3, path: () => '/api/feed/home' },
+  { name: 'foryou', weight: 3, path: () => `/api/feed/for-you?page=${Math.random() < 0.8 ? 0 : 1}` },
   { name: 'videos', weight: 2, path: () => '/api/videos?limit=24' },
   { name: 'watch', weight: 4, path: () => `/api/videos/${pick(ids)}` },
   { name: 'next', weight: 3, path: () => `/api/videos/${pick(ids)}/next` },
   { name: 'rising', weight: 1, path: () => '/api/feed/rising' },
   { name: 'search', weight: 1, path: () => `/api/search?q=${encodeURIComponent(pick(words) ?? 'video')}` },
 ];
-const bag = steps.flatMap((s) => Array(s.weight).fill(s));
+// ONLY=foryou,watch runs just those endpoints (to measure one of them).
+const only = process.env.ONLY?.split(',');
+const bag = steps.filter((s) => !only || only.includes(s.name)).flatMap((s) => Array(s.weight).fill(s));
 const stats = new Map(steps.map((s) => [s.name, { ms: [], errors: 0 }]));
 
 const until = Date.now() + seconds * 1000;
@@ -45,7 +52,7 @@ async function visitor() {
     const st = stats.get(s.name);
     const t = performance.now();
     try {
-      const r = await fetch(api + s.path());
+      const r = await fetch(api + s.path(), { headers: headers() });
       await r.arrayBuffer();
       if (r.status >= 500 || r.status === 429) st.errors++;
     } catch { st.errors++; }

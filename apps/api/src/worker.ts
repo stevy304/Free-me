@@ -1,4 +1,6 @@
 import { MailService } from './mail/mail.service';
+import { refreshSignals } from './recommend/signals';
+import { refreshRelated } from './recommend/related';
 import { setAuthPublisher } from './auth/session-cache';
 import 'reflect-metadata';
 import { ConsoleLogger, Logger } from '@nestjs/common';
@@ -41,6 +43,7 @@ async function main() {
   const connection = () => new Redis(config.redisUrl!, { maxRetriesPerRequest: null });
   // Plans bought or granted here (payments, administrators) reach the API processes' session caches at once.
   setAuthPublisher(new Redis(config.redisUrl!));
+  const recRedis = new Redis(config.redisUrl!);
   // Instant updates from the worker (processing progress, notifications, payments) reach browsers through Redis.
   const emitter = new Emitter(new Redis(config.redisUrl));
   setRealtimeSink((r, event, data) => emitter.to(r).emit(event, data));
@@ -111,6 +114,9 @@ async function main() {
   await maintenance.upsertJobScheduler('recover-stuck', { every: 5 * 60_000 }, { name: 'recover-stuck' });
   // Popularity-based encoding: videos that reached HD_MIN_VIEWS get their 1080p and above.
   await maintenance.upsertJobScheduler('hd-upgrades', { every: 60_000 }, { name: 'hd-upgrades' });
+  // Recommendations: the feature store and pools every 5 minutes, related lists every 2 (the ones viewers needed first, then popular videos).
+  await maintenance.upsertJobScheduler('rec-signals', { every: 5 * 60_000 }, { name: 'rec-signals' });
+  await maintenance.upsertJobScheduler('rec-related', { every: 2 * 60_000 }, { name: 'rec-related' });
   // AV1 for videos that reached AV1_MIN_VIEWS: fewer bytes for every later viewer whose device decodes it.
   if (config.media.av1.minViews) await maintenance.upsertJobScheduler('av1-upgrades', { every: 5 * 60_000 }, { name: 'av1-upgrades' });
   else await maintenance.removeJobScheduler('av1-upgrades').catch(() => undefined);
@@ -150,6 +156,8 @@ async function main() {
       }
       if (ids.length) log.log({ event: 'hd_upgrades_queued', count: ids.length });
     }
+    else if (job.name === 'rec-signals') { const n = await refreshSignals(prisma, recRedis, { maxActive: config.recActiveMax }); log.log({ event: 'rec_signals_built', videos: n }); }
+    else if (job.name === 'rec-related') { const n = await refreshRelated(prisma, recRedis); if (n) log.log({ event: 'rec_related_built', videos: n }); }
     else if (job.name === 'av1-upgrades') {
       const ids = await jobs.popularAv1();
       for (const videoId of ids) {

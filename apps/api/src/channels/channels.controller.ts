@@ -1,4 +1,6 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { tasteChanged } from '../recommend/profile';
+import { RedisService } from '../database/redis.service';
 import { authChanged } from '../auth/session-cache';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { handleProblem, isCountryCode, isLanguageCode, normalizeHandle } from '@free-me/shared';
@@ -16,7 +18,7 @@ import { hasPremiumAccess } from '../billing/billing';
 @ApiTags('channels')
 @Controller('channels')
 export class ChannelsController {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly limits: RateLimitService, private readonly urls: MediaUrls) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly limits: RateLimitService, private readonly urls: MediaUrls, private readonly redis: RedisService) {}
 
   @Get('handle-available')
   @ApiOperation({ summary: 'Whether a handle can be taken' })
@@ -111,6 +113,7 @@ export class ChannelsController {
       const c = r.count ? await tx.channel.update({ where: { id: channel.id }, data: { subscriberCount: { increment: 1 } } }) : channel;
       return c.subscriberCount;
     });
+    await tasteChanged(this.redis.client, auth.user.id);
     return { following: true, followerCount: count };
   }
 
@@ -126,6 +129,7 @@ export class ChannelsController {
       const c = r.count ? await tx.channel.update({ where: { id: channel.id }, data: { subscriberCount: { decrement: 1 } } }) : channel;
       return c.subscriberCount;
     });
+    await tasteChanged(this.redis.client, auth.user.id);
     return { following: false, followerCount: count };
   }
 }

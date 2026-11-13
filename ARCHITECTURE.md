@@ -108,9 +108,12 @@ Measured with `deploy/loadtest/player-bench.mjs` (see [RESULTS.md](deploy/loadte
 
 ## Discovery
 
+The whole recommendation system (For you, Up next, Trending: signals, candidates, scoring, mix rules, cost at
+scale and how to tune it) is described in [ALGORITHM.md](ALGORITHM.md).
+
 - **Next** (`/api/videos/:id/next`): same Space, shared tags and topic, the viewer's topics, popularity and freshness, plus **watched together**: among the latest 500 signed-in viewers of the video, the other videos at least 3 of them watched. A count shared by fewer than 3 people is never used, so no one's own history can be read from it.
 - **Trending** (`/api/feed/rising?country=RW`, and the home page's Trending shelf): videos of the last 30 days ranked by views in the last two days (`VideoDailyStat`), so a video rising now beats last month's hit. With a country, only creators who chose that country. The home page shows the viewer's country when it has at least 4 such videos, else everywhere.
-- The home page still ranks nothing by the viewer's own watching: picked topics, followed Spaces, trending and recency.
+- **For you** (`/api/feed/for-you`, on the home page) ranks for each viewer from what they watch, like and follow, with the reason on every card; it can be turned off in Settings. See ALGORITHM.md.
 
 ## Coming in later phases
 
