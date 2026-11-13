@@ -72,6 +72,13 @@ They look different on purpose. A badge anyone can buy must never be mistaken fo
   by scrolling on. Only campaigns not aimed at particular videos or Spaces play there.
 - Viewers can skip after 5 seconds. A viewer is counted once per ad and video every 30 minutes, so creators cannot inflate their share by replaying.
 
+## Valid views
+
+Only valid views and watch time count, for earnings and for joining monetisation. A view needs real playback, checked by
+the server's own clock. Views from automated browsers and scripts, and floods from one network or one account, are
+recorded as "not valid" instead. Creators see that number in their statistics. Details are in SECURITY.md, under
+"Views and watch time".
+
 ## How the ad money is shared
 
 Each day, the money earned from ads that day is split **60 / 30 / 10**. For campaigns priced per 1,000 views that is the views delivered that day (at $1 per 1,000 by default); budget a campaign could not deliver by the end of its make-good period is counted on that last day, because it was paid for. (Older campaigns priced per day count what they paid for the hours they ran.)

@@ -45,6 +45,11 @@ const config: NextConfig = {
         { key: 'X-Content-Type-Options', value: 'nosniff' },
         { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         { key: 'X-Frame-Options', value: 'DENY' },
+        // Browsers keep to HTTPS for a year once they have seen the site over it (ignored over plain HTTP in development).
+        { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+        // No plugins, no <base> hijacking, never inside another site's frame. Scripts are not restricted here: that needs
+        // per-request nonces in Next.js (see SECURITY.md).
+        { key: 'Content-Security-Policy', value: "object-src 'none'; base-uri 'self'; frame-ancestors 'none'" },
         // Camera, microphone and screen sharing only for Free Me's own pages (Live Studio); never for embedded sites.
         { key: 'Permissions-Policy', value: 'camera=(self), microphone=(self), display-capture=(self), geolocation=()' },
       ],

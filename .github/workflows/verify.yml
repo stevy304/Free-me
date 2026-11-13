@@ -60,6 +60,9 @@ jobs:
           curl -sf http://127.0.0.1:5055/ > /dev/null || { cat /tmp/moto.log; exit 1; }
       - name: Install (generates the Prisma client and builds the shared package)
         run: npm ci
+      - name: No critical advisories in the packages the app runs on
+        # High ones still open are listed in SECURITY.md with why each waits (major upgrades of Next.js and Prisma).
+        run: npm audit --omit=dev --audit-level=critical
       - name: Schema is valid and migrations match it
         run: |
           npx prisma validate
@@ -83,6 +86,8 @@ jobs:
           export APP_URL=http://localhost:3000 MAIL_TRANSPORT=console SESSION_SECRET=ci-session-secret-0123456789abcdefghij STORAGE_DRIVER=local LOCAL_STORAGE_DIR=/tmp/fm-storage SCRATCH_DIR=/tmp/fm-scratch ADMIN_EMAILS=admin@example.com,live-admin@example.com,encoder-admin@example.com,secrets-admin@example.com
           # The browser tests publish videos from brand-new accounts with no picture-checking engine: let the text check decide.
           export SAFETY_UNSCANNED_REVIEW=none
+          # The browser tests play videos in headless Chrome, which the view checks treat as automated (media/view-quality.ts).
+          export VIEWS_ALLOW_AUTOMATED=true
           (cd apps/api && node dist/main.js > /tmp/api.log 2>&1 &)
           (cd apps/api && node dist/worker.js > /tmp/worker.log 2>&1 &)
           (cd apps/web && API_INTERNAL_URL=http://127.0.0.1:4000 PORT=3000 HOSTNAME=127.0.0.1 node .next/standalone/apps/web/server.js > /tmp/web.log 2>&1 &)

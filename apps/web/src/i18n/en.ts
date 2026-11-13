@@ -561,6 +561,8 @@ export const en = {
 
   // Stats
   'stats.views': 'Views',
+  'stats.invalidViews.one': '{count} view in this period was not counted because it looked automated or abusive. Such views never count towards earnings.',
+  'stats.invalidViews.other': '{count} views in this period were not counted because they looked automated or abusive. Such views never count towards earnings.',
   'stats.viewsPerDay': 'Views per day',
   'stats.watchHours': 'Watch time (hours)',
   'stats.watchPerDay': 'Watch time (hours) per day',

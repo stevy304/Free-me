@@ -38,8 +38,8 @@ export class StatsController {
     if (!channel) throw new NotFoundException('Create your Space first.');
     const { start, prevStart, list } = window(days);
     const [daily, prev, follows, prevFollows, top] = await Promise.all([
-      this.prisma.$queryRaw<Array<{ day: Date; views: bigint; watch: bigint }>>`
-        SELECT s."day", SUM(s."views")::bigint AS views, SUM(s."watchSeconds")::bigint AS watch FROM "VideoDailyStat" s JOIN "Video" v ON v."id" = s."videoId"
+      this.prisma.$queryRaw<Array<{ day: Date; views: bigint; watch: bigint; invalid: bigint }>>`
+        SELECT s."day", SUM(s."views")::bigint AS views, SUM(s."watchSeconds")::bigint AS watch, SUM(s."invalidViews")::bigint AS invalid FROM "VideoDailyStat" s JOIN "Video" v ON v."id" = s."videoId"
         WHERE v."channelId" = ${channel.id} AND s."day" >= ${iso(start)}::date GROUP BY s."day"`,
       this.prisma.$queryRaw<Array<{ views: bigint | null; watch: bigint | null }>>`
         SELECT SUM(s."views")::bigint AS views, SUM(s."watchSeconds")::bigint AS watch FROM "VideoDailyStat" s JOIN "Video" v ON v."id" = s."videoId"
@@ -61,6 +61,8 @@ export class StatsController {
       days, from: list[0], to: list.at(-1),
       totals: {
         views: sum('views'), watchSeconds: sum('watchSeconds'), newFollowers: sum('newFollowers'), followers: channel.subscriberCount,
+        // Views not counted because they looked automated or abusive (media/view-quality.ts), like YouTube's removed views.
+        invalidViews: daily.reduce((a, d) => a + Number(d.invalid ?? 0), 0),
         previous: { views: Number(prev[0]?.views ?? 0), watchSeconds: Number(prev[0]?.watch ?? 0), newFollowers: prevFollows },
       },
       series,

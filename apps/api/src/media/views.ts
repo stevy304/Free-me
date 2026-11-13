@@ -4,6 +4,8 @@ import type Redis from 'ioredis';
 const PENDING_VIEWS = 'fm:views:pending';
 const PENDING_WATCH = 'fm:watch:pending';
 const PENDING_PLUS = 'fm:pluswatch:pending';
+/** Views judged not valid (media/view-quality.ts), per video and day: kept for creators and moderators, never counted. */
+const PENDING_INVALID = 'fm:views:invalid:pending';
 /** The same viewer counts once per video in this window. */
 const DEDUPE_SECONDS = 6 * 3600;
 /** Seconds one heartbeat may report (the player sends one about every minute). */
@@ -14,13 +16,13 @@ const ABANDONED_MS = 2 * 60_000;
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** Adds views and watch time to one video's row for one day (UTC). */
-async function addDaily(prisma: PrismaClient, videoId: string, day: string, views: number, seconds: number, plusSeconds = 0) {
-  if (!views && !seconds && !plusSeconds) return;
+async function addDaily(prisma: PrismaClient, videoId: string, day: string, views: number, seconds: number, plusSeconds = 0, invalid = 0) {
+  if (!views && !seconds && !plusSeconds && !invalid) return;
   await prisma.$executeRaw`
-    INSERT INTO "VideoDailyStat" ("videoId", "day", "views", "watchSeconds", "plusWatchSeconds") SELECT ${videoId}, ${day}::date, ${views}, ${seconds}, ${plusSeconds}
+    INSERT INTO "VideoDailyStat" ("videoId", "day", "views", "watchSeconds", "plusWatchSeconds", "invalidViews") SELECT ${videoId}, ${day}::date, ${views}, ${seconds}, ${plusSeconds}, ${invalid}
     WHERE EXISTS (SELECT 1 FROM "Video" WHERE "id" = ${videoId})
     ON CONFLICT ("videoId", "day") DO UPDATE SET "views" = "VideoDailyStat"."views" + EXCLUDED."views", "watchSeconds" = "VideoDailyStat"."watchSeconds" + EXCLUDED."watchSeconds",
-      "plusWatchSeconds" = "VideoDailyStat"."plusWatchSeconds" + EXCLUDED."plusWatchSeconds"`;
+      "plusWatchSeconds" = "VideoDailyStat"."plusWatchSeconds" + EXCLUDED."plusWatchSeconds", "invalidViews" = "VideoDailyStat"."invalidViews" + EXCLUDED."invalidViews"`;
 }
 
 /**
@@ -30,10 +32,19 @@ async function addDaily(prisma: PrismaClient, videoId: string, day: string, view
 export class ViewCounter {
   constructor(private readonly prisma: PrismaClient, private readonly redis: Redis | null) {}
 
-  /** Returns true when this counted as a new view. */
-  /** `plus`: the viewer has Plus perks; their watch time also counts for sharing subscription money with creators. */
-  async record(videoId: string, viewerKey: string, watchedSeconds: number, plus = false): Promise<boolean> {
+  /**
+   * Returns true when this counted as a new view. `plus`: the viewer has Plus perks; their watch time also counts for
+   * sharing subscription money with creators. `invalid`: why the view is not valid (view-quality.ts), or null: an
+   * invalid view is recorded for the creator's statistics (once per viewer every 6 hours) and adds nothing else.
+   */
+  async record(videoId: string, viewerKey: string, watchedSeconds: number, plus = false, invalid: string | null = null): Promise<boolean> {
     const seconds = Math.max(0, Math.min(6 * 3600, Math.round(watchedSeconds)));
+    if (invalid) {
+      if (!this.redis) { await addDaily(this.prisma, videoId, today(), 0, 0, 0, 1); return false; }
+      const first = await this.redis.set(`fm:view:invalid:${videoId}:${viewerKey}`, '1', 'EX', DEDUPE_SECONDS, 'NX');
+      if (first) await this.redis.hincrby(PENDING_INVALID, `${videoId}|${today()}`, 1);
+      return false;
+    }
     if (!this.redis) {
       await this.prisma.video.update({ where: { id: videoId }, data: { viewCount: { increment: 1 }, watchTimeSeconds: { increment: seconds } } });
       await addDaily(this.prisma, videoId, today(), 1, seconds, plus ? seconds : 0);
@@ -95,9 +106,9 @@ export class ViewCounter {
     const stamp = `${now}-${Math.random().toString(36).slice(2)}`;
     const claim = async (key: string) => { try { await redis.rename(key, `${key}:flushing:${stamp}`); return true; } catch { return false; } };
     const stamps = new Set<string>();
-    if ((await Promise.all([claim(PENDING_VIEWS), claim(PENDING_WATCH), claim(PENDING_PLUS)])).some(Boolean)) stamps.add(stamp);
+    if ((await Promise.all([claim(PENDING_VIEWS), claim(PENDING_WATCH), claim(PENDING_PLUS), claim(PENDING_INVALID)])).some(Boolean)) stamps.add(stamp);
     // Batches another worker claimed and never finished.
-    for (const base of [PENDING_VIEWS, PENDING_WATCH, PENDING_PLUS]) {
+    for (const base of [PENDING_VIEWS, PENDING_WATCH, PENDING_PLUS, PENDING_INVALID]) {
       let cursor = '0';
       do {
         const [next, keys] = await redis.scan(cursor, 'MATCH', `${base}:flushing:*`, 'COUNT', 100);
@@ -113,12 +124,12 @@ export class ViewCounter {
 
   private async write(stamp: string): Promise<number> {
     const redis = this.redis!;
-    const keys = [PENDING_VIEWS, PENDING_WATCH, PENDING_PLUS].map((k) => `${k}:flushing:${stamp}`);
-    const [views, watch, plusWatch] = await Promise.all(keys.map((k) => redis.hgetall(k)));
-    const fields = [...new Set([...Object.keys(views), ...Object.keys(watch), ...Object.keys(plusWatch)])];
+    const keys = [PENDING_VIEWS, PENDING_WATCH, PENDING_PLUS, PENDING_INVALID].map((k) => `${k}:flushing:${stamp}`);
+    const [views, watch, plusWatch, invalid] = await Promise.all(keys.map((k) => redis.hgetall(k)));
+    const fields = [...new Set([...Object.keys(views), ...Object.keys(watch), ...Object.keys(plusWatch), ...Object.keys(invalid)])];
     // Per day for the charts; per video for the totals. (Fields from before days were recorded count as today.)
-    const daily = fields.map((f) => { const [id, day = today()] = f.split('|'); return { id, day, v: Number(views[f] ?? 0), w: Number(watch[f] ?? 0), p: Number(plusWatch[f] ?? 0) }; })
-      .filter((d) => d.id && /^\d{4}-\d{2}-\d{2}$/.test(d.day) && (d.v || d.w || d.p));
+    const daily = fields.map((f) => { const [id, day = today()] = f.split('|'); return { id, day, v: Number(views[f] ?? 0), w: Number(watch[f] ?? 0), p: Number(plusWatch[f] ?? 0), i: Number(invalid[f] ?? 0) }; })
+      .filter((d) => d.id && /^\d{4}-\d{2}-\d{2}$/.test(d.day) && (d.v || d.w || d.p || d.i));
     const totals = new Map<string, { v: number; w: number }>();
     for (const d of daily) { const t = totals.get(d.id) ?? { v: 0, w: 0 }; totals.set(d.id, { v: t.v + d.v, w: t.w + d.w }); }
     const ids = [...totals.keys()];
@@ -128,12 +139,12 @@ export class ViewCounter {
         const fresh = await tx.$executeRaw`INSERT INTO "CounterFlush" ("stamp") VALUES (${stamp}) ON CONFLICT DO NOTHING`;
         if (!fresh) return;
         await tx.$executeRaw`
-          INSERT INTO "VideoDailyStat" ("videoId", "day", "views", "watchSeconds", "plusWatchSeconds")
-          SELECT d."id", d."day", d."v", d."w", d."p"
-          FROM unnest(${daily.map((d) => d.id)}::text[], ${daily.map((d) => d.day)}::date[], ${daily.map((d) => d.v)}::int[], ${daily.map((d) => d.w)}::bigint[], ${daily.map((d) => d.p)}::bigint[]) AS d("id", "day", "v", "w", "p")
+          INSERT INTO "VideoDailyStat" ("videoId", "day", "views", "watchSeconds", "plusWatchSeconds", "invalidViews")
+          SELECT d."id", d."day", d."v", d."w", d."p", d."i"
+          FROM unnest(${daily.map((d) => d.id)}::text[], ${daily.map((d) => d.day)}::date[], ${daily.map((d) => d.v)}::int[], ${daily.map((d) => d.w)}::bigint[], ${daily.map((d) => d.p)}::bigint[], ${daily.map((d) => d.i)}::int[]) AS d("id", "day", "v", "w", "p", "i")
           WHERE EXISTS (SELECT 1 FROM "Video" x WHERE x."id" = d."id")
           ON CONFLICT ("videoId", "day") DO UPDATE SET "views" = "VideoDailyStat"."views" + EXCLUDED."views", "watchSeconds" = "VideoDailyStat"."watchSeconds" + EXCLUDED."watchSeconds",
-            "plusWatchSeconds" = "VideoDailyStat"."plusWatchSeconds" + EXCLUDED."plusWatchSeconds"`;
+            "plusWatchSeconds" = "VideoDailyStat"."plusWatchSeconds" + EXCLUDED."plusWatchSeconds", "invalidViews" = "VideoDailyStat"."invalidViews" + EXCLUDED."invalidViews"`;
         await tx.$executeRaw`
           UPDATE "Video" x SET "viewCount" = x."viewCount" + d."v", "watchTimeSeconds" = x."watchTimeSeconds" + d."w"
           FROM unnest(${ids}::text[], ${ids.map((id) => totals.get(id)!.v)}::bigint[], ${ids.map((id) => totals.get(id)!.w)}::bigint[]) AS d("id", "v", "w")

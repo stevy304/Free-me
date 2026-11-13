@@ -553,6 +553,8 @@ export const rw: Partial<Record<Key, string>> = {
 
   // Stats
   'stats.views': 'Abayirebye',
+  'stats.invalidViews.one': 'Ireba {count} ryo muri iki gihe ntiryabazwe kuko ryasaga n’iryakozwe na mashini cyangwa iry’uburiganya. Amareba nk’aya ntabarirwa mu mafaranga winjiza.',
+  'stats.invalidViews.other': 'Amareba {count} yo muri iki gihe ntiyabazwe kuko yasaga n’ayakozwe na mashini cyangwa ay’uburiganya. Amareba nk’aya ntabarirwa mu mafaranga winjiza.',
   'stats.viewsPerDay': 'Abayirebye ku munsi',
   'stats.watchHours': 'Igihe cyo kureba (amasaha)',
   'stats.watchPerDay': 'Igihe cyo kureba (amasaha) ku munsi',

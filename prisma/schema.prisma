@@ -980,6 +980,8 @@ model VideoDailyStat {
   watchSeconds          BigInt            @default(0)
   /// Watched by Plus, Family and Premium members: shares their subscription money with creators
   plusWatchSeconds      BigInt            @default(0)
+  /// Views not counted because they looked automated or abusive (media/view-quality.ts): shown to the creator, like YouTube
+  invalidViews          Int               @default(0)
 
   @@id([videoId, day])
   @@index([day])

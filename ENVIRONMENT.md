@@ -125,6 +125,10 @@ To make someone an administrator (everything, including every Premium feature su
 | `VERIFICATION_PRICE_USD_CENTS` | | `1000` ($10) | Verified business badge, per year, paid after an administrator approved the business |
 | `AD_CPM_USD_CENTS` | | `100` ($1) | Price of 1,000 ad views. A paid day buys `AD_PRICE_PER_DAY_USD_CENTS × 1000 / AD_CPM_USD_CENTS` views at most (3,000 by default); views not delivered in the days bought keep running for as many days again. Administrators can change it in the app |
 | `PAYOUT_MINIMUM_USD_CENTS` | | `1000` ($10) | Smallest withdrawal a creator can ask for |
+| `VIEW_MAX_PER_NETWORK_PER_VIDEO` | | `100` | Signed-out views of one video from one network address in a day that can count; more are recorded as not valid. Kept generous because many people share an address through their mobile operator |
+| `VIEW_MAX_PER_ACCOUNT_PER_DAY` | | `300` | Views by one signed-in account in a day that can count; more are recorded as not valid |
+| `VIEWS_ALLOW_AUTOMATED` | | `false` | `true` lets headless browsers' views count (browser tests only; ignored in production) |
+| `VIEW_CHECKS` | | `full` | `off` takes the player's word without play tickets (API tests only; ignored in production) |
 | `MONETISE_MIN_WATCH_HOURS` | | `4000` (YouTube's) | Watch hours a Space needs in the last 12 months to join monetisation. Watch time is counted by the player's heartbeats, checked against real time |
 | `MONETISE_MIN_FOLLOWERS` | | `1000` (YouTube's) | Followers a Space needs to join monetisation |
 | `MONETISE_MIN_MOMENT_VIEWS` | | `10000000` (YouTube's 10 million Shorts views) | Moments views in the last 90 days that count instead of the watch hours. `0` turns this way in off; with both at `0`, only the followers count |

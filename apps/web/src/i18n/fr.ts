@@ -549,6 +549,8 @@ export const fr: Partial<Record<Key, string>> = {
 
   // Stats
   'stats.views': 'Vues',
+  'stats.invalidViews.one': '{count} vue de cette période n’a pas été comptée, car elle semblait automatisée ou abusive. Ces vues ne comptent jamais pour les revenus.',
+  'stats.invalidViews.other': '{count} vues de cette période n’ont pas été comptées, car elles semblaient automatisées ou abusives. Ces vues ne comptent jamais pour les revenus.',
   'stats.viewsPerDay': 'Vues par jour',
   'stats.watchHours': 'Durée de visionnage (heures)',
   'stats.watchPerDay': 'Durée de visionnage (heures) par jour',

@@ -84,7 +84,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     setSoundOnly(false);
     setAudio(null);
     resumeAt.current = null;
-    reported.current = false;
+    reported.current = false; playTicket.current = null;
     unsent.current = 0;
     watched.current = 0;
     lastT.current = 0;
@@ -114,6 +114,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   useEffect(() => { if (error) qoe.current?.failed(); }, [error]);
   const watched = useRef(0);
   const reported = useRef(false);
+  /** The play ticket for the current video (asked for when playback really starts). */
+  const playTicket = useRef<Promise<string | null> | null>(null);
   // Watch time after the view was counted, not yet reported (sent with each progress save: every 30 s while playing,
   // on pause, leave and end). The server checks it against real time.
   const unsent = useRef(0);
@@ -424,6 +426,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     if (el.buffered.length) setBuffered(el.buffered.end(el.buffered.length - 1));
     const delta = el.currentTime - lastT.current;
     if (!el.paused && delta > 0 && delta < 2) {
+      // Playback really started: ask for the play ticket the view needs (checked against the server's clock).
+      if (videoId && !playTicket.current) playTicket.current = fetch(`/api/videos/${videoId}/play`, { method: 'POST', credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((j) => j?.ticket ?? null).catch(() => null);
       watched.current += delta; if (reported.current) unsent.current += delta;
       if (!ad) qoe.current?.watched(delta, Math.min(el.videoWidth, el.videoHeight) || 0);
     }
@@ -432,7 +436,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
     const need = Math.min(30, (el.duration || duration) * 0.5);
     if (videoId && !reported.current && need > 0 && watched.current >= need) {
       reported.current = true;
-      fetch(`/api/videos/${videoId}/views`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ watchedSeconds: Math.round(watched.current) }), credentials: 'same-origin' }).catch(() => undefined);
+      const seconds = Math.round(watched.current);
+      void (playTicket.current ?? Promise.resolve(null)).then((ticket) => fetch(`/api/videos/${videoId}/views`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ watchedSeconds: seconds, ...(ticket ? { ticket } : {}) }), credentials: 'same-origin' })).catch(() => undefined);
     }
   };
 

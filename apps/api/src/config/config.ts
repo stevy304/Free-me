@@ -122,6 +122,11 @@ export interface AppConfig {
   safety: SafetyConfig;
   /** To join monetisation: watch hours in the last 365 days and followers (0: not required). */
   monetisation: { minWatchHours: number; minFollowers: number; minMomentViews: number };
+  /**
+   * Which views count (media/view-quality.ts). checks 'full': a play ticket and real watching time are required, and
+   * invalid traffic is recorded instead of counted; 'off' (tests only): the player's word is taken.
+   */
+  views: { checks: 'full' | 'off'; maxPerNetworkPerVideo: number; maxPerAccountPerDay: number; allowAutomated: boolean };
   /** Who runs the service, shown on the legal pages and in notices (see ENVIRONMENT.md). */
   legal: LegalConfig;
   billing: BillingConfig;
@@ -368,6 +373,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),
     media, legal, billing, live,
     // YouTube's Partner Programme: 1,000 followers and 4,000 public watch hours in 12 months, or 10 million Moments views in 90 days.
+    views: {
+      checks: env.VIEW_CHECKS === 'off' && nodeEnv !== 'production' ? 'off' : 'full',
+      maxPerNetworkPerVideo: Math.max(1, count('VIEW_MAX_PER_NETWORK_PER_VIDEO', 100)), maxPerAccountPerDay: Math.max(1, count('VIEW_MAX_PER_ACCOUNT_PER_DAY', 300)),
+      allowAutomated: env.VIEWS_ALLOW_AUTOMATED === 'true' && nodeEnv !== 'production',
+    },
     monetisation: { minWatchHours: count('MONETISE_MIN_WATCH_HOURS', 4000), minFollowers: count('MONETISE_MIN_FOLLOWERS', 1000), minMomentViews: count('MONETISE_MIN_MOMENT_VIEWS', 10_000_000) },
     safety: {
       scanUrl: env.SAFETY_SCAN_URL?.trim() || null, scanToken: env.SAFETY_SCAN_TOKEN?.trim() || null,

@@ -10,7 +10,7 @@ import type { Key } from '@/i18n';
 interface Day { day: string; views: number; watchSeconds: number; newFollowers?: number }
 interface Overview {
   days: number; series: Day[];
-  totals: { views: number; watchSeconds: number; newFollowers: number; followers: number; previous: { views: number; watchSeconds: number; newFollowers: number } };
+  totals: { views: number; watchSeconds: number; newFollowers: number; followers: number; invalidViews?: number; previous: { views: number; watchSeconds: number; newFollowers: number } };
   topVideos: Array<{ id: string; title: string; thumbnailUrl: string | null; durationSeconds: number; views: number; watchSeconds: number; averageViewSeconds: number }>;
 }
 interface VideoStats { video: { id: string; title: string; durationSeconds: number }; lifetime: { views: number; watchSeconds: number; averageViewSeconds: number }; retention: { viewers: number; points: Array<{ at: number; percent: number }> | null } }
@@ -70,6 +70,7 @@ export function HubStats() {
           </div>
         )) : [0, 1, 2].map((i) => <div key={i} className="h-[112px] animate-pulse rounded-2xl bg-surface" />)}
       </div>
+      {!!t?.invalidViews && <p className="flex items-start gap-2 rounded-xl bg-surface px-4 py-3 text-[13px] text-muted"><Icon.Shield size={16} className="mt-0.5 shrink-0" />{tr(t.invalidViews === 1 ? 'stats.invalidViews.one' : 'stats.invalidViews.other', { count: compactNumber(t.invalidViews, locale) })}</p>}
       <section className="rounded-2xl border border-line bg-elevated p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-[16px] font-bold">{tr(METRICS.find(([k]) => k === metric)![2])}</h2>
