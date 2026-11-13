@@ -2,7 +2,28 @@ import { spawn } from 'node:child_process';
 import { setPriority } from 'node:os';
 import { hdrOf, type Hdr } from './filters';
 
+/**
+ * Video apps whose downloads carry their marks inside the file. TikTok (and Douyin) write a `vid:` comment and other
+ * tags into every video saved from the app; the others name themselves in a tag. A screen recording carries none:
+ * the AI moderator looks for the watermark in the pictures instead (safety/ai.ts).
+ */
+const APP_MARKS: Array<[RegExp, string]> = [
+  [/^vid:v[0-9a-z]{6,}/i, 'TikTok'], [/aigc_info|tiktok|musical\.ly|bytedance/i, 'TikTok'], [/douyin/i, 'Douyin'],
+  [/\bkwai\b|kuaishou/i, 'Kwai'], [/\blikee\b/i, 'Likee'], [/snapchat/i, 'Snapchat'], [/\btriller\b/i, 'Triller'],
+];
+/** The app a downloaded video came from, by the marks in its file (container and stream tags), or null. */
+export function madeByApp(tags: Array<Record<string, unknown> | undefined>): string | null {
+  for (const t of tags) {
+    for (const [key, value] of Object.entries(t ?? {})) {
+      for (const [re, app] of APP_MARKS) if (re.test(key) || re.test(String(value))) return app;
+    }
+  }
+  return null;
+}
+
 export interface ProbeResult {
+  /** Downloaded from another video app (its marks are in the file), e.g. 'TikTok'; null otherwise. */
+  madeBy?: string | null;
   durationSeconds: number; width: number; height: number; fps: number; hasAudio: boolean; videoCodec: string; hdr: Hdr;
   /** For copying the video as it is (no re-encoding): its pixel format, H.264 profile and level, bitrate and rotation. */
   pixFmt?: string; profile?: string; level?: number; videoKbps?: number; rotated?: boolean;
@@ -56,7 +77,7 @@ export async function probe(ffprobe: string, path: string): Promise<ProbeResult>
   let out: string;
   try { out = (await run(ffprobe, ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', path])).stdout; }
   catch { throw new MediaError('This file could not be read as a video. Upload an MP4, MOV, MKV, WebM or another common video format.'); }
-  const data = JSON.parse(out) as { format?: { duration?: string }; streams?: Array<Record<string, any>> };
+  const data = JSON.parse(out) as { format?: { duration?: string; tags?: Record<string, unknown> }; streams?: Array<Record<string, any>> };
   const v = data.streams?.find((s) => s.codec_type === 'video' && s.disposition?.attached_pic !== 1);
   if (!v || !v.width || !v.height) {
     if (data.streams?.some((s) => s.codec_type === 'audio')) throw new AudioOnly(Number(data.format?.duration ?? 0));
@@ -72,6 +93,7 @@ export async function probe(ffprobe: string, path: string): Promise<ProbeResult>
   // The video's own bitrate, or (when the container does not say) the file's, which includes the audio.
   const bps = Number(v.bit_rate) || Number(fmt?.bit_rate) || 0;
   return {
+    madeBy: madeByApp([data.format?.tags, ...(data.streams ?? []).map((st) => st.tags as Record<string, unknown> | undefined)]),
     durationSeconds: duration, width: w, height: h, fps: Number.isFinite(fps) && fps > 0 && fps < 241 ? fps : 30, hasAudio: !!data.streams?.some((s) => s.codec_type === 'audio'), videoCodec: v.codec_name, hdr: hdrOf(v),
     pixFmt: v.pix_fmt, profile: v.profile, level: Number(v.level) || undefined, videoKbps: bps ? Math.round(bps / 1000) : undefined, rotated: rotation !== 0 || Math.abs(Number(v.tags?.rotate ?? v.side_data_list?.find((d: any) => d.rotation !== undefined)?.rotation ?? 0)) % 360 !== 0,
   };

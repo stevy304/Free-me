@@ -67,11 +67,28 @@ closes as soon as it is saved. Only the names of changed keys go into the audit 
 | Title, description, tags, and pictures with the AI moderator | While it is transcoded | AI: published, limited or rejected with a reason. Without it: held before it is ever shown |
 | Pictures (frames across the video) | While it is transcoded, when an engine is configured | Held before it is ever shown |
 | No picture engine configured | While it is transcoded | First videos of new Spaces (under a week old or under 3 published videos) wait for a person (`SAFETY_UNSCANNED_REVIEW`) |
+| Re-uploads from other apps (TikTok, Douyin, Kwai, Likee, Snapchat, Triller) | While it is transcoded | Marks the app wrote into the file: not published, at once, with the reason (no AI or person needed). Without such marks (a screen recording), the AI moderator rejects a visible watermark or another account's @name |
 | Edits to title, description, tags | Before they are saved | The video is hidden at the same moment, and a moderator is asked |
 | What is said (automatic transcript) | When captions are made, after publishing | AI: limited or hidden with a reason (appealable). Without it: hidden and a moderator is asked |
 | Comments | Before they are posted; with the AI moderator, low-risk ones (established accounts, nothing the word rules notice) are shown at once and checked by the AI within seconds | Not posted, and the writer is told why; or removed just after it was shown. Edits are checked before they are saved |
 | Live chat | Before it reaches anyone | Not sent; the writer is told why (built-in rules only, so chat stays instant) |
 | Reports from people | Any time | Several established accounts hide the video until a moderator decides (`REPORT_HOLD_THRESHOLD`) |
+
+## Re-uploads from other apps
+
+Free Me does not publish videos downloaded from other apps. They copy someone else's work, and they carry that app's
+logo and the original account's name.
+
+- **Marks in the file** (`media/probe.ts`, `madeByApp`): TikTok writes a `vid:` comment and other tags into every video
+  saved from the app. Kwai, Likee, Snapchat and Triller name themselves in a tag.
+  - A video with such marks is not published, decided at once.
+  - The creator reads why: "upload your original, without the app's logo".
+  - They can appeal; without the AI moderator, the appeal goes to a moderator.
+- **Watermarks in the pictures:** the AI moderator rejects a visible logo or @name tag of another video app (category
+  `reupload`), for example in a screen recording.
+  - A TV channel's or news agency's logo, a brand in the scene, or the creator's own name is not a re-upload.
+- **Without the AI moderator,** a screen recording with no marks in its file is not caught automatically. People can
+  report it.
 
 ## Categories and lines
 
@@ -89,6 +106,7 @@ holds the video (or refuses the comment). The queue puts the most serious first.
 | Harassment or bullying | 0.8 | 40 |
 | Weapons, drugs, other illegal goods | 0.85 | 40 |
 | Spam or scam | 0.9 | 20 |
+| Re-uploaded from another app | 0.6 | 30 |
 
 ## Engines
 

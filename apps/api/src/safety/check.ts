@@ -123,10 +123,16 @@ export interface VideoVerdict extends Decision {
  * JPEGs across the video (base64), taken once and shared by every engine.
  */
 export async function checkVideo(prisma: PrismaClient, config: AppConfig, video: { id: string; title: string; description: string | null; channelId: string; durationSeconds?: number },
-  frames: () => Promise<string[]>, signal?: AbortSignal): Promise<VideoVerdict> {
+  frames: () => Promise<string[]>, signal?: AbortSignal, file: { madeBy?: string | null } = {}): Promise<VideoVerdict> {
   const tags = (await prisma.videoTag.findMany({ where: { videoId: video.id }, select: { tag: { select: { name: true } } } })).map((t) => t.tag.name);
   const text = videoText({ ...video, tags });
   const { scores } = scoreText(text, await moderatorTerms(prisma));
+  // Downloaded from another app: its marks are in the file. Certain, so decided at once (no AI, no person), and the
+  // creator is told how to fix it. They can appeal (e.g. when it is their own video: then they upload the original).
+  if (file.madeBy) {
+    const reason = `This video was downloaded from ${file.madeBy}: the file carries ${file.madeBy}'s marks, and usually its logo and the original account's name. Free Me does not publish videos taken from other apps. If it is your own video, upload the original from your phone's camera or editing app, without ${file.madeBy}'s logo.`;
+    return { hold: true, category: 'reupload', score: 1, priority: POLICY.reupload.priority, reason, scores: { ...scores, reupload: 1 }, action: 'reject', model: null, scanned: true, unscanned: false };
+  }
   let pictures: string[] | null = null;
   const pics = async () => (pictures ??= await frames());
 

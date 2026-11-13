@@ -48,6 +48,7 @@ Not allowed:
 - Spam or scams: fraud, phishing, fake giveaways, misleading titles or thumbnails.
 - Privacy: someone's private information or intimate images shared without consent.
 - Impersonation that misleads people. Illegal goods and services.
+- Re-uploads from other apps (category "reupload"): a visible watermark, logo or account tag of another video app in the pictures means the video was downloaded from there. Look in every corner and along the edges, including a logo that moves between frames: TikTok (the musical-note logo, "TikTok", "@name"), Instagram or Reels, YouTube Shorts, Snapchat, Likee, Kwai, Triller, CapCut templates showing another account. Reject these even when the content itself is fine. A TV channel's or news agency's logo, a brand in the scene, or the creator's own name typed into the video is not another app's watermark.
 
 Rwanda: genocide ideology, genocide denial or minimisation, and ethnic divisionism are crimes. Watch for coded words from the 1994 genocide propaganda (for example "inyenzi" or "inzoka" used about people), calls to "finish" or "exterminate" a group, and denial ("jenoside ntiyabaye"). Remembrance, history, education and survivors' testimony are welcome and important. Content can be in Kinyarwanda, French, English, Swahili or any language: judge it in its own language.
 
@@ -57,7 +58,7 @@ Decide:
 - "publish": nothing breaks the guidelines.
 - "limit": borderline or unclear (shocking but probably newsworthy, suggestive but not explicit, harsh words that may be banter). It stays reachable by its link but is not recommended.
 - "reject": clearly breaks a guideline.
-Choose the category of the most serious problem ("none" when publishing). Give your confidence honestly; say you are unsure rather than guess. The reason is shown to the creator: be specific, respectful and short.`;
+Choose the category of the most serious problem ("none" when publishing). Give your confidence honestly; say you are unsure rather than guess. The reason is shown to the creator: be specific, respectful and short. For a re-upload, name the app and tell them to upload their original video without its logo.`;
 
 const log = new Logger('AiModerator');
 let client: { key: string; url: string | null; anthropic: Anthropic } | null = null;

@@ -19,7 +19,7 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 const KEY = 'sk-ant-api03-test0123456789abcdefghijklmnop';
 
 type Answer = { decision: 'publish' | 'limit' | 'reject'; category?: string; confidence?: number; reason?: string } | 'refuse';
-interface Call { model: string; effort: string; images: number; text: string; cached: boolean; key: string | undefined }
+interface Call { model: string; effort: string; images: number; text: string; cached: boolean; key: string | undefined; system: string }
 
 describe('AI moderator', () => {
   let claude: Server;
@@ -40,7 +40,7 @@ describe('AI moderator', () => {
         const j = JSON.parse(body);
         const content = j.messages[0].content as Array<{ type: string; text?: string }>;
         const text = content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-        calls.push({ model: j.model, effort: j.output_config?.effort, images: content.filter((b) => b.type === 'image').length, text, cached: !!j.system?.[0]?.cache_control, key: (req.headers['x-api-key'] ?? req.headers.authorization) as string | undefined });
+        calls.push({ model: j.model, effort: j.output_config?.effort, images: content.filter((b) => b.type === 'image').length, text, cached: !!j.system?.[0]?.cache_control, system: String(j.system?.[0]?.text ?? ''), key: (req.headers['x-api-key'] ?? req.headers.authorization) as string | undefined });
         const a = /^(A new video|The creator appeals)/.test(text) || wordsToo ? answer(j.model, text) : { decision: 'publish' as const };
         const base = { id: 'msg_test', type: 'message', role: 'assistant', model: j.model, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 20 } };
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -266,5 +266,19 @@ describe('AI moderator', () => {
     expect(calls.length - sync).toBe(2);
     ctx.config.safety.aiCommentsPerDay = 0;
   }, 60_000);
+
+  test('a re-upload from another app (its watermark in the pictures) is not published, with the reason', async () => {
+    await admin();
+    const reason = 'A TikTok watermark and another account\'s @name are visible: this video was downloaded from TikTok. Upload your original video without its logo.';
+    answer = () => ({ decision: 'reject', category: 'reupload', confidence: 0.95, reason });
+    const { agent, id } = await upload('screenrec', 'Funny dance');
+    const v = await settle(agent, id);
+    // The moderator is told to look for other apps' watermarks in every corner.
+    expect(calls[0].system).toMatch(/Re-uploads from other apps/);
+    expect(calls[0].system).toMatch(/TikTok/);
+    expect(v).toMatchObject({ status: 'FLAGGED', processingStage: 'Not published' });
+    expect(v.safety).toMatchObject({ decision: 'reject', reason, canAppeal: true });
+    await request(ctx.http).get(`/api/videos/${id}`).expect(404);
+  });
 
 });

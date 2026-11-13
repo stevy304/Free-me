@@ -230,15 +230,16 @@ export class VideoProcessor {
   private async safetyGate(video: Video, source: string, info: ProbeResult, work: string, signal?: AbortSignal): Promise<boolean> {
     if (video.safetyCheckedAt) return true;
     if (video.screeningClearedAt) { await this.prisma.video.update({ where: { id: video.id }, data: { safetyCheckedAt: new Date() } }); return true; }
-    const verdict = await checkVideo(this.prisma, this.config, video, () => frames(this.config.media.ffmpegPath, source, info, join(work, 'safety')), signal);
+    const verdict = await checkVideo(this.prisma, this.config, video, () => frames(this.config.media.ffmpegPath, source, info, join(work, 'safety')), signal, { madeBy: info.madeBy });
     signal?.throwIfAborted();
     this.log.log({ event: 'video_safety_checked', videoId: video.id, action: verdict.action, model: verdict.model, category: verdict.category, scanned: verdict.scanned, unscanned: verdict.unscanned, scores: verdict.scores });
-    const decided = { safetyDecision: verdict.action === 'hold' ? null : verdict.action, safetyReason: verdict.model ? verdict.reason : null, safetyModel: verdict.model };
+    // The reason is written for the creator when a machine decided alone (the AI, or the file's own marks).
+    const decided = { safetyDecision: verdict.action === 'hold' ? null : verdict.action, safetyReason: verdict.model || verdict.action === 'reject' ? verdict.reason : null, safetyModel: verdict.model };
     if (verdict.action === 'hold') { await hold(this.prisma, video.id, verdict.reason ?? 'Held by the automatic check', verdict.priority); return false; }
     if (verdict.action === 'reject') {
       // Decided by the AI alone: not published, the creator sees why and can appeal. Kept on record (resolved).
       await this.prisma.video.update({ where: { id: video.id }, data: { ...decided, status: 'FLAGGED', processingStage: 'Not published', processingProgress: 0 } });
-      await recordAutomatic(this.prisma, video.id, `Rejected automatically by ${verdict.model}: ${verdict.reason}`, verdict.category);
+      await recordAutomatic(this.prisma, video.id, `Rejected automatically by ${verdict.model ?? 'the file check'}: ${verdict.reason}`, verdict.category);
       return false;
     }
     const now = new Date();
