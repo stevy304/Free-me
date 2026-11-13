@@ -14,6 +14,7 @@ import type { Storage } from '../media/storage';
 import { ViewCounter } from '../media/views';
 import { MediaUrls } from './media-urls';
 import { hasPlus } from '../billing/billing';
+import { hotViewable } from '../engagement/hot-video';
 
 /** Who is watching, for counting: the account, or a hash of address and browser for visitors. */
 const viewerKey = (auth: AuthContext | null, req: AppRequest) => auth ? `u:${auth.user.id}` : `a:${createHash('sha256').update(`${clientIp(req) ?? 'unknown'}|${userAgent(req) ?? ''}`).digest('hex').slice(0, 32)}`;
@@ -111,8 +112,8 @@ export class PlaybackController {
   async view(@Param('id', ParseUUIDPipe) id: string, @Body() body: ViewDto, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
     const ip = clientIp(req) ?? 'unknown';
     await this.limits.consume(`views:${ip}`, 600, 3600);
-    const v = await this.viewable(id, auth);
-    if (v.channel.userId === auth?.user.id) return { counted: false };
+    const v = await hotViewable(this.prisma, id, auth);
+    if (v.ownerId === auth?.user.id) return { counted: false };
     const minimum = Math.min(30, v.durationSeconds * 0.5);
     if (body.watchedSeconds + 0.5 < minimum) throw new BadRequestException('Not watched long enough to count.');
     const viewer = viewerKey(auth, req);
@@ -126,8 +127,8 @@ export class PlaybackController {
   @ApiOperation({ summary: 'Watch-time heartbeat after the view was counted: seconds played since the last report (checked against real time)' })
   async watch(@Param('id', ParseUUIDPipe) id: string, @Body() body: ViewDto, @CurrentAuth() auth: AuthContext | null, @Req() req: AppRequest) {
     await this.limits.consume(`watch:${clientIp(req) ?? 'unknown'}`, 1200, 3600);
-    const v = await this.viewable(id, auth);
-    if (v.channel.userId === auth?.user.id) return { seconds: 0 };
+    const v = await hotViewable(this.prisma, id, auth);
+    if (v.ownerId === auth?.user.id) return { seconds: 0 };
     const plus = !!auth && await hasPlus(this.prisma, auth.user);
     return { seconds: await this.views.addWatch(id, viewerKey(auth, req), body.watchedSeconds, v.durationSeconds, plus) };
   }

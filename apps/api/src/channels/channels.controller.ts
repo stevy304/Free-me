@@ -1,4 +1,5 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { authChanged } from '../auth/session-cache';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { handleProblem, isCountryCode, isLanguageCode, normalizeHandle } from '@free-me/shared';
 import { PrismaService } from '../database/prisma.service';
@@ -46,6 +47,7 @@ export class ChannelsController {
       if (!auth.user.roles.includes('CREATOR')) await tx.user.update({ where: { id: auth.user.id }, data: { roles: { set: [...auth.user.roles, 'CREATOR'] } } });
       return c;
     });
+    authChanged(auth.user.id); // now a creator
     await this.audit.record({ userId: auth.user.id, action: 'CHANNEL_CREATED', entityType: 'Channel', entityId: channel.id, req, details: { handle } });
     return { channel: publicChannel(channel) };
   }

@@ -883,6 +883,15 @@ model Notification {
 }
 
 /// Views and watch time of one video on one day (UTC), written by the view counter's batches. Creator Hub's charts read it.
+/// A batch of counted views and watch time already written (ViewCounter.flush): written in the same transaction as
+/// the counts, so a batch retried after a crash is never added twice. Rows older than a week are deleted.
+model CounterFlush {
+  stamp                 String            @id
+  createdAt             DateTime          @default(now())
+
+  @@index([createdAt])
+}
+
 model VideoDailyStat {
   videoId               String
   video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)

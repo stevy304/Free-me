@@ -1,4 +1,5 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { authChanged } from './session-cache';
 import type { Request } from 'express';
 import { DISPLAY_NAME_MAX, isLanguageCode } from '@free-me/shared';
 import type { User } from '@prisma/client';
@@ -38,11 +39,13 @@ export class AccountsService {
       await this.audit.record({ userId: user.id, action: 'ACCOUNT_CREATED', entityType: 'User', entityId: user.id, req });
     } else if (!user.emailVerifiedAt) {
       user = await this.prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
+      authChanged(user.id);
     }
     if (user.status !== 'ACTIVE') throw new ForbiddenException('This account is suspended. Contact support if you think this is a mistake.');
     // Administrators are named in configuration (ADMIN_EMAILS), never by a request.
     if (this.config.adminEmails.includes(email) && !user.roles.includes('ADMIN')) {
       user = await this.prisma.user.update({ where: { id: user.id }, data: { roles: { set: [...new Set([...user.roles, 'ADMIN' as const])] } } });
+      authChanged(user.id);
       await this.audit.record({ userId: user.id, action: 'ADMIN_GRANTED_BY_CONFIG', entityType: 'User', entityId: user.id, req });
     }
     if (extras.avatarUrl) await this.prisma.profile.updateMany({ where: { userId: user.id, avatarUrl: null }, data: { avatarUrl: extras.avatarUrl } });

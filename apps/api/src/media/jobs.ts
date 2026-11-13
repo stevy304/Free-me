@@ -14,6 +14,7 @@ import { MediaError, VideoProcessor } from './process';
 import type { Storage } from './storage';
 import type { ChunkRunner } from './chunks';
 import { ViewCounter } from './views';
+import { ProgressBuffer } from './progress';
 
 /**
  * `transcode` makes a video playable (360p, thumbnails, seek previews); `upgrade` adds the higher qualities. Upgrades
@@ -29,6 +30,8 @@ export class MediaJobs {
   private readonly log = new Logger('MediaJobs');
   readonly processor: VideoProcessor;
   readonly views: ViewCounter;
+  /** Resume positions saved by players, written to the database in batches with the views (see progress.ts). */
+  readonly progress: ProgressBuffer;
   private readonly localLocks = new Set<string>();
 
   constructor(private readonly prisma: PrismaClient, private readonly storage: Storage, private readonly config: AppConfig, private readonly redis: Redis | null,
@@ -38,6 +41,7 @@ export class MediaJobs {
     chunks: ChunkRunner | null = null) {
     this.processor = new VideoProcessor(prisma, storage, config, chunks);
     this.views = new ViewCounter(prisma, redis);
+    this.progress = new ProgressBuffer(prisma, redis);
   }
 
   private async withLock<T>(videoId: string, fn: (lease?: AbortSignal) => Promise<T>): Promise<T> {

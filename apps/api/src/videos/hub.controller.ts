@@ -1,4 +1,5 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Put, Query, Req } from '@nestjs/common';
+import { forgetHotVideo } from '../engagement/hot-video';
 import { feedsChanged } from '../catalog/feed-cache';
 import { announceVideo } from '../notifications/notify';
 import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
@@ -102,6 +103,7 @@ export class HubController {
     }
     await this.prisma.$transaction(async (tx) => {
       await tx.video.update({ where: { id }, data });
+      forgetHotVideo(id);
       if (body.tags) {
         const names = [...new Set(body.tags.map((t) => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean))].slice(0, 30);
         await tx.videoTag.deleteMany({ where: { videoId: id } });
@@ -185,6 +187,7 @@ export class HubController {
     const v = await this.mine(auth, id);
     if (v.uploadId && v.sourceFileS3Key) await this.storage.abortMultipart(v.sourceFileS3Key, v.uploadId);
     await this.prisma.video.delete({ where: { id } });
+    forgetHotVideo(id);
     await this.queue.add({ name: 'purge', videoId: id });
     await feedsChanged();
     await this.audit.record({ userId: auth.user.id, action: 'VIDEO_DELETED', entityType: 'Video', entityId: id, req, details: { title: v.title } });

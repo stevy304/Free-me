@@ -83,6 +83,8 @@ export interface AppConfig {
   /** 32+ random characters; signs the short-lived OAuth state cookie and keys the sign-in code hashes. */
   sessionSecret: string;
   sessionTtlDays: number;
+  /** Seconds each API process keeps a session and its account (auth/session-cache.ts); 0 = read them every request. */
+  sessionCacheSeconds: number;
   google: { clientId: string; clientSecret: string } | null;
   mail: { transport: 'smtp' | 'console' | 'memory'; from: string; smtp: { host: string; port: number; secure: boolean; user?: string; pass?: string } | null };
   /** Accounts that are administrators (their email addresses). Applied each time they sign in. */
@@ -337,6 +339,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
     sessionTtlDays: Math.min(90, Math.max(1, Number(env.SESSION_TTL_DAYS || 30))),
+    sessionCacheSeconds: nodeEnv === 'test' && !env.SESSION_CACHE_SECONDS ? 0 : Math.min(60, count('SESSION_CACHE_SECONDS', 15)),
     google: googleId && googleSecret ? { clientId: googleId, clientSecret: googleSecret } : null,
     mail: { transport, from, smtp }, adminEmails, trustProxy: Number(env.TRUST_PROXY ?? (prod ? 1 : 0)), feedCacheSeconds: nodeEnv === 'test' && !env.FEED_CACHE_SECONDS ? 0 : count('FEED_CACHE_SECONDS', 60), metricsToken, workerMetricsPort, workerMetricsHost: env.WORKER_METRICS_HOST?.trim() || '127.0.0.1',
     docsEnabled: env.API_DOCS === 'true' || (!prod && env.API_DOCS !== 'false'),

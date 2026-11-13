@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { authChanged } from '../auth/session-cache';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type Campaign, type Payment, type PrismaClient, type User } from '@prisma/client';
 import { PROPOSED_SPLIT, allocatePool, splitRevenue } from '@free-me/shared';
@@ -322,6 +323,7 @@ export class Billing {
     const until = user[field];
     const from = until && until > new Date() ? until.getTime() : Date.now();
     await tx.user.update({ where: { id: userId }, data: { [field]: new Date(from + months * MONTH) } });
+    authChanged(userId); // announced again two seconds later, after the transaction commits
   }
 
   private async extendPremium(tx: Prisma.TransactionClient, userId: string, months: number) {
@@ -330,6 +332,7 @@ export class Billing {
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     const from = isPremium(user) ? user.premiumUntil!.getTime() : Date.now();
     await tx.user.update({ where: { id: userId }, data: { premiumUntil: new Date(from + months * MONTH) } });
+    authChanged(userId);
     await tx.channel.updateMany({ where: { userId, isVerified: false }, data: { isVerified: true, verificationSource: 'PREMIUM' } });
   }
 

@@ -1,4 +1,5 @@
 import { MailService } from './mail/mail.service';
+import { setAuthPublisher } from './auth/session-cache';
 import 'reflect-metadata';
 import { ConsoleLogger, Logger } from '@nestjs/common';
 import { PrismaClient, type Prisma } from '@prisma/client';
@@ -38,6 +39,8 @@ async function main() {
   const log = new Logger('Worker');
   const prisma = new PrismaClient();
   const connection = () => new Redis(config.redisUrl!, { maxRetriesPerRequest: null });
+  // Plans bought or granted here (payments, administrators) reach the API processes' session caches at once.
+  setAuthPublisher(new Redis(config.redisUrl!));
   // Instant updates from the worker (processing progress, notifications, payments) reach browsers through Redis.
   const emitter = new Emitter(new Redis(config.redisUrl));
   setRealtimeSink((r, event, data) => emitter.to(r).emit(event, data));
@@ -162,7 +165,7 @@ async function main() {
         const job = { name: playable ? 'upgrade' : 'transcode', videoId } as const;
         await enqueue(job);
       }
-    } else await jobs.views.flush();
+    } else await Promise.all([jobs.views.flush(), jobs.progress.flush()]); // flush-views: counts and resume positions
   }, { connection: connection(), prefix: config.media.queuePrefix, concurrency: 1 });
 
   // Live from OBS and TV encoders: nginx-rtmp (on this server) writes HLS to LIVE_RTMP_HLS_DIR; copy it to storage

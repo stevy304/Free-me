@@ -8,6 +8,8 @@ import { publicChannel } from '../users/serialize';
 import { PUBLIC_VIDEO, videoCard } from './serialize';
 import { MediaUrls } from '../videos/media-urls';
 import { hasPlus } from '../billing/billing';
+import { RedisService } from '../database/redis.service';
+import { ProgressBuffer } from '../media/progress';
 
 /** Keyset pagination cursor: "<publishedAt ISO>_<id>", stable while new videos arrive. */
 function parseCursor(cursor?: string) {
@@ -22,7 +24,10 @@ const pageSize = (v?: string) => Math.min(48, Math.max(1, Number(v) || 24));
 @ApiTags('catalog')
 @Controller()
 export class CatalogController {
-  constructor(private readonly prisma: PrismaService, private readonly urls: MediaUrls) {}
+  private readonly positions: ProgressBuffer;
+  constructor(private readonly prisma: PrismaService, private readonly urls: MediaUrls, redis: RedisService) {
+    this.positions = new ProgressBuffer(prisma, redis.client);
+  }
 
   @Get('categories')
   @ApiOperation({ summary: 'Video categories' })
@@ -67,12 +72,15 @@ export class CatalogController {
     if (v.reviewHoldAt && !owner) throw new NotFoundException('This video is being reviewed by our moderators.');
     const card = videoCard(v, this.urls);
     const fullQuality = owner || (!!auth && await hasPlus(this.prisma, auth.user));
-    const [reaction, history, following, saved] = auth ? await Promise.all([
+    const [reaction, stored, following, saved, pending] = auth ? await Promise.all([
       this.prisma.like.findUnique({ where: { userId_videoId: { userId: auth.user.id, videoId: id } }, select: { isLike: true } }),
       this.prisma.watchHistory.findUnique({ where: { userId_videoId: { userId: auth.user.id, videoId: id } }, select: { progressSeconds: true, completed: true } }),
       this.prisma.subscription.findUnique({ where: { userId_channelId: { userId: auth.user.id, channelId: v.channelId } }, select: { id: true } }),
       this.prisma.playlistItem.count({ where: { videoId: id, playlist: { userId: auth.user.id } } }),
-    ]) : [null, null, null, 0];
+      this.positions.pending(auth.user.id, id),
+    ]) : [null, null, null, 0, null];
+    // A position saved in the last few seconds may not be in the database yet (see media/progress.ts).
+    const history = pending ? { progressSeconds: pending.seconds, completed: pending.completed } : stored;
     return {
       video: { ...card, thumbnailUrl: await this.urls.thumb(v), description: v.description, status: v.status, visibility: v.visibility, likeCount: v.likeCount, commentCount: v.commentCount,
         commentsOpen: v.commentsEnabled && !v.madeForKids, takenDownAt: v.takenDownAt,

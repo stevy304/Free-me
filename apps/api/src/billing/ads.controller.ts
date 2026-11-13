@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
+import { authChanged } from '../auth/session-cache';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, IsUUID, IsUrl, Length, Max, Min } from 'class-validator';
 import type { Advertiser, BusinessVerification, Campaign, Video } from '@prisma/client';
@@ -114,7 +115,7 @@ export class AdsController {
         where: { userId: auth.user.id }, update: { businessName: body.businessName.trim(), country: body.country.toUpperCase() },
         create: { userId: auth.user.id, businessName: body.businessName.trim(), country: body.country.toUpperCase(), businessType: 'business', currency: EARNINGS_CURRENCY },
       });
-      if (!auth.user.roles.includes('ADVERTISER')) await tx.user.update({ where: { id: auth.user.id }, data: { roles: { set: [...auth.user.roles, 'ADVERTISER'] } } });
+      if (!auth.user.roles.includes('ADVERTISER')) { await tx.user.update({ where: { id: auth.user.id }, data: { roles: { set: [...auth.user.roles, 'ADVERTISER'] } } }); authChanged(auth.user.id); }
       const now = new Date();
       return tx.campaign.create({ data: {
         advertiserId: adv.id, name: body.headline.trim(), headline: body.headline.trim(), destinationUrl: body.destinationUrl, videoId: v.id, days, dailyRateCents: rate, cpmRateCents: cpm,

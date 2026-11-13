@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
+import { clearHotVideos } from '../engagement/hot-video';
 import { feedsChanged } from '../catalog/feed-cache';
 import { AUTOMATED_MATCH } from '../media/screening';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
@@ -82,7 +83,8 @@ export class ModerationController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Remove the video, dismiss the report, or restore a removed video (e.g. after a counter-notice)' })
   async decide(@Param('id', ParseUUIDPipe) id: string, @Body() body: DecisionDto, @CurrentAuth() auth: AuthContext, @Req() req: AppRequest) {
-    try { return await this.decision(id, body, auth, req); } finally { await feedsChanged(); }
+    // Removed or released: the counting endpoints of this server see it at once (others within seconds).
+    try { return await this.decision(id, body, auth, req); } finally { clearHotVideos(); await feedsChanged(); }
   }
 
   private async decision(id: string, body: DecisionDto, auth: AuthContext, req: AppRequest) {
