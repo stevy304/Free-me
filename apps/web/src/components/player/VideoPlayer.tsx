@@ -6,6 +6,7 @@ import type Hls from 'hls.js';
 import { languageName } from '@free-me/shared';
 import { AdBreak, type AdSlot } from './AdBreak';
 import { DATA_SAVER_MAX, dataSaverActive } from '@/lib/datasaver';
+import { av1Preferred, codecFamily } from '@/lib/codecs';
 
 export interface CaptionTrack { language: string; auto: boolean; url: string }
 
@@ -256,20 +257,27 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
       el.src = url;
       autoplay();
     } else {
-      import('hls.js').then(({ default: H }) => {
+      Promise.all([import('hls.js'), av1Preferred()]).then(([{ default: H }, av1]) => {
         if (cancelled) return;
         if (!H.isSupported()) { setError('This browser cannot play this video.'); return; }
+        // Popular videos also come in AV1 (fewer bytes). hls.js keeps to one codec for the whole playback; this says
+        // which one when both are there. A device that cannot decode one never sees it (hls.js drops those).
+        const family = av1 ? 'av01' : 'avc1';
         // startFragPrefetch: the first segment downloads while the player is still setting up.
-        const h = new H({ capLevelToPlayerSize: true, startLevel: -1, startFragPrefetch: true, maxBufferLength: 30, backBufferLength: 60 });
+        const h = new H({ capLevelToPlayerSize: true, startLevel: -1, startFragPrefetch: true, maxBufferLength: 30, backBufferLength: 60, videoPreference: { videoCodec: family } });
         hls.current = h;
         h.on(H.Events.MANIFEST_PARSED, () => {
           autoplay();
-          setLevels(h.levels.map((l, index) => ({ index, height: l.height, width: l.width, label: label(l.height, l.width) })).reverse());
+          // The quality menu and data saver work on the chosen codec's renditions only (each quality is listed once).
+          const pool = h.levels.map((l, index) => ({ l, index })).filter(({ l }) => codecFamily(l.codecSet) === family);
+          const usable = pool.length ? pool : h.levels.map((l, index) => ({ l, index }));
+          setLevels(usable.map(({ l, index }) => ({ index, height: l.height, width: l.width, label: label(l.height, l.width) })).reverse());
           const track = h.audioTracks[0];
           if (track?.url && url === src) setAudio({ for: src, url: track.url });
           // Data saver: "Auto" stays at 360p or below (the viewer can still pick a higher quality).
-          const cap = h.levels.reduce((best, l, i) => (Math.min(l.width, l.height) <= DATA_SAVER_MAX && (best < 0 || l.height * l.width > h.levels[best].height * h.levels[best].width) ? i : best), -1);
-          const on = dataSaverActive() && cap >= 0 && cap < h.levels.length - 1;
+          const cap = usable.reduce((best, { l, index: i }) => (Math.min(l.width, l.height) <= DATA_SAVER_MAX && (best < 0 || l.height * l.width > h.levels[best].height * h.levels[best].width) ? i : best), -1);
+          const top = usable.reduce((a, b) => (b.l.height * b.l.width > a.l.height * a.l.width ? b : a)).index;
+          const on = dataSaverActive() && cap >= 0 && cap !== top;
           setSaver(on);
           if (on) { h.autoLevelCapping = cap; h.nextLoadLevel = Math.min(h.nextLoadLevel, cap); }
           if (quality !== null && quality >= 0 && quality < h.levels.length) {

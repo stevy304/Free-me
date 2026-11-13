@@ -157,6 +157,11 @@ export interface MediaConfig {
    * did not reach HD_MIN_VIEWS by then keeps its qualities up to 720p for good. Originals are often the largest file.
    */
   sourceRetentionDays: number;
+  /**
+   * AV1 renditions for popular videos (see media/av1.ts): about a third fewer bytes than H.264 for the same picture,
+   * for viewers whose device decodes AV1. Made once a video has `minViews` views; minViews 0 turns AV1 off.
+   */
+  av1: { minViews: number; preset: number; crf: number };
   workerConcurrency: number;
   upgradeConcurrency: number;
   /** Long videos are encoded in pieces any worker server can take (see media/chunks.ts). */
@@ -240,6 +245,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const count = (k: string, d: number) => { const v = env[k]?.trim(); if (!v) return d; const n = Number(v); if (!Number.isSafeInteger(n) || n < 0) { problems.push(`${k} must be a whole number of 0 or more.`); return d; } return n; };
   const hdMinViews = count('HD_MIN_VIEWS', 100);
   const freeMaxShort = count('FREE_MAX_QUALITY', 720);
+  const av1Preset = count('AV1_PRESET', 8);
+  if (av1Preset > 13) problems.push('AV1_PRESET must be from 0 (slowest, smallest) to 13 (fastest).');
+  const av1Crf = count('AV1_CRF', 32);
+  if (av1Crf < 10 || av1Crf > 55) problems.push('AV1_CRF must be from 10 to 55.');
   if (freeMaxShort && ![144, 240, 360, 480, 720, 1080, 1440, 2160].includes(freeMaxShort)) problems.push('FREE_MAX_QUALITY must be 0 (no limit) or one of 144, 240, 360, 480, 720, 1080, 1440, 2160.');
   const media: MediaConfig = {
     driver, s3, localDir: env.LOCAL_STORAGE_DIR?.trim() || './.data/storage', publicBaseUrl, maxUploadBytes, partBytes,
@@ -247,6 +256,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     preset: env.TRANSCODE_PRESET?.trim() || 'veryfast', presetHigh: env.TRANSCODE_PRESET_HIGH?.trim() || 'superfast',
     copyTopRung: env.COPY_TOP_RUNG !== 'false',
     hdMinViews, freeMaxShort, sourceRetentionDays: count('SOURCE_RETENTION_DAYS', 0),
+    av1: { minViews: count('AV1_MIN_VIEWS', 500), preset: av1Preset, crf: av1Crf },
     chunked: env.CHUNKED_ENCODING !== 'false', chunkMinSeconds: Math.max(10, Number(env.CHUNK_MIN_SECONDS) || 120),
     chunkSeconds: Math.max(4, Math.round((Number(env.CHUNK_SECONDS) || 30) / 2) * 2), chunkConcurrency: Math.max(1, Number(env.CHUNK_CONCURRENCY) || 1),
     encoder: (['nvenc', 'qsv'].includes(env.VIDEO_ENCODER?.trim() ?? '') ? env.VIDEO_ENCODER!.trim() : 'libx264') as MediaConfig['encoder'], workerConcurrency: Math.max(1, Number(env.WORKER_CONCURRENCY) || 2), upgradeConcurrency: Math.max(1, Math.floor(Number(env.WORKER_UPGRADE_CONCURRENCY) || 1)), queuePrefix: env.QUEUE_PREFIX?.trim() || 'fm',

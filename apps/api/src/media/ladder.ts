@@ -53,7 +53,7 @@ export function codecsFor(r: PlannedRung): string {
   return `avc1.6400${level}`;
 }
 
-export interface MasterEntry { name: string; width: number; height: number; bandwidth: number; codecs: string; frameRate: number; playlist: string }
+export interface MasterEntry { name: string; width: number; height: number; bandwidth: number; codecs: string; frameRate: number; playlist: string; codec?: 'h264' | 'av1' }
 
 /**
  * The master playlist: one line per rendition, lowest first (players start low and climb). With `audio`, the

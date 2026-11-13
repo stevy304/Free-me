@@ -9,6 +9,7 @@ import { mediaPrefix, wantedLocation } from './keys';
 import { LATE_FOLDERS } from './captions';
 import { autoCaptions, extractSpeech } from './autocaptions';
 import { AudioOnly, probe } from './probe';
+import { ffmpegEncoders } from './filters';
 import { MediaError, VideoProcessor } from './process';
 import type { Storage } from './storage';
 import type { ChunkRunner } from './chunks';
@@ -18,7 +19,7 @@ import { ViewCounter } from './views';
  * `transcode` makes a video playable (360p, thumbnails, seek previews); `upgrade` adds the higher qualities. Upgrades
  * have a lower priority, so a new upload never waits for another video's 1080p or 4K.
  */
-export type MediaJob = { name: 'transcode'; videoId: string } | { name: 'upgrade'; videoId: string } | { name: 'relocate'; videoId: string } | { name: 'purge'; videoId: string } | { name: 'caption'; videoId: string };
+export type MediaJob = { name: 'transcode'; videoId: string } | { name: 'upgrade'; videoId: string } | { name: 'av1'; videoId: string } | { name: 'relocate'; videoId: string } | { name: 'purge'; videoId: string } | { name: 'caption'; videoId: string };
 
 /** Thrown when a video is busy with another job; the queue retries later. */
 export class VideoBusy extends Error {}
@@ -249,6 +250,32 @@ export class MediaJobs {
   }
 
   /**
+   * Popular videos that get AV1 renditions (AV1_MIN_VIEWS, see av1.ts): ready, complete (no HD waiting, nothing
+   * processing), not removed, watched enough, never queued for AV1. Most watched first. Each is claimed before it is
+   * returned (av1QueuedAt), so it is queued once; nothing when AV1 is off or this ffmpeg cannot encode it.
+   */
+  async popularAv1(limit = 20, now = new Date()): Promise<string[]> {
+    const min = this.config.media.av1.minViews;
+    if (!min || !(await ffmpegEncoders(this.config.media.ffmpegPath)).has('libsvtav1')) return [];
+    const rows = await this.prisma.video.findMany({
+      where: { av1QueuedAt: null, status: 'READY', processingStage: 'Ready', hdPending: false, takenDownAt: null, hlsMasterKey: { not: null }, viewCount: { gte: BigInt(min) } },
+      orderBy: { viewCount: 'desc' }, take: limit, select: { id: true },
+    });
+    const claimed: string[] = [];
+    for (const { id } of rows) {
+      const r = await this.prisma.video.updateMany({ where: { id, av1QueuedAt: null }, data: { av1QueuedAt: now } });
+      if (r.count) claimed.push(id);
+    }
+    return claimed;
+  }
+
+  /** AV1 renditions of a popular video; the lock is held only while publishing them (see VideoProcessor.processAv1). */
+  async av1(videoId: string, signal?: AbortSignal) {
+    const added = await this.processor.processAv1(videoId, (fn) => this.withLock(videoId, fn), signal);
+    if (added.length) this.log.log(`${videoId}: AV1 ${added.join(', ')}`);
+  }
+
+  /**
    * Storage saving (SOURCE_RETENTION_DAYS): deletes the original upload of ready videos older than that, once nothing
    * still needs it: automatic captions were tried (when they are on), no job is running on the video (lock), and a
    * video still waiting for its HD qualities gives that up (it keeps up to 720p). Returns how many were removed.
@@ -280,6 +307,7 @@ export class MediaJobs {
   async run(job: MediaJob, final: boolean, signal?: AbortSignal) {
     if (job.name === 'transcode') return this.transcode(job.videoId, final, signal);
     if (job.name === 'upgrade') return this.transcode(job.videoId, final, signal, 'rest');
+    if (job.name === 'av1') return this.av1(job.videoId, signal);
     if (job.name === 'caption') {
       try { return await this.backfillCaption(job.videoId, signal); }
       catch (error) {

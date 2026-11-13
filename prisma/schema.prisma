@@ -308,6 +308,8 @@ model Video {
   /// Hidden until a moderator reviews it: reported by several established accounts (REPORT_HOLD_THRESHOLD)
   reviewHoldAt          DateTime?
   hdPending             Boolean           @default(false)
+  /// When the AV1 renditions (popular videos, AV1_MIN_VIEWS) were queued; null = not yet. Set once, so it is queued once.
+  av1QueuedAt           DateTime?
   publishedAt           DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
@@ -331,6 +333,7 @@ model Video {
 
   @@index([status, captionAttemptedAt])
   @@index([hdPending, viewCount])
+  @@index([av1QueuedAt, viewCount])
   @@index([channelId])
   @@index([categoryId])
   @@index([status, visibility])
@@ -352,12 +355,12 @@ model VideoRendition {
   bitrateKbps           Int
   playlistKey           String            // variant playlist, relative to the video's media prefix ("hls/720/index.m3u8")
   fileSizeBytes         BigInt
-  codec                 String            @default("h264")
+  codec                 String            @default("h264") // "h264" or "av1" (the same resolution can exist in both)
   codecs                String            @default("avc1.640028,mp4a.40.2") // RFC 6381, for the master playlist
   frameRate             Float             @default(30)
   createdAt             DateTime          @default(now())
 
-  @@unique([videoId, resolution])
+  @@unique([videoId, resolution, codec])
   @@index([videoId])
 }
 

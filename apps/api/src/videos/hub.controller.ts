@@ -54,7 +54,7 @@ export class HubController {
       takenDownAt: v.takenDownAt, takedownReason: v.takedownReason,
       createdAt: v.createdAt, publishedAt: v.publishedAt, thumbnailUrl: await this.urls.thumb(v), customThumbnail: v.customThumbnail,
       thumbnailCandidates: await Promise.all(v.thumbnailCandidates.map((k) => this.urls.file(v, k))),
-      renditions: (v.renditions ?? []).sort((a, b) => a.height * a.width - b.height * b.width).map((r) => r.resolution),
+      renditions: (v.renditions ?? []).sort((a, b) => a.height * a.width - b.height * b.width).map((r) => r.resolution).filter((name, i, all) => all.indexOf(name) === i),
       playbackUrl: this.urls.playback(v), sourceSizeBytes: v.sourceSizeBytes?.toString() ?? null,
       captions: (await this.prisma.caption.findMany({ where: { videoId: v.id }, orderBy: { language: 'asc' } }))
         .map((c) => ({ language: c.language, source: c.source, cues: c.cueCount, updatedAt: c.updatedAt, url: `/api/videos/${v.id}/captions/${c.language}.vtt` })),

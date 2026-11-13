@@ -57,7 +57,7 @@ async function main() {
   const media = new Queue<MediaJob>(MEDIA_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
   const upgrades = new Queue<MediaJob>(MEDIA_UPGRADE_QUEUE, { connection: connection(), prefix: config.media.queuePrefix });
   const enqueue = async (job: MediaJob) => {
-    const queue = job.name === 'upgrade' || job.name === 'caption' ? upgrades : media;
+    const queue = job.name === 'upgrade' || job.name === 'caption' || job.name === 'av1' ? upgrades : media;
     await queue.add(job.name, job, jobOptions(job));
   };
   const jobs = new MediaJobs(prisma, storage, config, new Redis(config.redisUrl), enqueue, new QueueChunks(chunkQueue, chunkEvents, chunkDestinations));
@@ -108,6 +108,9 @@ async function main() {
   await maintenance.upsertJobScheduler('recover-stuck', { every: 5 * 60_000 }, { name: 'recover-stuck' });
   // Popularity-based encoding: videos that reached HD_MIN_VIEWS get their 1080p and above.
   await maintenance.upsertJobScheduler('hd-upgrades', { every: 60_000 }, { name: 'hd-upgrades' });
+  // AV1 for videos that reached AV1_MIN_VIEWS: fewer bytes for every later viewer whose device decodes it.
+  if (config.media.av1.minViews) await maintenance.upsertJobScheduler('av1-upgrades', { every: 5 * 60_000 }, { name: 'av1-upgrades' });
+  else await maintenance.removeJobScheduler('av1-upgrades').catch(() => undefined);
   // Storage saving: originals of ready videos older than SOURCE_RETENTION_DAYS (off by default).
   if (config.media.sourceRetentionDays) await maintenance.upsertJobScheduler('expire-sources', { every: 3600_000 }, { name: 'expire-sources' });
   // Money: check pending payments every minute; end memberships and share yesterday's ad revenue every 15 minutes.
@@ -143,6 +146,15 @@ async function main() {
         catch (e) { await prisma.video.updateMany({ where: { id: videoId }, data: { hdPending: true } }); throw e; }
       }
       if (ids.length) log.log({ event: 'hd_upgrades_queued', count: ids.length });
+    }
+    else if (job.name === 'av1-upgrades') {
+      const ids = await jobs.popularAv1();
+      for (const videoId of ids) {
+        // Not queued: clear the claim so the next run tries again.
+        try { await enqueue({ name: 'av1', videoId }); }
+        catch (e) { await prisma.video.updateMany({ where: { id: videoId }, data: { av1QueuedAt: null } }); throw e; }
+      }
+      if (ids.length) log.log({ event: 'av1_upgrades_queued', count: ids.length });
     }
     else if (job.name === 'recover-stuck') {
       // A playable video that stopped before its higher qualities only needs the second job.

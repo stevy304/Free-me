@@ -41,7 +41,7 @@ test('a 1080p H.264 upload with regular keyframes keeps its own 1080p (copied, n
     '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-b:v', '4M', '-maxrate', '4M', '-bufsize', '8M', '-g', '60', '-c:a', 'aac', '-shortest', clip]);
   const v = await uploadAndWait(c.agent, clip);
   expect(v.renditions).toEqual(['144p', '240p', '360p', '480p', '720p', '1080p']);
-  const top = await ctx.prisma.videoRendition.findUniqueOrThrow({ where: { videoId_resolution: { videoId: v.id, resolution: '1080p' } } });
+  const top = await ctx.prisma.videoRendition.findUniqueOrThrow({ where: { videoId_resolution_codec: { videoId: v.id, resolution: '1080p', codec: 'h264' } } });
   expect(top.codecs).toBe('avc1.640028,mp4a.40.2'); // the upload's own profile and level
   expect(top.bitrateKbps).toBeGreaterThan(2000);
   const master = (await c.agent.get(`/api/videos/${v.id}/hls/master.m3u8`).expect(200)).text;
@@ -56,7 +56,7 @@ test('an upload that is not suitable (too high a bitrate for viewers) is encoded
   const clip = join(dir, 'heavy.mp4');
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1920x1080:rate=30:duration=2,noise=alls=30:allf=t', '-c:v', 'libx264', '-preset', 'ultrafast', '-b:v', '14M', '-maxrate', '14M', '-bufsize', '14M', '-g', '60', clip]);
   const v = await uploadAndWait(c.agent, clip);
-  const top = await ctx.prisma.videoRendition.findUniqueOrThrow({ where: { videoId_resolution: { videoId: v.id, resolution: '1080p' } } });
+  const top = await ctx.prisma.videoRendition.findUniqueOrThrow({ where: { videoId_resolution_codec: { videoId: v.id, resolution: '1080p', codec: 'h264' } } });
   expect(top.codecs).toBe('avc1.64002a'); // the ladder's own encode (no audio), not the upload's
   expect(top.bitrateKbps).toBeLessThan(10_000);
 }, 180_000);
