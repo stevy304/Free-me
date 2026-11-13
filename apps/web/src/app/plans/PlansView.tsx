@@ -24,7 +24,7 @@ type Buyable = 'plus' | 'family';
 
 /** All plans in one place: compare, buy Plus or Family & TV here, and manage the family. */
 export function PlansView({ signedIn }: { signedIn: boolean }) {
-  const { locale } = useShell();
+  const { locale, t } = useShell();
   const router = useRouter();
   const params = useSearchParams();
   const [plans, setPlans] = useState<Plans | null>(null);
@@ -45,9 +45,9 @@ export function PlansView({ signedIn }: { signedIn: boolean }) {
   useEffect(() => { void load(); }, [load]);
 
   const paid = useCallback((p: Payment) => {
-    if (p.status === 'SUCCEEDED') { setNotice(p.purpose === 'FAMILY' ? 'Family & TV is active. Add the people you share it with below.' : 'Plus is active: no ads and every quality.'); setChoice(null); void load(); router.refresh(); }
-    else setError(p.failureReason ?? 'The payment did not go through.');
-  }, [load, router]);
+    if (p.status === 'SUCCEEDED') { setNotice(p.purpose === 'FAMILY' ? t('plans.familyActive') : t('plans.plusActive')); setChoice(null); void load(); router.refresh(); }
+    else setError(p.failureReason ?? t('plans.failed'));
+  }, [load, router, t]);
   const { watching, watch } = usePaymentWatch(paid);
   useEffect(() => {
     const id = params.get('payment');
@@ -63,82 +63,82 @@ export function PlansView({ signedIn }: { signedIn: boolean }) {
   const local = plans.methods.find((m) => m.currency !== 'USD' && (m.name === 'mtn_momo' || m.name === 'airtel_money'));
   const price = (p: PlanPrice | undefined, per: string) => p && (
     <p className="mt-2"><b className="font-display text-[26px] font-extrabold">{local && p.country ? money(charge(p.usdCents, local), local.currency, locale) : usd(p.usdCents, locale)}</b> <span className="text-[14px] text-muted">{per}</span>
-      {local && !p.country && <span className="block text-[12px] text-muted">{money(charge(p.usdCents, local), local.currency, locale)} by mobile money</span>}
-      {p.country && p.standardUsdCents && <span className="block text-[12px] text-muted">Your price in {region(p.country, locale)} ({usd(p.standardUsdCents, locale)} elsewhere)</span>}</p>
+      {local && !p.country && <span className="block text-[12px] text-muted">{t('plans.byMobileMoney', { amount: money(charge(p.usdCents, local), local.currency, locale) })}</span>}
+      {p.country && p.standardUsdCents && <span className="block text-[12px] text-muted">{t('plans.yourPrice', { country: region(p.country, locale), price: usd(p.standardUsdCents, locale) })}</span>}</p>
   );
   const status = (active: boolean, text: string) => active && <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-0.5 text-[12px] font-semibold text-brand"><Icon.CheckCircle size={14} filled />{text}</p>;
   const buying = choice && plans[choice];
 
   return (
     <div className="mx-auto max-w-6xl px-4 pb-16 pt-6 sm:px-6">
-      <h1 className="font-display text-[32px] font-extrabold">Plans</h1>
-      <p className="text-[15px] text-muted">Watching is free. Pay only for what you want more of. Pay with MTN MoMo, Airtel Money or a card; plans are paid ahead and never renew without you.</p>
+      <h1 className="font-display text-[32px] font-extrabold">{t('plans.title')}</h1>
+      <p className="text-[15px] text-muted">{t('plans.intro')}</p>
       {notice && <p role="status" className="mt-4 flex items-center gap-2 rounded-2xl bg-brand-soft px-4 py-3 text-[14px] font-semibold text-brand"><Icon.CheckCircle size={20} filled />{notice}</p>}
       {error && <p role="alert" className="mt-4 rounded-2xl bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p>}
-      {watching?.status === 'PENDING' && watching.method !== 'manual' && <p role="status" className="mt-4 flex items-center gap-2 rounded-2xl bg-surface px-4 py-3 text-[14px]"><Icon.Spinner size={18} className="animate-spin" />Confirming your payment…</p>}
+      {watching?.status === 'PENDING' && watching.method !== 'manual' && <p role="status" className="mt-4 flex items-center gap-2 rounded-2xl bg-surface px-4 py-3 text-[14px]"><Icon.Spinner size={18} className="animate-spin" />{t('plans.confirming')}</p>}
 
-      <h2 className="mt-8 font-display text-[22px] font-bold">For viewers</h2>
+      <h2 className="mt-8 font-display text-[22px] font-bold">{t('plans.forViewers')}</h2>
       <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card title="Free" tag="Watch">
+        <Card title={t('plans.free')} tag={t('plans.freeTag')}>
           <p className="mt-2"><b className="font-display text-[26px] font-extrabold">{usd(0, locale)}</b></p>
-          <Perks items={['Watch everything, with short ads', 'Video quality up to 720p', 'Follow, comment and save videos']} />
+          <Perks items={[t('plans.free1'), t('plans.free2'), t('plans.free3')]} />
         </Card>
 
-        <Card title="Plus" tag="Watch without ads" highlight>
-          {price(plans.plus, 'a month')}
-          {status(!!me?.plans.plus.active, me?.plans.plus.via === 'plus' ? `Active until ${until(me.plans.plus.until)}` : 'Included in your plan')}
-          <Perks items={['No ads', 'Video quality up to 1080p and 4K', 'On your phone, computer and smart TV']} />
-          <Choose onClick={() => choose('plus')} label={me?.plans.plus.via === 'plus' ? 'Add more time' : 'Get Plus'} />
+        <Card title="Plus" tag={t('plans.plusTag')} highlight>
+          {price(plans.plus, t('plans.perMonth'))}
+          {status(!!me?.plans.plus.active, me?.plans.plus.via === 'plus' ? t('plans.activeUntil', { date: until(me.plans.plus.until) }) : t('plans.included'))}
+          <Perks items={[t('plans.plus1'), t('plans.plus2'), t('plans.plus3')]} />
+          <Choose onClick={() => choose('plus')} label={me?.plans.plus.via === 'plus' ? t('plans.addTime') : t('plans.getPlus')} />
         </Card>
 
-        <Card title="Family & TV" tag="For the whole home">
-          {plans.family && price(plans.family, 'a month')}
-          {status(!!me?.plans.family.active, `Active until ${until(me?.plans.family.until ?? null)}`)}
-          <Perks items={[`Everything in Plus for up to ${plans.family?.seats ?? 4} people`, 'Watch on a smart TV’s browser and every phone at home', 'Add and remove people any time']} />
-          <Choose onClick={() => choose('family')} label={me?.plans.family.active ? 'Add more time' : 'Get Family & TV'} />
+        <Card title="Family & TV" tag={t('plans.familyTag')}>
+          {plans.family && price(plans.family, t('plans.perMonth'))}
+          {status(!!me?.plans.family.active, t('plans.activeUntil', { date: until(me?.plans.family.until ?? null) }))}
+          <Perks items={[t('plans.family1', { seats: plans.family?.seats ?? 4 }), t('plans.family2'), t('plans.family3')]} />
+          <Choose onClick={() => choose('family')} label={me?.plans.family.active ? t('plans.addTime') : t('plans.getFamily')} />
         </Card>
       </div>
 
-      <h2 className="mt-10 font-display text-[22px] font-bold">For creators</h2>
+      <h2 className="mt-10 font-display text-[22px] font-bold">{t('plans.forCreators')}</h2>
       <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card title="Starter" tag="Try creating">
+        <Card title={t('plans.starter')} tag={t('plans.starterTag')}>
           <p className="mt-2"><b className="font-display text-[26px] font-extrabold">{usd(0, locale)}</b></p>
-          <Perks items={[`${plans.creatorPass?.freeVideos ?? 3} uploads`, `Videos up to ${Math.round((plans.uploadMaxBytes ?? 20 * 1024 ** 3) / 1024 ** 3)} GB each`, '1080p and 4K once your videos take off', 'Creator Hub with your stats']} />
+          <Perks items={[t('plans.uploads', { count: plans.creatorPass?.freeVideos ?? 3 }), t('plans.sizeEach', { gb: Math.round((plans.uploadMaxBytes ?? 20 * 1024 ** 3) / 1024 ** 3) }), t('plans.hdLater'), t('plans.hubStats')]} />
         </Card>
 
-        <Card title="Creator pass" tag="Keep creating">
-          {price(plans.creatorPass, 'a year')}
-          {status(!!me?.plans.creatorPass.active, `Active until ${until(me?.plans.creatorPass.until ?? null)}`)}
-          <Perks items={[`${plans.creatorPass?.videosPerYear ?? 50} uploads a year`, `Videos up to ${Math.round((plans.uploadMaxBytes ?? 20 * 1024 ** 3) / 1024 ** 3)} GB each`, '1080p and 4K once your videos take off', 'Your videos stay online even if the pass ends']} />
-          <Link href="/hub/pass" className="mt-4 flex h-11 items-center justify-center rounded-2xl bg-brand text-[14px] font-bold text-on-brand hover:bg-brand-strong">Get the Creator pass</Link>
+        <Card title={t('plans.pass')} tag={t('plans.passTag')}>
+          {price(plans.creatorPass, t('plans.perYear'))}
+          {status(!!me?.plans.creatorPass.active, t('plans.activeUntil', { date: until(me?.plans.creatorPass.until ?? null) }))}
+          <Perks items={[t('plans.uploadsYear', { count: plans.creatorPass?.videosPerYear ?? 50 }), t('plans.sizeEach', { gb: Math.round((plans.uploadMaxBytes ?? 20 * 1024 ** 3) / 1024 ** 3) }), t('plans.hdLater'), t('plans.stayOnline')]} />
+          <Link href="/hub/pass" className="mt-4 flex h-11 items-center justify-center rounded-2xl bg-brand text-[14px] font-bold text-on-brand hover:bg-brand-strong">{t('plans.getPass')}</Link>
         </Card>
 
-        <Card title="Pro" tag="Grow and earn" badge highlight>
-          {price(plans.premium, 'a month')}
-          {status(!!me?.premium.active, 'Active')}
-          <Perks items={['Unlimited uploads', '1080p and 4K from the first minute', 'Live streaming', 'Earn from your videos', 'Gold Premium badge', 'No ads when you watch']} />
-          <Link href="/premium" className="mt-4 flex h-11 items-center justify-center rounded-2xl bg-brand text-[14px] font-bold text-on-brand hover:bg-brand-strong">Get Pro</Link>
+        <Card title="Pro" tag={t('plans.proTag')} badge highlight>
+          {price(plans.premium, t('plans.perMonth'))}
+          {status(!!me?.premium.active, t('plans.active'))}
+          <Perks items={[t('plans.pro1'), t('plans.pro2'), t('plans.pro3'), t('plans.pro4'), t('plans.pro5'), t('plans.pro6')]} />
+          <Link href="/premium" className="mt-4 flex h-11 items-center justify-center rounded-2xl bg-brand text-[14px] font-bold text-on-brand hover:bg-brand-strong">{t('plans.getPro')}</Link>
         </Card>
       </div>
-      <p className="mt-6 text-[14px] text-muted">A business? Advertise and protect your name with a Verified badge in <Link href="/studio/ads" className="font-semibold text-brand">Ad Studio</Link>.</p>
+      <p className="mt-6 text-[14px] text-muted">{t('plans.business')} <Link href="/studio/ads" className="font-semibold text-brand">Ad Studio</Link></p>
 
       {buying && choice && (
         <section aria-labelledby="checkout" className="mt-8 rounded-3xl border border-line bg-elevated p-5 sm:p-6">
           <div className="flex items-start gap-3">
-            <h2 id="checkout" className="flex-1 font-display text-[20px] font-bold">{choice === 'plus' ? 'Plus' : 'Family & TV'}: choose how long</h2>
-            <button type="button" onClick={() => setChoice(null)} aria-label="Close" className="rounded-full p-2 hover:bg-surface"><Icon.Close size={20} /></button>
+            <h2 id="checkout" className="flex-1 font-display text-[20px] font-bold">{t('plans.howLong', { plan: choice === 'plus' ? 'Plus' : 'Family & TV' })}</h2>
+            <button type="button" onClick={() => setChoice(null)} aria-label={t('plans.close')} className="rounded-full p-2 hover:bg-surface"><Icon.Close size={20} /></button>
           </div>
-          <div role="radiogroup" aria-label="Length" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div role="radiogroup" aria-label={t('plans.length')} className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
             {buying.months.map((m) => (
               <button key={m} type="button" role="radio" aria-checked={months === m} onClick={() => setMonths(m)}
                 className={`rounded-2xl border-2 px-3 py-2.5 text-left ${months === m ? 'border-brand bg-brand-soft' : 'border-line hover:border-faint'}`}>
-                <span className="block text-[15px] font-bold">{m} {m === 1 ? 'month' : 'months'}</span>
+                <span className="block text-[15px] font-bold">{t(m === 1 ? 'plans.month.one' : 'plans.month.other', { count: m })}</span>
                 <span className="block text-[13px] text-muted">{usd(buying.usdCents * m, locale)}</span>
               </button>
             ))}
           </div>
           <div className="mt-4 max-w-lg">
-            <PayPanel usdCents={buying.usdCents * months} plans={plans} label={choice === 'plus' ? 'Get Plus' : 'Get Family & TV'} onPaid={paid}
+            <PayPanel usdCents={buying.usdCents * months} plans={plans} label={choice === 'plus' ? t('plans.getPlus') : t('plans.getFamily')} onPaid={paid}
               start={async (method, phone) => (await api<{ payment: Payment }>(`/billing/plans/${choice}`, { body: { method, phone, months } })).payment} />
           </div>
         </section>
@@ -146,21 +146,21 @@ export function PlansView({ signedIn }: { signedIn: boolean }) {
 
       {family?.holder.active && (
         <section aria-labelledby="family" className="mt-8 rounded-3xl border border-line bg-elevated p-5 sm:p-6">
-          <h2 id="family" className="font-display text-[20px] font-bold">Your family</h2>
-          <p className="text-[14px] text-muted">Up to {family.holder.seats - 1} more people, by the email of their Free Me account. They get Plus while your plan lasts.</p>
+          <h2 id="family" className="font-display text-[20px] font-bold">{t('plans.yourFamily')}</h2>
+          <p className="text-[14px] text-muted">{t('plans.familyHint', { count: family.holder.seats - 1 })}</p>
           <ul className="mt-3 divide-y divide-line">
             {family.holder.members.map((m) => (
               <li key={m.id} className="flex items-center gap-3 py-2.5">
                 <span className="min-w-0 flex-1 truncate text-[15px]">{m.name ? `${m.name} · ` : ''}{m.email}</span>
-                <button type="button" onClick={() => void familyCall(() => api<Family>(`/billing/family/members/${m.id}`, { method: 'DELETE', body: {} }))} className="text-[13px] font-semibold text-danger hover:underline">Remove</button>
+                <button type="button" onClick={() => void familyCall(() => api<Family>(`/billing/family/members/${m.id}`, { method: 'DELETE', body: {} }))} className="text-[13px] font-semibold text-danger hover:underline">{t('plans.remove')}</button>
               </li>
             ))}
-            {!family.holder.members.length && <li className="py-2.5 text-[14px] text-muted">Nobody added yet.</li>}
+            {!family.holder.members.length && <li className="py-2.5 text-[14px] text-muted">{t('plans.nobody')}</li>}
           </ul>
           {family.holder.members.length < family.holder.seats - 1 && (
             <form className="mt-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); void familyCall(() => api<Family>('/billing/family/members', { body: { email } })); }}>
-              <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="their@email.com" className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-bg px-3 text-[15px] outline-none focus:border-brand" />
-              <button type="submit" className="h-11 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand">Add</button>
+              <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t('plans.theirEmail')} className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-bg px-3 text-[15px] outline-none focus:border-brand" />
+              <button type="submit" className="h-11 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand">{t('plans.add')}</button>
             </form>
           )}
         </section>
@@ -168,8 +168,8 @@ export function PlansView({ signedIn }: { signedIn: boolean }) {
 
       {family?.memberOf && (
         <section className="mt-8 rounded-3xl border border-line bg-elevated p-5 sm:p-6">
-          <p className="text-[15px]">You are in <b>{family.memberOf.email}</b>&rsquo;s Family & TV plan{family.memberOf.until ? `, until ${until(family.memberOf.until)}` : ''}.</p>
-          <button type="button" onClick={() => void familyCall(() => api<Family>('/billing/family/membership', { method: 'DELETE', body: {} }))} className="mt-2 text-[13px] font-semibold text-danger hover:underline">Leave this plan</button>
+          <p className="text-[15px]">{t('plans.memberOf1')} <b>{family.memberOf.email}</b>{family.memberOf.until ? ` · ${t('plans.activeUntil', { date: until(family.memberOf.until) })}` : ''}</p>
+          <button type="button" onClick={() => void familyCall(() => api<Family>('/billing/family/membership', { method: 'DELETE', body: {} }))} className="mt-2 text-[13px] font-semibold text-danger hover:underline">{t('plans.leave')}</button>
         </section>
       )}
     </div>

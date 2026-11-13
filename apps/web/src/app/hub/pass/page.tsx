@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
-import { getViewer } from '@/lib/server-api';
+import { getT, getViewer } from '@/lib/server-api';
 import { PassView } from './PassView';
 
-export const metadata: Metadata = { title: 'Creator pass' };
+export async function generateMetadata(): Promise<Metadata> { return { title: (await getT())('hub.creatorPass') }; }
 
 export default async function CreatorPass() {
   const viewer = await getViewer();
