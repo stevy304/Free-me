@@ -275,7 +275,7 @@ redisTest('views are de-duplicated in Redis and written to the database in batch
   expect((await ctx.prisma.video.findUniqueOrThrow({ where: { id: video.id } })).viewCount).toBe(0n);
   expect(await counter.flush()).toBe(1);
   const after = await ctx.prisma.video.findUniqueOrThrow({ where: { id: video.id }, include: { channel: true } });
-  expect([after.viewCount, after.watchTimeSeconds, after.channel.totalViews]).toEqual([2n, 90n, 2n]);
+  expect([after.viewCount, after.watchTimeSeconds, after.channel.totalViews]).toEqual([2n, 70n, 2n]);
   expect(await counter.flush()).toBe(0);
   await redis.quit();
 });

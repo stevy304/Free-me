@@ -30,6 +30,7 @@ async function addDaily(prisma: PrismaClient, videoId: string, day: string, view
  * then written to PostgreSQL in one batch every few seconds (flush). Without Redis (development) they are written directly.
  */
 export class ViewCounter {
+  private readonly local = new Map<string, { at: number; total: number; expires: number }>();
   constructor(private readonly prisma: PrismaClient, private readonly redis: Redis | null) {}
 
   /**
@@ -38,7 +39,7 @@ export class ViewCounter {
    * invalid view is recorded for the creator's statistics (once per viewer every 6 hours) and adds nothing else.
    */
   async record(videoId: string, viewerKey: string, watchedSeconds: number, plus = false, invalid: string | null = null): Promise<boolean> {
-    const seconds = Math.max(0, Math.min(6 * 3600, Math.round(watchedSeconds)));
+    const seconds = Math.max(0, Math.min(6 * 3600, (Number.isFinite(watchedSeconds) ? Math.round(watchedSeconds) : 0)));
     if (invalid) {
       if (!this.redis) { await addDaily(this.prisma, videoId, today(), 0, 0, 0, 1); return false; }
       const first = await this.redis.set(`fm:view:invalid:${videoId}:${viewerKey}`, '1', 'EX', DEDUPE_SECONDS, 'NX');
@@ -46,21 +47,32 @@ export class ViewCounter {
       return false;
     }
     if (!this.redis) {
-      await this.prisma.video.update({ where: { id: videoId }, data: { viewCount: { increment: 1 }, watchTimeSeconds: { increment: seconds } } });
-      await addDaily(this.prisma, videoId, today(), 1, seconds, plus ? seconds : 0);
+      const now = Date.now();
+      for (const [key, value] of this.local) if (value.expires <= now) this.local.delete(key);
+      const key = beatKey(videoId, viewerKey);
+      if (this.local.has(key)) return false;
+      this.local.set(key, { at: now, total: seconds, expires: now + DEDUPE_SECONDS * 1000 });
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          const v = await tx.video.update({ where: { id: videoId }, data: { viewCount: { increment: 1 }, watchTimeSeconds: { increment: seconds } } });
+          await tx.channel.update({ where: { id: v.channelId }, data: { totalViews: { increment: 1 } } });
+          await addDaily(tx as unknown as PrismaClient, videoId, today(), 1, seconds, plus ? seconds : 0);
+        });
+      } catch (error) { this.local.delete(key); throw error; }
       return true;
     }
-    const fresh = await this.redis.set(`fm:view:${videoId}:${viewerKey}`, '1', 'EX', DEDUPE_SECONDS, 'NX');
-    const m = this.redis.multi();
-    // Start this viewer's watch-time account for the video: later heartbeats (addWatch) are checked against it.
-    if (fresh) m.hset(beatKey(videoId, viewerKey), 'at', Date.now(), 'total', seconds).expire(beatKey(videoId, viewerKey), DEDUPE_SECONDS);
-    // Fields are "<video>|<day>", so a batch also knows which day each view belongs to.
-    const field = `${videoId}|${today()}`;
-    if (fresh) m.hincrby(PENDING_VIEWS, field, 1);
-    if (seconds) m.hincrby(PENDING_WATCH, field, seconds);
-    if (seconds && plus) m.hincrby(PENDING_PLUS, field, seconds);
-    await m.exec();
-    return fresh === 'OK';
+    // Dedupe, initial watch account and pending counters move together, including across workers.
+    const fresh = await this.redis.eval(`
+      if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+      redis.call('SET', KEYS[1], '1', 'EX', ARGV[1])
+      redis.call('HSET', KEYS[2], 'at', ARGV[2], 'total', ARGV[3])
+      redis.call('EXPIRE', KEYS[2], ARGV[1])
+      redis.call('HINCRBY', KEYS[3], ARGV[4], 1)
+      redis.call('HINCRBY', KEYS[4], ARGV[4], ARGV[3])
+      redis.call('HINCRBY', KEYS[5], ARGV[4], ARGV[5])
+      return 1`, 5, `fm:view:${videoId}:${viewerKey}`, beatKey(videoId, viewerKey), PENDING_VIEWS, PENDING_WATCH, PENDING_PLUS,
+      DEDUPE_SECONDS, Date.now(), seconds, `${videoId}|${today()}`, plus ? seconds : 0);
+    return fresh === 1;
   }
 
   /**
@@ -70,28 +82,37 @@ export class ViewCounter {
    * reports faster or replaying. Returns the seconds counted.
    */
   async addWatch(videoId: string, viewerKey: string, watchedSeconds: number, durationSeconds: number, plus = false): Promise<number> {
-    const claimed = Math.max(0, Math.min(MAX_BEAT_SECONDS, Math.round(watchedSeconds)));
+    const claimed = Math.max(0, Math.min(MAX_BEAT_SECONDS, (Number.isFinite(watchedSeconds) ? Math.round(watchedSeconds) : 0)));
     if (!claimed) return 0;
     if (!this.redis) {
-      await this.prisma.video.update({ where: { id: videoId }, data: { watchTimeSeconds: { increment: claimed } } });
-      await addDaily(this.prisma, videoId, today(), 0, claimed, plus ? claimed : 0);
-      return claimed;
+      const entry = this.local.get(beatKey(videoId, viewerKey));
+      const now = Date.now();
+      if (!entry || entry.expires <= now) return 0;
+      const seconds = Math.max(0, Math.floor(Math.min(claimed, (now - entry.at) / 1000 * 2, durationSeconds + 60 - entry.total)));
+      entry.at = now; entry.total += seconds;
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.video.update({ where: { id: videoId }, data: { watchTimeSeconds: { increment: seconds } } });
+          await addDaily(tx as unknown as PrismaClient, videoId, today(), 0, seconds, plus ? seconds : 0);
+        });
+      } catch (error) { entry.total -= seconds; throw error; }
+      return seconds;
     }
-    const key = beatKey(videoId, viewerKey);
-    const [at, total] = await this.redis.hmget(key, 'at', 'total');
-    if (!at) return 0; // no counted view in the last 6 hours: nothing to add to
-    const now = Date.now();
-    const elapsed = Math.max(0, (now - Number(at)) / 1000);
-    const room = Math.max(0, durationSeconds + 60 - Number(total ?? 0));
-    const seconds = Math.floor(Math.min(claimed, elapsed * 2 + 2, room));
-    const m = this.redis.multi().hset(key, 'at', now);
-    if (seconds > 0) {
-      const field = `${videoId}|${today()}`;
-      m.hincrby(key, 'total', seconds).hincrby(PENDING_WATCH, field, seconds);
-      if (plus) m.hincrby(PENDING_PLUS, field, seconds);
-    }
-    await m.exec();
-    return Math.max(0, seconds);
+    // Read/check/increment atomically so simultaneous tabs cannot spend the same elapsed time.
+    return Number(await this.redis.eval(`
+      local at = redis.call('HGET', KEYS[1], 'at')
+      if not at then return 0 end
+      local total = tonumber(redis.call('HGET', KEYS[1], 'total') or '0')
+      local elapsed = math.max(0, (tonumber(ARGV[1]) - tonumber(at)) / 1000)
+      local seconds = math.max(0, math.floor(math.min(tonumber(ARGV[2]), elapsed * 2, tonumber(ARGV[3]) + 60 - total)))
+      redis.call('HSET', KEYS[1], 'at', ARGV[1])
+      if seconds > 0 then
+        redis.call('HINCRBY', KEYS[1], 'total', seconds)
+        redis.call('HINCRBY', KEYS[2], ARGV[4], seconds)
+        if ARGV[5] == '1' then redis.call('HINCRBY', KEYS[3], ARGV[4], seconds) end
+      end
+      return seconds`, 3, beatKey(videoId, viewerKey), PENDING_WATCH, PENDING_PLUS,
+      Date.now(), claimed, durationSeconds, `${videoId}|${today()}`, plus ? 1 : 0));
   }
 
   /**

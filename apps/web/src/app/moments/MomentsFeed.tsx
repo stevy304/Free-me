@@ -1,5 +1,6 @@
 'use client';
 
+import { PlaybackCounts } from '@/lib/playback-counts';
 import * as Icon from '@/components/icons';
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -17,8 +18,14 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
   const hls = useRef<Hls | null>(null);
   const [paused, setPaused] = useState(false);
   const [progress, setProgress] = useState(0);
-  const watched = useRef(0); const last = useRef(0); const sent = useRef(false);
-  const ticket = useRef<Promise<string | null> | null>(null);
+  const counts = useRef<PlaybackCounts | null>(null);
+  useEffect(() => {
+    const tracker = new PlaybackCounts(v.id); counts.current = tracker;
+    const leave = () => { void tracker.flush(); };
+    window.addEventListener('pagehide', leave);
+    document.addEventListener('visibilitychange', leave);
+    return () => { leave(); window.removeEventListener('pagehide', leave); document.removeEventListener('visibilitychange', leave); };
+  }, [v.id]);
   const { locale, viewer } = useShell();
 
   useEffect(() => {
@@ -41,18 +48,7 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
   const onTime = () => {
     const video = el.current!; const d = video.duration || v.durationSeconds;
     setProgress(d ? video.currentTime / d : 0);
-    const delta = video.currentTime - last.current;
-    if (!video.paused && delta > 0 && delta < 2) {
-      // Playback really started: the play ticket the view needs.
-      if (!ticket.current) ticket.current = fetch(`/api/videos/${v.id}/play`, { method: 'POST', credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((j) => j?.ticket ?? null).catch(() => null);
-      watched.current += delta;
-    }
-    last.current = video.currentTime;
-    if (!sent.current && d && watched.current >= Math.min(30, d * 0.5)) {
-      sent.current = true;
-      const seconds = Math.round(watched.current);
-      void (ticket.current ?? Promise.resolve(null)).then((t) => fetch(`/api/videos/${v.id}/views`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ watchedSeconds: seconds, ...(t ? { ticket: t } : {}) }) })).catch(() => undefined);
-    }
+    counts.current?.sample(video.currentTime, d, active && !video.paused && !video.seeking && document.visibilityState === 'visible', video.playbackRate);
   };
   const share = async () => { const url = `${location.origin}/watch?v=${v.id}`; try { if (navigator.share) await navigator.share({ title: v.title, url }); else { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1800); } } catch { /* dismissed */ } };
   // Likes and dislikes (both shown on Moments) are read the first time this Moment comes on screen.
@@ -67,8 +63,12 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
     fetch(`/api/videos/${v.id}`).then((r) => r.ok ? r.json() : null).then((d) => { if (!d) return; setVotes({ mine: d.viewer?.reaction ?? 'none', likes: d.video.likeCount, dislikes: d.video.dislikeCount ?? 0 }); setComments(d.video.commentCount ?? 0); }).catch(() => undefined);
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
   const signIn = () => { window.location.href = `/login?returnTo=${encodeURIComponent(`/moments#${v.id}`)}`; };
+  // One reaction at a time: a second tap waits for the first to finish (counts stay exact).
+  const voting = useRef(false);
   const vote = async (value: 'like' | 'dislike') => {
     if (!viewer) { signIn(); return; }
+    if (voting.current) return;
+    voting.current = true;
     const cur = votes ?? { mine: 'none' as const, likes: 0, dislikes: 0 };
     const mine: 'like' | 'dislike' | 'none' = cur.mine === value ? 'none' : value;
     // Shown at once; the server's counts replace the guess.
@@ -77,6 +77,7 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
     const at = el.current?.currentTime;
     const r = await fetch(`/api/videos/${v.id}/reaction`, { method: 'PUT', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value: mine, ...(mine === 'like' && at !== undefined ? { at: Math.floor(at) } : {}) }) }).catch(() => null);
     if (r?.ok) { const d = await r.json(); setVotes({ mine, likes: d.likeCount, dislikes: d.dislikeCount ?? next.dislikes }); } else setVotes(cur);
+    voting.current = false;
   };
   /** Opens (or starts) a conversation with whoever posted this Moment. */
   const message = async () => {
@@ -89,7 +90,7 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
     <section className="relative flex h-full snap-start snap-always items-center justify-center gap-4 sm:py-3" aria-label={v.title}>
       <div className="relative h-full w-full overflow-hidden bg-black sm:aspect-[9/16] sm:w-auto sm:max-h-[calc(100dvh-6.5rem)] sm:rounded-[26px] sm:shadow-[var(--shadow)]">
         <video ref={el} loop playsInline poster={v.thumbnailUrl ?? undefined} className="h-full w-full object-cover"
-          onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} onPlay={() => setPaused(false)} onPause={() => setPaused(true)} onTimeUpdate={onTime} />
+          onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} onPlay={() => setPaused(false)} onPause={() => { setPaused(true); void counts.current?.flush(); }} onTimeUpdate={onTime} />
         <div className="absolute inset-x-0 top-0 flex justify-between p-3">
           <button type="button" onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} aria-label={paused ? 'Play' : 'Pause'} className="grid h-9 w-9 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{paused ? <Icon.Play size={20} /> : <Icon.Pause size={20} />}</button>
           <button type="button" onClick={() => setMuted(!muted)} aria-label={muted ? 'Unmute' : 'Mute'} className="grid h-9 w-9 place-items-center rounded-xl bg-[rgb(16_32_31/0.55)] text-white backdrop-blur">{muted ? <Icon.VolumeOff size={20} /> : <Icon.VolumeHigh size={20} />}</button>

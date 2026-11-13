@@ -19,10 +19,10 @@ test('views are written per day by the counter\'s batches', async () => {
   const counter = new ViewCounter(ctx.prisma as never, redis);
   await counter.record(v.id, 'a:1', 40);
   await counter.record(v.id, 'a:2', 60);
-  await counter.record(v.id, 'a:1', 30); // same viewer: watch time only
+  await counter.record(v.id, 'a:1', 30); // same viewer: duplicate initial claim is ignored
   await counter.flush();
   const row = await ctx.prisma.videoDailyStat.findUniqueOrThrow({ where: { videoId_day: { videoId: v.id, day: day(0) } } });
-  expect(row).toMatchObject({ views: 2, watchSeconds: 130n });
+  expect(row).toMatchObject({ views: 2, watchSeconds: 100n });
   expect((await ctx.prisma.video.findUniqueOrThrow({ where: { id: v.id } })).viewCount).toBe(2n);
   await redis.quit();
 });
