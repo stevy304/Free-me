@@ -211,6 +211,7 @@ export const en = {
   'watch.passAlong': 'Pass along',
   'watch.copied': 'Copied',
   'watch.conversation': 'Conversation',
+  'watch.comments': 'Comments',
   'watch.about': 'About',
   'watch.keepWatching': 'Keep watching',
   'watch.upNext1': 'Up',

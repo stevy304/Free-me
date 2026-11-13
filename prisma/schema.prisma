@@ -463,6 +463,8 @@ model Like {
   userId                String
   videoId               String
   isLike                Boolean           @default(true) // true for like, false for dislike
+  /// Where in the video the Spark was given (seconds): the most Sparked moments are marked on the progress bar
+  atSeconds             Int?
   user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
   createdAt             DateTime          @default(now())

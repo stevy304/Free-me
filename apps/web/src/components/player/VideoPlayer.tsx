@@ -30,7 +30,7 @@ const label = (h: number, w: number) => `${Math.min(h, w)}p`;
 /** How long autoplay waits to learn whether an ad plays first. */
 const ADS_WAIT_MS = 1500;
 
-export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange, storyboard, captions = [], withAds = false }: {
+export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange, storyboard, captions = [], withAds = false, markers = [] }: {
   src: string; poster?: string | null; videoId?: string; durationHint?: number; autoPlay?: boolean; theater?: boolean; onTheater?: () => void; onEnded?: () => void;
   startAt?: number; onProgress?: (seconds: number, ended: boolean) => void; onPlayingChange?: (playing: boolean) => void;
   /** WebVTT of seek-bar previews (cues point into a sprite sheet with #xywh). */
@@ -39,6 +39,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   captions?: CaptionTrack[];
   /** Play ads from monetised creators' campaigns (the watch page; at most two per video). */
   withAds?: boolean;
+  /** Moments to mark on the progress bar (seconds), e.g. the most Sparked ones. */
+  markers?: number[];
 }) {
   const box = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -612,6 +614,7 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
             <div className="relative h-1.5 w-full rounded-full bg-white/20 transition-[height] group-hover/bar:h-2">
               <div className="absolute inset-y-0 left-0 rounded-full bg-white/30" style={{ width: pct(buffered) }} />
               <div className="absolute inset-y-0 left-0 rounded-full bg-[#f5b95c]" style={{ width: pct(time) }} />
+              {markers.filter((m) => duration && m < duration).map((m) => <span key={m} aria-hidden className="pointer-events-none absolute top-1/2 h-3.5 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ffd27a] shadow-[0_0_0_1.5px_rgb(10_17_16/0.75),0_0_8px_rgb(245_185_92/0.8)]" style={{ left: pct(m) }} />)}
               <div className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_4px_rgb(245_185_92/0.35)] transition-transform group-hover/bar:scale-110" style={{ left: pct(time) }} />
             </div>
             {hover && <SeekPreview hover={hover} cue={cueAt(cues, hover.t)} label={fmt(hover.t)} />}

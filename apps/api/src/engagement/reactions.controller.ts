@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { tasteChanged } from '../recommend/profile';
 import { notifySpark } from '../notifications/notify';
 import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
@@ -15,7 +16,10 @@ import { RedisService } from '../database/redis.service';
 import { ProgressBuffer } from '../media/progress';
 import { hotWatchable } from './hot-video';
 
-class ReactionDto { @ApiProperty({ enum: ['like', 'dislike', 'none'] }) @IsIn(['like', 'dislike', 'none']) value!: 'like' | 'dislike' | 'none' }
+class ReactionDto {
+  @ApiProperty({ enum: ['like', 'dislike', 'none'] }) @IsIn(['like', 'dislike', 'none']) value!: 'like' | 'dislike' | 'none';
+  @ApiProperty({ required: false, description: 'Where in the video (seconds) a Spark was given' }) @IsOptional() @IsNumber() @Min(0) @Max(86_400) at?: number;
+}
 class ProgressDto {
   @ApiProperty({ description: 'Playback position in seconds' }) @IsNumber() @Min(0) @Max(86_400) seconds!: number;
   @ApiProperty({ required: false, description: 'True when playback reached the end' }) @IsOptional() @IsBoolean() ended?: boolean;
@@ -41,7 +45,7 @@ export class ReactionsController {
       // Each count change matches a row that this request really removed or inserted, so racing requests cannot drift.
       const removed = await tx.$queryRaw<Array<{ isLike: boolean }>>`DELETE FROM "Like" WHERE "userId" = ${userId} AND "videoId" = ${id} RETURNING "isLike"`;
       const inserted = body.value === 'none' ? [] : await tx.$queryRaw<Array<{ isLike: boolean }>>`
-        INSERT INTO "Like" ("id", "userId", "videoId", "isLike", "createdAt") VALUES (gen_random_uuid(), ${userId}, ${id}, ${body.value === 'like'}, now())
+        INSERT INTO "Like" ("id", "userId", "videoId", "isLike", "atSeconds", "createdAt") VALUES (gen_random_uuid(), ${userId}, ${id}, ${body.value === 'like'}, ${body.value === 'like' && body.at !== undefined ? Math.floor(body.at) : null}, now())
         ON CONFLICT ("userId", "videoId") DO NOTHING RETURNING "isLike"`;
       const delta = (rows: Array<{ isLike: boolean }>, like: boolean) => rows.filter((r) => r.isLike === like).length;
       const likes = delta(inserted, true) - delta(removed, true);
@@ -52,6 +56,19 @@ export class ReactionsController {
     publish(room.video(id), 'reactions', { likeCount: counts.likeCount });
     await tasteChanged(this.redis.client, userId);
     return { reaction: body.value, likeCount: counts.likeCount };
+  }
+
+  @Get('videos/:id/sparked-moments')
+  @ApiOperation({ summary: 'The most Sparked moments of a video (up to 3, each Sparked by at least 2 people), for the progress bar' })
+  async sparkedMoments(@Param('id', ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext | null, @Res({ passthrough: true }) res: Response) {
+    const v = await hotWatchable(this.prisma, id, auth);
+    // Moments are spans of 1/40 of the video (at least 5 s); a mark sits in the middle of its span.
+    const span = Math.max(5, Math.floor((v.durationSeconds || 0) / 40));
+    const rows = await this.prisma.$queryRaw<Array<{ bucket: number; n: bigint }>>`
+      SELECT ("atSeconds" / ${span})::int AS bucket, count(*)::bigint AS n FROM "Like"
+      WHERE "videoId" = ${id} AND "isLike" AND "atSeconds" IS NOT NULL GROUP BY 1 HAVING count(*) >= 2 ORDER BY n DESC, bucket LIMIT 3`;
+    res.setHeader('Cache-Control', v.visibility === 'PUBLIC' ? 'public, max-age=300' : 'private, no-store');
+    return { moments: rows.map((r) => ({ at: Math.min(v.durationSeconds || Infinity, r.bucket * span + Math.floor(span / 2)), sparks: Number(r.n) })).sort((a, b) => a.at - b.at) };
   }
 
   @Post('videos/:id/progress')

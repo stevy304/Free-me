@@ -43,6 +43,9 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   const [menu, setMenu] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const time = useRef(0);
+  // The most Sparked moments, marked in gold on the progress bar.
+  const [moments, setMoments] = useState<number[]>([]);
+  useEffect(() => { api<{ moments: Array<{ at: number }> }>(`/videos/${v.id}/sparked-moments`).then((r) => setMoments(r.moments.map((m) => m.at))).catch(() => undefined); }, [v.id]);
   const login = `/login?returnTo=${encodeURIComponent(`/watch?v=${v.id}`)}`;
 
   useEffect(() => { try { setTheater(localStorage.getItem('fm_theater') === '1'); } catch { /* blocked */ } }, []);
@@ -57,7 +60,9 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
     const before = { reaction, likes };
     // Show the change at once; the server's count replaces the guess.
     setReaction(next); setLikes(likes + (next === 'like' ? 1 : 0) - (reaction === 'like' ? 1 : 0)); setError(null);
-    try { const r = await api<{ likeCount: number }>(`/videos/${v.id}/reaction`, { method: 'PUT', body: { value: next } }); setLikes(r.likeCount); }
+    // Where in the video the Spark was given (the player's own clock): the most Sparked moments are marked on the bar.
+    const at = stage.current?.querySelector('video')?.currentTime ?? time.current;
+    try { const r = await api<{ likeCount: number }>(`/videos/${v.id}/reaction`, { method: 'PUT', body: { value: next, ...(next === 'like' && Number.isFinite(at) ? { at: Math.floor(at) } : {}) } }); setLikes(r.likeCount); }
     catch (e) { setReaction(before.reaction); setLikes(before.likes); setError((e as Error).message); }
   };
   const progress = useCallback((seconds: number, ended: boolean) => {
@@ -69,6 +74,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   }, [v.id, v.durationSeconds, more, initialViewer.signedIn]);
   const need = (what: 'save' | 'report') => { setMenu(false); if (!initialViewer.signedIn) router.push(login); else setDialog(what); };
   const [tab, setTab] = useState<'about' | 'conversation' | 'next'>('conversation');
+  useEffect(() => { if (window.matchMedia('(min-width: 1280px)').matches) setTab((x) => (x === 'conversation' ? 'about' : x)); }, []);
 
   // Next: what plays after this one. "Flow on" moves to it by itself after a short, cancellable countdown.
   const next = more[0] ?? null;
@@ -139,7 +145,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   // An early connection to the CDN (DNS, TLS) before the player asks for the first segment.
   const cdn = mediaOrigin(v.playbackUrl);
   const player = v.playbackUrl
-    ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} storyboard={v.storyboardUrl} captions={v.captions ?? []} withAds onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
+    ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} storyboard={v.storyboardUrl} captions={v.captions ?? []} markers={moments} withAds onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
     : <div className="grid aspect-video w-full place-items-center rounded-[24px] bg-[#0b1413] text-center text-[15px] text-[#9fb0ad]"><div><Icon.Spinner className="mx-auto mb-3 animate-spin" />{v.takenDownAt ? t('watch.removed') : v.processingStage ?? t('watch.processing')}</div></div>;
 
   const pill = 'flex h-11 shrink-0 items-center gap-2 rounded-full border border-[#2bb5ab]/70 px-5 text-[14px] font-semibold text-white shadow-[0_0_14px_rgb(43_181_171/0.16)] transition-colors hover:bg-[#2bb5ab]/12';
@@ -164,9 +170,11 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
       {/* Phones: the video sticks to the top, edge to edge, while the page scrolls under it. */}
       <div ref={top} />
       <section className="sticky top-0 z-30 bg-stage sm:relative sm:z-auto sm:px-6 sm:pb-10 sm:pt-6" style={{ backgroundImage: 'radial-gradient(ellipse at 50% 35%, rgb(12 130 126 / 0.32), transparent 62%)' }}>
-        <div className="mx-auto flex max-w-[1760px] justify-center gap-6">
-          <div className={`min-w-0 flex-1 transition-[max-width] duration-300 ${theater ? 'sm:max-w-[min(1800px,calc((100dvh-6rem)*16/9))]' : 'sm:max-w-[min(1280px,calc((100dvh-15rem)*16/9))]'}`}>
-          <div ref={stage} className={`relative ${docked ? 'aspect-video' : 'sm:rounded-[24px] sm:shadow-[0_0_0_1px_rgb(43_181_171/0.45),0_0_36px_rgb(43_181_171/0.22)]'}`}>
+        <div className="mx-auto flex max-w-[1880px] justify-center gap-7">
+          <div className={`min-w-0 flex-1 transition-[max-width] duration-300 ${theater ? 'sm:max-w-[min(1800px,calc((100dvh-6rem)*16/9))]' : 'sm:max-w-[min(1280px,calc((100dvh-15rem)*16/9))] xl:max-w-[calc((100dvh-7.5rem)*16/9)]'}`}>
+          <div ref={stage} className={`relative isolate ${docked ? 'aspect-video' : 'sm:rounded-[24px] sm:shadow-[0_0_0_1px_rgb(43_181_171/0.45),0_0_36px_rgb(43_181_171/0.22)]'}`}>
+            {/* A soft glow of the video's own colours around the player. */}
+            {!docked && v.thumbnailUrl && <div aria-hidden className="pointer-events-none absolute inset-x-6 -bottom-6 top-10 -z-10 hidden rounded-[40px] bg-cover bg-center opacity-45 blur-[60px] saturate-150 sm:block" style={{ backgroundImage: `url(${v.thumbnailUrl})` }} />}
             {docked && <div className="absolute inset-0 grid place-items-center rounded-[24px] border border-white/10 text-[14px] text-[#9fb0ad]">{t('watch.corner')}</div>}
             <div className={docked ? 'fixed bottom-4 right-4 z-50 w-[min(400px,calc(100vw-2rem))] overflow-hidden rounded-[20px] bg-stage shadow-[0_18px_48px_rgb(0_0_0/0.45)] [&_video]:rounded-none' : 'relative'}>
               {player}
@@ -197,41 +205,56 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
               )}
             </div>
           </div>
-          {/* Tablets and computers: title, numbers and actions under the video, on the stage. */}
-          <div className="hidden pt-5 text-white sm:block">
-            <h1 className="text-[24px] font-extrabold leading-[1.15] lg:text-[30px]">{v.title}</h1>
-            {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#9fb0ad]">Up to {v.qualityLimit}p · <Link href="/plans" className="font-semibold text-[#2bb5ab] hover:underline">every quality and no ads with Plus</Link></p> : null}
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-              <p className="text-[14px] text-[#9fb0ad]" suppressHydrationWarning>
+          {/* Tablets and computers: title, numbers and the creator under the video; small actions beside the title. */}
+          <div className="hidden items-start gap-6 pt-5 text-white sm:flex">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-[24px] font-extrabold leading-[1.15] lg:text-[32px]">{v.title}</h1>
+              {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#9fb0ad]">Up to {v.qualityLimit}p · <Link href="/plans" className="font-semibold text-[#2bb5ab] hover:underline">every quality and no ads with Plus</Link></p> : null}
+              <p className="mt-1.5 text-[14px] text-[#9fb0ad]" suppressHydrationWarning>
                 {viewsLabel(v.viewCount, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : t('watch.notPublished')}
                 {v.category && <> · <Link href={`/explore?topic=${v.category.slug}`} className="font-semibold text-[#2bb5ab] hover:underline">{v.category.name}</Link></>}
               </p>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Spark (${likes})`} className={`${pill} ${reaction === 'like' ? 'border-[#f5b95c] bg-[#f5b95c]/15' : ''}`}>
-                  <Icon.Spark size={19} filled={reaction === 'like'} className={reaction === 'like' ? 'text-[#f5b95c]' : ''} /><span suppressHydrationWarning>{likes > 0 ? `${compactNumber(likes, locale)} ${t('watch.spark')}` : t('watch.spark')}</span>
+              <div className="dark mt-3.5 flex flex-wrap items-center gap-3">
+                <Link href={`/@${v.channel.handle}`} className="flex min-w-0 items-center gap-3">
+                  <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={44} />
+                  <span className="min-w-0"><span className="flex items-center gap-1 truncate font-display text-[16px] font-bold text-white">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={15} kind={v.channel.badge} />}</span><span className="block text-[13px] text-[#9fb0ad]" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</span></span>
+                </Link>
+                {initialViewer.isOwner
+                  ? <Link href="/hub" className="flex h-10 items-center gap-2 rounded-xl bg-white/[0.08] px-4 text-[14px] font-semibold hover:bg-white/[0.14]"><Icon.Hub size={17} />{t('watch.creatorHub')}</Link>
+                  : <FollowButton handle={v.channel.handle} initial={initialViewer.following} initialCount={v.channel.followerCount} />}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 pt-1.5">
+              {/* Spark and Pass along, small, side by side. */}
+              <div className="flex h-10 overflow-hidden rounded-[14px] border border-[#2bb5ab]/45 bg-white/[0.04] text-[14px] font-semibold">
+                <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Spark (${likes})`} className={`flex items-center gap-1.5 px-3.5 transition-colors hover:bg-white/[0.08] ${reaction === 'like' ? 'bg-[#f5b95c]/15 text-[#f5b95c]' : ''}`}>
+                  <Icon.Spark size={17} filled={reaction === 'like'} className="text-[#f5b95c]" /><span suppressHydrationWarning>{likes > 0 ? compactNumber(likes, locale) : t('watch.spark')}</span>
                 </button>
-                <button type="button" onClick={share} className={pill}><Icon.PassAlong size={19} />{copied ? t('live.linkCopied') : t('watch.passAlong')}</button>
-                <button type="button" onClick={() => need('save')} aria-pressed={saved} className={`${pill} ${saved ? 'bg-[#2bb5ab]/15' : ''}`}><Icon.Bookmark size={19} filled={saved} />{saved ? 'Kept' : 'Keep'}</button>
-                <div className="relative">
-                  <button type="button" onClick={() => setMenu((m) => !m)} aria-label={t('watch.moreActions')} aria-haspopup="menu" aria-expanded={menu} className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#2bb5ab]/70 text-white shadow-[0_0_14px_rgb(43_181_171/0.16)] transition-colors hover:bg-[#2bb5ab]/12"><Icon.More size={19} /></button>
-                  {menu && <div role="menu" className="absolute right-0 top-full z-40 mt-2 w-[240px] rounded-2xl border border-line bg-elevated p-1.5 text-ink shadow-[var(--shadow)]">{menuItems}</div>}
-                </div>
+                <button type="button" onClick={share} className="flex items-center gap-1.5 border-l border-[#2bb5ab]/30 px-3.5 transition-colors hover:bg-white/[0.08]"><Icon.PassAlong size={17} />{copied ? t('live.linkCopied') : t('watch.passAlong')}</button>
+              </div>
+              <button type="button" onClick={() => need('save')} aria-pressed={saved} className={`flex h-10 items-center gap-1.5 rounded-[14px] border border-[#2bb5ab]/45 bg-white/[0.04] px-3.5 text-[14px] font-semibold transition-colors hover:bg-white/[0.08] ${saved ? 'bg-[#2bb5ab]/15' : ''}`}><Icon.Bookmark size={16} filled={saved} />{saved ? 'Kept' : 'Keep'}</button>
+              <div className="relative">
+                <button type="button" onClick={() => setMenu((m) => !m)} aria-label={t('watch.moreActions')} aria-haspopup="menu" aria-expanded={menu} className="grid h-10 w-10 place-items-center rounded-[14px] border border-[#2bb5ab]/45 bg-white/[0.04] transition-colors hover:bg-white/[0.08]"><Icon.More size={18} /></button>
+                {menu && <div role="menu" className="absolute right-0 top-full z-40 mt-2 w-[240px] rounded-2xl border border-line bg-elevated p-1.5 text-ink shadow-[var(--shadow)]">{menuItems}</div>}
               </div>
             </div>
           </div>
           </div>
-          {/* Wide screens: what comes next, on the left of the video. */}
-          {!theater && more.length > 0 && (
+          {/* Wide screens, left of the video: what comes next, and the conversation, as two matching cards. */}
+          {!theater && (
             <aside aria-label={t('watch.upNext')} className="relative order-first hidden w-[360px] shrink-0 xl:block">
-              <div className="absolute inset-0 flex flex-col rounded-[24px] bg-white/[0.04] shadow-[0_0_0_1px_rgb(43_181_171/0.3),0_0_28px_rgb(43_181_171/0.12)]">
-                <div className="flex items-center justify-between px-5 pb-3 pt-5 text-white">
-                  <h2 className="flex items-center gap-2 text-[20px] font-extrabold uppercase tracking-wide text-[#2bb5ab]">{t('watch.upNext')}<span className="grid h-6 w-6 place-items-center rounded-md bg-[#2bb5ab] text-[#04201e]"><Icon.Play size={14} /></span></h2>
-                  <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 text-[12px] font-semibold text-[#9fb0ad]">
-                    Flow on
-                    <span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-[#2bb5ab]' : 'bg-white/20'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span>
-                  </button>
-                </div>
-                <div className="no-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-3">
+              <div className="absolute inset-0 flex flex-col gap-5">
+                {more.length > 0 && (
+                  <div className="flex max-h-[44%] min-h-0 shrink-0 flex-col rounded-[24px] bg-white/[0.04] shadow-[0_0_0_1px_rgb(43_181_171/0.3),0_0_28px_rgb(43_181_171/0.12)]">
+                    <div className="flex items-center justify-between px-5 pt-5 text-white">
+                      <h2 className="flex items-center gap-2 text-[20px] font-extrabold uppercase tracking-wide text-[#2bb5ab]">{t('watch.upNext')}<span className="grid h-6 w-6 place-items-center rounded-md bg-[#2bb5ab] text-[#04201e]"><Icon.Play size={14} /></span></h2>
+                      <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 text-[12px] font-semibold text-[#9fb0ad]">
+                        Flow on
+                        <span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-[#2bb5ab]' : 'bg-white/20'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span>
+                      </button>
+                    </div>
+                    <div className="imigongo mx-5 mb-2 mt-3" aria-hidden />
+                    <div className="no-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-3">
                   {more.slice(0, 10).map((x, i) => (
                     <Link key={x.id} href={`/watch?v=${x.id}`} className="group flex gap-3 rounded-2xl p-2 hover:bg-white/[0.06]">
                       <span className="relative block w-[148px] shrink-0 overflow-hidden rounded-xl shadow-[0_0_0_1px_rgb(43_181_171/0.35)]">
@@ -246,6 +269,11 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
                       </span>
                     </Link>
                   ))}
+                    </div>
+                  </div>
+                )}
+                <div className="min-h-0 flex-1 rounded-[24px] bg-white/[0.04] p-5 shadow-[0_0_0_1px_rgb(43_181_171/0.3),0_0_28px_rgb(43_181_171/0.12)]">
+                  <Comments videoId={v.id} initialCount={v.commentCount} variant="card" />
                 </div>
               </div>
             </aside>
@@ -346,21 +374,11 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
           </div>
         </div>
       )}
-      <div className="mx-auto hidden max-w-[1280px] gap-8 px-4 sm:mt-8 sm:grid sm:px-6 lg:grid-cols-[300px_1fr]">
-        <aside className="hidden h-fit rounded-[20px] border border-line bg-elevated p-4 sm:block lg:sticky lg:top-20">
-          <Link href={`/@${v.channel.handle}`} className="flex items-center gap-3">
-            <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={52} />
-            <div className="min-w-0"><p className="flex items-center gap-1 truncate font-display text-[17px] font-bold">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={16} kind={v.channel.badge} />}</p><p className="text-[13px] text-muted" suppressHydrationWarning>@{v.channel.handle} · {followersLabel(v.channel.followerCount, locale)}</p></div>
-          </Link>
-          <div className="mt-4 [&>div]:w-full [&_button]:w-full [&_button]:justify-center">
-            {initialViewer.isOwner
-              ? <Link href="/hub" className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-surface text-[14px] font-semibold hover:bg-surface-hover"><Icon.Hub size={18} />{t('watch.creatorHub')}</Link>
-              : <FollowButton handle={v.channel.handle} initial={initialViewer.following} initialCount={v.channel.followerCount} />}
-          </div>
-        </aside>
+      {/* Under the stage: about, the conversation (beside the video on wide screens) and more to watch. The creator is under the title. */}
+      <div className="mx-auto hidden max-w-[1280px] px-4 sm:mt-8 sm:block sm:px-6">
         <div className="min-w-0">
           <div role="tablist" className="flex gap-1 border-b border-line">
-            {tabBtn('about', t('watch.about'))}{tabBtn('conversation', v.commentsOpen ? `${t('watch.conversation')} · ${compactNumber(v.commentCount, locale)}` : t('watch.conversation'))}{more.length > 0 && tabBtn('next', t('watch.keepWatching'))}
+            {tabBtn('about', t('watch.about'))}<span className={theater ? 'contents' : 'contents xl:hidden'}>{tabBtn('conversation', v.commentsOpen ? `${t('watch.conversation')} · ${compactNumber(v.commentCount, locale)}` : t('watch.conversation'))}</span>{more.length > 0 && tabBtn('next', t('watch.keepWatching'))}
           </div>
           {tab === 'about' && (
             <div className="py-5 text-[15px] leading-relaxed">
@@ -368,7 +386,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
               <p className="mt-2 whitespace-pre-line break-words">{v.description || <span className="text-muted">{t('watch.noDescription')}</span>}</p>
             </div>
           )}
-          {tab === 'conversation' && <Comments videoId={v.id} initialCount={v.commentCount} />}
+          {tab === 'conversation' && <div className={theater ? '' : 'xl:hidden'}><Comments videoId={v.id} initialCount={v.commentCount} /></div>}
           {tab === 'next' && <div className="grid gap-4 py-5">{more.map((x) => <VideoRow key={x.id} v={x} locale={locale} large />)}</div>}
           {tab !== 'next' && more.length > 0 && (
             <section className="mt-10">

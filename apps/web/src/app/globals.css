@@ -87,3 +87,11 @@ body { -webkit-font-smoothing: antialiased; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .thin-scrollbar { scrollbar-width: thin; scrollbar-color: transparent transparent; }
 .thin-scrollbar:hover { scrollbar-color: var(--surface-hover) transparent; }
+
+/* Imigongo: the zigzag of Rwanda's traditional geometric art, Free Me's own accent under card titles. */
+.imigongo {
+  height: 8px; border-radius: 2px; opacity: 0.55;
+  background:
+    linear-gradient(135deg, var(--zig, #2bb5ab) 25%, transparent 25%) -5px 0 / 10px 8px,
+    linear-gradient(225deg, var(--zig, #2bb5ab) 25%, transparent 25%) -5px 0 / 10px 8px;
+}

@@ -203,6 +203,7 @@ export const rw: Partial<Record<Key, string>> = {
   'watch.passAlong': 'Sangiza',
   'watch.copied': 'Byakoporowe',
   'watch.conversation': 'Ibitekerezo',
+  'watch.comments': 'Ibitekerezo',
   'watch.about': 'Ibisobanuro',
   'watch.keepWatching': 'Komeza kureba',
   'watch.upNext1': 'Ibikurikira',

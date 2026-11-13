@@ -199,6 +199,7 @@ export const fr: Partial<Record<Key, string>> = {
   'watch.passAlong': 'Partager',
   'watch.copied': 'Copié',
   'watch.conversation': 'Discussion',
+  'watch.comments': 'Commentaires',
   'watch.about': 'À propos',
   'watch.keepWatching': 'Continuer à regarder',
   'watch.upNext1': 'À',

@@ -167,7 +167,11 @@ function RepliesToggle({ n, open, onClick }: { n: number; open: boolean; onClick
 }
 
 /** Comments under a video: count, sort, write, then the list (pinned first) with "load more". */
-export function Comments({ videoId, initialCount }: { videoId: string; initialCount: number }) {
+/**
+ * The conversation under a video. `card`: the watch page's Comments card beside the video (same look as Up next,
+ * always dark like the stage): its list scrolls inside the card.
+ */
+export function Comments({ videoId, initialCount, variant }: { videoId: string; initialCount: number; variant?: 'card' }) {
   const { viewer, locale, t } = useShell();
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
   const [page, setPage] = useState<Page | null>(null);
@@ -203,20 +207,37 @@ export function Comments({ videoId, initialCount }: { videoId: string; initialCo
     return <section aria-label={t('comments.conversation')} className="mt-5 rounded-2xl bg-surface px-4 py-3 text-[14px] text-muted"><Icon.Comment size={18} className="mr-2 inline" />{page.closedReason}</section>;
   }
 
+  const card = variant === 'card';
+  const sortPicker = (
+    <label className={`flex items-center gap-2 text-[14px] font-medium ${card ? 'rounded-xl bg-white/[0.07] px-2.5 py-1 text-[13px] text-white' : ''}`}>
+      <Icon.Sort size={card ? 16 : 20} /><span className="sr-only">{t('comments.sortBy')}</span>
+      <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} className="rounded-md bg-transparent py-1 outline-none hover:bg-surface">
+        <option value="newest">{t('comments.newest')}</option><option value="oldest">{t('comments.oldest')}</option>
+      </select>
+    </label>
+  );
   return (
-    <section aria-label={t('comments.conversation')} className="mt-5">
+    <section aria-label={t('comments.conversation')} className={card ? 'dark flex h-full min-h-0 flex-col text-ink' : 'mt-5'}>
+      {card ? (
+        <>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-[20px] font-extrabold uppercase tracking-wide text-[#2bb5ab]">
+              {t('watch.comments')}<span className="grid h-6 w-6 place-items-center rounded-md bg-[#2bb5ab] text-[#04201e]"><Icon.Comment size={14} /></span>
+              <span className="rounded-full bg-white/[0.08] px-2 py-0.5 font-sans text-[12px] font-bold normal-case tracking-normal text-[#9fb0ad]" suppressHydrationWarning>{compactNumber(count, locale)}</span>
+            </h2>
+            {sortPicker}
+          </div>
+          <div className="imigongo mb-3 mt-3" aria-hidden />
+        </>
+      ) : (
       <div className="flex items-center gap-6">
         <h2 className="text-[18px] font-bold" suppressHydrationWarning>{t('watch.conversation')} <span className="font-sans text-[14px] font-medium text-muted">{compactNumber(count, locale)}</span></h2>
-        <label className="flex items-center gap-2 text-[14px] font-medium">
-          <Icon.Sort size={20} /><span className="sr-only">{t('comments.sortBy')}</span>
-          <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} className="rounded-md bg-transparent py-1 outline-none hover:bg-surface">
-            <option value="newest">{t('comments.newest')}</option><option value="oldest">{t('comments.oldest')}</option>
-          </select>
-        </label>
+        {sortPicker}
       </div>
-      <div className="mt-5 flex gap-3">
+      )}
+      <div className={card ? 'flex gap-2.5' : 'mt-5 flex gap-3'}>
         {viewer
-          ? <><Avatar name={viewer.profile?.displayName ?? viewer.user.email} src={viewer.profile?.avatarUrl} size={40} />
+          ? <><Avatar name={viewer.profile?.displayName ?? viewer.user.email} src={viewer.profile?.avatarUrl} size={card ? 34 : 40} />
             <Composer placeholder={t('comments.joinPlaceholder')} submitLabel={t('comments.post')} onSubmit={async (text) => {
               const r = await api<{ comment: CommentData }>(`/videos/${videoId}/comments`, { body: { content: text } });
               setCount((n) => n + 1);
@@ -224,7 +245,7 @@ export function Comments({ videoId, initialCount }: { videoId: string; initialCo
             }} /></>
           : <Link href={`/login?returnTo=${encodeURIComponent(`/watch?v=${videoId}`)}`} className="flex w-full items-center gap-3 border-b border-line pb-2 text-[14px] text-muted hover:text-ink"><Icon.PersonCircle size={40} strokeWidth={1.3} />{t('comments.signIn')}</Link>}
       </div>
-      <div className="mt-4">
+      <div className={card ? 'no-scrollbar -mx-2 mt-3 min-h-0 flex-1 overflow-y-auto px-2' : 'mt-4'}>
         {!page && !error && <div className="grid place-items-center py-6"><Icon.Spinner className="animate-spin text-muted" /></div>}
         {page?.comments.map((c) => <CommentItem key={c.id} c={c} videoId={videoId} onChange={update} onRemoved={removed} onReplied={() => setCount((n) => n + 1)} />)}
         {page && page.comments.length === 0 && <p className="py-6 text-center text-[14px] text-muted">{t('comments.none')}</p>}
