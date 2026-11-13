@@ -48,8 +48,8 @@ export function MomentAd({ ad, after, active, muted, setMuted }: { ad: MomentAdD
   useEffect(() => () => { hls.current?.destroy(); }, []);
 
   return (
-    <section aria-label={`Sponsored: ${ad.headline}`} className="relative flex h-full snap-start snap-always items-center justify-center py-3">
-      <div className="relative aspect-[9/16] h-full max-h-[calc(100dvh-8rem)] overflow-hidden rounded-[26px] bg-black text-white shadow-[var(--shadow)]">
+    <section aria-label={`Sponsored: ${ad.headline}`} className="relative flex h-full snap-start snap-always items-center justify-center sm:py-3">
+      <div className="relative h-full w-full overflow-hidden bg-black text-white sm:aspect-[9/16] sm:w-auto sm:max-h-[calc(100dvh-6.5rem)] sm:rounded-[26px] sm:shadow-[var(--shadow)]">
       <video ref={el} playsInline loop={false} poster={ad.thumbnailUrl ?? undefined} className="h-full w-full object-contain"
         onPlaying={() => { if (!imp.current) imp.current = post('/ads/impressions', { campaignId: ad.campaignId, videoId: after, placement: 'MOMENTS' }).then((r) => r.json()).then((j) => j.impressionId ?? null).catch(() => null); }}
         onTimeUpdate={(e) => { const d = e.currentTarget.duration || ad.durationSeconds; setProgress(d ? e.currentTarget.currentTime / d : 0); }}
