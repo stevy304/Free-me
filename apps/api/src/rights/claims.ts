@@ -27,11 +27,15 @@ async function protectedWorks(prisma: PrismaClient, ids: string[], uploader: { c
     if (!ref && !published) return [];
     // Only a verified rights holder may let copies through (monetize or track); anyone else's works are blocked.
     const policy: RightsPolicy = ref && v.channel.rightsVerifiedAt ? ref.policy : 'BLOCK';
-    return [{ id: v.id, title: v.title, policy, owner: v.channel }];
+    // Sound alone counts only for a verified rights holder's work (they own the song or the broadcast). Ordinary
+    // creators' videos are protected by their picture: two people dancing to the same trending song, or filming the
+    // same anthem in a stadium, have the same sound and are not copies of each other.
+    const bySound = !!v.channel.rightsVerifiedAt;
+    return [{ id: v.id, title: v.title, policy, owner: v.channel, bySound }];
   });
 }
 
-const describe = (m: Match) => (m.picture && m.sound ? 'picture and sound' : m.picture ? 'picture' : 'sound');
+const describe = (m: Match) => (m.picture && m.sound ? 'picture and sound' : m.picture ? 'picture' : 'sound') + (m.edits?.length ? ` (${m.edits.join(', ')})` : '');
 const seconds = (m: Match) => Math.max(m.picture?.seconds ?? 0, m.sound?.seconds ?? 0);
 
 /**
@@ -47,7 +51,9 @@ export async function claimUpload(prisma: PrismaClient, video: { id: string; cha
   const claims: ClaimView[] = [];
   for (const w of works) {
     if (released.has(w.id)) continue;
-    const m = matches.find((x) => x.videoId === w.id)!;
+    const found = matches.find((x) => x.videoId === w.id)!;
+    const m = w.bySound ? found : { ...found, sound: null };
+    if (!m.picture && !m.sound) continue;
     const part = m.picture && (!m.sound || m.picture.seconds >= m.sound.seconds) ? m.picture : m.sound!;
     const data = { ownerChannelId: w.owner.id, policy: w.policy, matched: describe(m), matchedSeconds: seconds(m), uploadStart: part.uploadStart, referenceStart: part.referenceStart };
     await prisma.contentClaim.upsert({ where: { videoId_referenceVideoId: { videoId: video.id, referenceVideoId: w.id } }, create: { videoId: video.id, referenceVideoId: w.id, ...data }, update: data });

@@ -279,7 +279,7 @@ export class VideoProcessor {
   /** Fingerprints the upload and records claims; a failure never stops publishing (it is logged and retried by the backfill). */
   private async contentId(video: Video, source: string, info: ProbeResult, signal?: AbortSignal) {
     try {
-      const fp = await fingerprintFile(this.config.media.ffmpegPath, source, info.hasAudio, signal);
+      const fp = await fingerprintFile(this.config.media.ffmpegPath, source, info, signal, true);
       const r = await claimUpload(this.prisma, { id: video.id, channelId: video.channelId, createdAt: video.createdAt, durationSeconds: Math.round(info.durationSeconds) }, fp);
       if (r.claims.length) this.log.log({ event: 'video_claimed', videoId: video.id, claims: r.claims.map((c) => ({ reference: c.referenceVideoId, policy: c.policy, matched: c.matched, seconds: c.seconds })) });
       return r;

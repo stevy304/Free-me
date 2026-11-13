@@ -15,6 +15,8 @@ const tune = 'sin(2*PI*t*(330+220*sin(2*PI*t/3)+110*sin(2*PI*t/7)))*0.6';
 const original = join(dir, 'original.mp4');
 const copy = join(dir, 'copy.mp4');
 const own = join(dir, 'own.mp4');
+const sameSong = join(dir, 'same-song.mp4');
+const sameSong2 = join(dir, 'same-song-2.mp4');
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 beforeAll(async () => {
@@ -22,6 +24,9 @@ beforeAll(async () => {
   // The copy: smaller and lower quality, the first 2.4 s cut.
   ff(['-ss', '2.4', '-i', original, '-vf', 'scale=480:270', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '34', '-c:a', 'aac', '-b:a', '64k', copy]);
   ff(['-f', 'lavfi', '-i', 'life=size=320x180:rate=25:mold=10:ratio=0.4', '-f', 'lavfi', '-i', 'aevalsrc=sin(2*PI*t*(600+300*sin(2*PI*t/5)))*0.5:s=44100', '-t', '16', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '30', '-pix_fmt', 'yuv420p', '-c:a', 'aac', own]);
+  // Another picture entirely, with the original's soundtrack (a different dance to the same song).
+  ff(['-f', 'lavfi', '-i', 'testsrc2=size=480x270:rate=25', '-i', original, '-map', '0:v', '-map', '1:a', '-t', '20', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '30', '-pix_fmt', 'yuv420p', '-c:a', 'aac', sameSong]);
+  ff(['-f', 'lavfi', '-i', 'cellauto=size=480x270:rate=25:rule=110', '-i', original, '-map', '0:v', '-map', '1:a', '-t', '20', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '30', '-pix_fmt', 'yuv420p', '-c:a', 'aac', sameSong2]);
   ctx = await makeApp({ redis: false, storageDir: join(dir, 'storage'), adminEmails: ['admin@example.com'], env: { SAFETY_UNSCANNED_REVIEW: 'none' } });
 }, 120_000);
 beforeEach(async () => { await resetDb(ctx.prisma); ctx.mail.outbox.length = 0; await ctx.clearLimits(); });
@@ -65,7 +70,7 @@ test('a copy of a published video is blocked; the uploader disputes; the owner r
 
   // Both sides see the claim.
   const mine = (await copier.get('/api/rights').expect(200)).body;
-  expect(mine.claimsOnMyUploads).toEqual([expect.objectContaining({ policy: 'BLOCK', status: 'ACTIVE', matched: 'picture and sound', upload: expect.objectContaining({ id: blocked.id }), work: expect.objectContaining({ id: work.id, title: 'Fractal dreams' }) })]);
+  expect(mine.claimsOnMyUploads).toEqual([expect.objectContaining({ policy: 'BLOCK', status: 'ACTIVE', matched: 'picture', upload: expect.objectContaining({ id: blocked.id }), work: expect.objectContaining({ id: work.id, title: 'Fractal dreams' }) })]);
   expect(mine.claimsOnMyUploads[0].seconds).toBeGreaterThanOrEqual(10);
   const theirs = (await owner.get('/api/rights').expect(200)).body;
   expect(theirs.works).toEqual([expect.objectContaining({ id: work.id, protected: true, fingerprinted: true, policy: 'BLOCK' })]);
@@ -125,3 +130,26 @@ test('a verified rights holder lets copies through and earns from them; others c
   await label.put(`/api/rights/works/${work.id}`).set('Origin', WEB).send({ active: false }).expect(200);
   expect((await fan.get('/api/rights').expect(200)).body.claimsOnMyUploads[0].status).toBe('RELEASED');
 }, 180_000);
+
+test('the same song under another picture: not a copy of an ordinary creator\'s video, but claimed for a verified rights holder\'s registered work', async () => {
+  const dancer = await creator('first.dancer');
+  const first = await upload(dancer, original, 'My dance');
+  expect(first.status).toBe('READY');
+  const other = await creator('second.dancer');
+  const second = await upload(other, sameSong, 'My own dance to the same song');
+  expect(second.status).toBe('READY');
+  expect(await ctx.prisma.contentClaim.count({ where: { videoId: second.id } })).toBe(0);
+
+  // The label that owns the song registers it (privately) as a reference work, after being verified.
+  const label = await creator('song.label');
+  const song = await upload(label, original, 'The song (master)');
+  await label.patch(`/api/hub/videos/${song.id}`).set('Origin', WEB).send({ visibility: 'PRIVATE' }).expect(200);
+  const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+  await admin.post('/api/admin/rights/song.label').set('Origin', WEB).send({ verified: true }).expect(200);
+  await label.put(`/api/rights/works/${song.id}`).set('Origin', WEB).send({ active: true, policy: 'MONETIZE' }).expect(200);
+  // Make the master older than the next upload (it is: uploaded first). A new dance to that song is claimed by sound.
+  const third = await upload(await creator('third.dancer'), sameSong2, 'Third dance');
+  expect(third.status).toBe('READY');
+  const claims = await ctx.prisma.contentClaim.findMany({ where: { videoId: third.id }, include: { owner: true } });
+  expect(claims.map((c) => [c.owner.handle, c.policy, c.matched])).toEqual([['song.label', 'MONETIZE', 'sound']]);
+}, 240_000);

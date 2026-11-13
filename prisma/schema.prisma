@@ -1226,6 +1226,8 @@ model ContentFingerprint {
   videoId               String            @id
   video                 Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
   frames                Bytes
+  /// The centre of a landscape video (the 9:16 part a vertical repost keeps), the same way as `frames`
+  center                Bytes?
   audio                 Bytes
   createdAt             DateTime          @default(now())
 }

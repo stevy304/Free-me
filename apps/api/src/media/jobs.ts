@@ -396,7 +396,7 @@ export class MediaJobs {
         const file = join(work, `source${extname(v.sourceFileS3Key!) || '.bin'}`);
         await this.storage.download(v.sourceFileS3Key!, file);
         const info = await probe(this.config.media.ffprobePath, file);
-        await saveFingerprint(this.prisma, v.id, await fingerprintFile(this.config.media.ffmpegPath, file, info.hasAudio));
+        await saveFingerprint(this.prisma, v.id, await fingerprintFile(this.config.media.ffmpegPath, file, info));
         done++;
       } catch (e) {
         this.log.warn(`${v.id}: no fingerprint: ${(e as Error).message.slice(0, 200)}`);
