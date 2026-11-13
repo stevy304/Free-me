@@ -16,6 +16,16 @@ export interface SafetyConfig {
   failClosed: boolean;
   /** Uploads a day for accounts in their first week. */
   newAccountDailyUploads: number;
+  /** The engine that looks at pictures and text beyond the built-in rules (safety/engines.ts). */
+  engine: 'none' | 'openai' | 'http';
+  openaiKey: string | null;
+  /** For tests and proxies; the OpenAI moderation endpoint by default. */
+  openaiUrl: string | null;
+  /**
+   * Without an engine that looks at pictures, which new videos a person checks before they can be seen:
+   * 'new' (default) videos of Spaces under a week old or with fewer than 3 published videos, 'all', or 'none'.
+   */
+  unscannedReview: 'new' | 'all' | 'none';
 }
 
 /** Prices and payment providers (see ENVIRONMENT.md → Payments). Money is in US cents unless named otherwise. */
@@ -359,6 +369,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       timeoutMs: Math.max(1000, Number(env.SAFETY_SCAN_TIMEOUT_MS) || 60_000), failClosed: env.SAFETY_SCAN_FAIL_CLOSED === 'true',
       newAccountDailyUploads: Math.max(1, Number(env.NEW_ACCOUNT_DAILY_UPLOADS) || 5),
       reportHoldThreshold: count('REPORT_HOLD_THRESHOLD', 5),
+      engine: (['openai', 'http'].includes(env.SAFETY_ENGINE?.trim() ?? '') ? env.SAFETY_ENGINE!.trim() : env.SAFETY_SCAN_URL?.trim() ? 'http' : 'none') as SafetyConfig['engine'],
+      openaiKey: env.SAFETY_OPENAI_KEY?.trim() || null, openaiUrl: env.SAFETY_OPENAI_URL?.trim() || null,
+      unscannedReview: (['new', 'all', 'none'].includes(env.SAFETY_UNSCANNED_REVIEW?.trim() ?? '') ? env.SAFETY_UNSCANNED_REVIEW!.trim() : nodeEnv === 'test' ? 'none' : 'new') as SafetyConfig['unscannedReview'],
     },
   };
 }

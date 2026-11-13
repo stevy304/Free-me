@@ -57,8 +57,9 @@ export class ModerationController {
       ...(reason ? { reason } : {}),
     };
     const rows = await this.prisma.report.findMany({
-      // Open reports: videos held by many reports first (they are hidden until someone decides), then oldest first.
-      where, orderBy: [...(state === 'open' ? [{ video: { reviewHoldAt: { sort: 'asc', nulls: 'last' } } } as const] : []), { createdAt: state === 'closed' ? 'desc' : 'asc' }, { id: 'asc' }], take: 51, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      // Open reports: most serious first (priority: child safety, then graphic and sexual content, hate …), then videos
+      // hidden by many reports, then oldest first.
+      where, orderBy: [...(state === 'open' ? [{ priority: 'desc' } as const, { video: { reviewHoldAt: { sort: 'asc', nulls: 'last' } } } as const] : []), { createdAt: state === 'closed' ? 'desc' : 'asc' }, { id: 'asc' }], take: 51, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       include: { video: { include: { channel: true } }, reporter: { select: { email: true } } },
     });
     const items = await Promise.all(rows.slice(0, 50).map(async (r) => ({

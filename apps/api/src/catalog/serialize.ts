@@ -26,7 +26,8 @@ function storyboardPreview(v: Video, urls: MediaUrls) {
   return { url: urls.publicUrl(v.id, sb.key), count: sb.count, cols: sb.cols, width: sb.width, height: sb.height };
 }
 
-export const PUBLIC_VIDEO = { status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', publishedAt: { not: null }, takenDownAt: null, reviewHoldAt: null, isAd: false } as const;
+/** Listed anywhere: ready, public, published, not removed or held, and through the safety check. */
+export const PUBLIC_VIDEO = { status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', publishedAt: { not: null }, takenDownAt: null, reviewHoldAt: null, safetyCheckedAt: { not: null }, isAd: false } as const;
 
 /** Videos anyone with the link may watch: public or unlisted, ready, not removed. */
-export const LINKED_VIDEO: Prisma.VideoWhereInput = { status: 'READY', visibility: { in: ['PUBLIC', 'UNLISTED'] }, takenDownAt: null, reviewHoldAt: null };
+export const LINKED_VIDEO: Prisma.VideoWhereInput = { status: 'READY', visibility: { in: ['PUBLIC', 'UNLISTED'] }, takenDownAt: null, reviewHoldAt: null, safetyCheckedAt: { not: null } };

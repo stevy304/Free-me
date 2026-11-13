@@ -1,4 +1,7 @@
 import { ConnectedSocket, MessageBody, type OnGatewayDisconnect, type OnGatewayInit, SubscribeMessage, WebSocketGateway } from '@nestjs/websockets';
+import { Inject } from '@nestjs/common';
+import { APP_CONFIG, type AppConfig } from '../config/config';
+import { checkText, refusal } from '../safety/check';
 import type { Server, Socket } from 'socket.io';
 import { PrismaService } from '../database/prisma.service';
 import { RateLimitService } from '../common/rate-limit.service';
@@ -18,7 +21,7 @@ const clean = (text: string, max: number) => text.replace(/[\u0000-\u001f\u007f]
 export class LiveGateway implements OnGatewayDisconnect, OnGatewayInit {
   private readonly guests = new LiveGuests();
 
-  constructor(private readonly live: LiveService, private readonly prisma: PrismaService, private readonly limits: RateLimitService) {}
+  constructor(private readonly live: LiveService, private readonly prisma: PrismaService, private readonly limits: RateLimitService, @Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
   afterInit(server: Server) {
     const namespace = server.of('/');
@@ -159,6 +162,9 @@ export class LiveGateway implements OnGatewayDisconnect, OnGatewayInit {
         catch { return { ok: false, error: `Slow mode: one message every ${s.slowModeSeconds} seconds.` }; }
       }
     }
+    // Checked before it reaches anyone (safety/): the built-in rules and moderators' terms only, so chat stays instant.
+    const verdict = await checkText(this.prisma, this.config, clean, undefined, { engine: false });
+    if (verdict.hold) return { ok: false, error: refusal(verdict, 'message') };
     await this.live.say(streamId, {
       id: `${Date.now()}-${socket.id.slice(0, 6)}`, text: clean, at: new Date().toISOString(),
       author: { name: who.channel?.name ?? who.profile?.displayName ?? 'Viewer', handle: who.channel?.handle ?? null, avatarUrl: who.channel?.avatarUrl ?? who.profile?.avatarUrl ?? null, verified: !!who.channel?.isVerified, host: who.channel?.id === s.channelId },

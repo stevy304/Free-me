@@ -72,6 +72,7 @@ export class CatalogController {
     }
     if (!v || (!owner && (v.status !== 'READY' || v.visibility === 'PRIVATE'))) throw new NotFoundException('This video is not available.');
     if (v.reviewHoldAt && !owner) throw new NotFoundException('This video is being reviewed by our moderators.');
+    if (!v.safetyCheckedAt && !owner) throw new NotFoundException('This video is not available.');
     const card = videoCard(v, this.urls);
     const fullQuality = owner || (!!auth && await hasPlus(this.prisma, auth.user));
     const [reaction, stored, following, saved, pending] = auth ? await Promise.all([
@@ -133,7 +134,7 @@ export class CatalogController {
           UNION SELECT vt."videoId" FROM "Tag" t JOIN "VideoTag" vt ON vt."tagId" = t.id WHERE t.name = ANY(${words})
         )
         SELECT v.id FROM found f JOIN "Video" v ON v.id = f.id JOIN "Channel" c ON c.id = v."channelId", q
-        WHERE v.status = 'READY' AND v.visibility = 'PUBLIC' AND v."mediaLocation" = 'PUBLIC' AND v."publishedAt" IS NOT NULL AND v."takenDownAt" IS NULL AND v."reviewHoldAt" IS NULL
+        WHERE v.status = 'READY' AND v.visibility = 'PUBLIC' AND v."mediaLocation" = 'PUBLIC' AND v."publishedAt" IS NOT NULL AND v."takenDownAt" IS NULL AND v."reviewHoldAt" IS NULL AND v."safetyCheckedAt" IS NOT NULL
         ORDER BY (
             ts_rank(to_tsvector('simple', v.title), q.tsq) * 4
           + ts_rank(to_tsvector('simple', coalesce(v.description, '')), q.tsq)

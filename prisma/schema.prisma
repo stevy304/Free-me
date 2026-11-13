@@ -315,6 +315,10 @@ model Video {
   /// Per-title encoding (media/per-title.ts): the CRF this video's content needs to look as good as CRF 21 (21–25);
   /// chosen once from samples, then used by every later pass (HD, AV1) so its qualities stay consistent.
   encodeCrf             Int?
+  /// When the automatic safety check (safety/) passed. Nobody but the owner can see or find the video, and its files
+  /// stay off the public CDN, until it is set. Uploads and live recordings start without it; rows made any other way
+  /// (seeds, before this existed) count as checked.
+  safetyCheckedAt       DateTime?         @default(now())
   publishedAt           DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
@@ -758,6 +762,9 @@ model Report {
   counterAddress        String?
   counterAt             DateTime?
   resolution            String?           // what the moderator decided, shown to the reporter and the creator
+  /// Higher first in the moderators' queue: 100 child safety, 80 graphic violence or sexual content, 60 hate,
+  /// 40 other automatic findings, 0 reports from people (safety/policy.ts)
+  priority              Int               @default(0)
   resolvedAt            DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
@@ -767,6 +774,7 @@ model Report {
   @@index([videoId])
   @@index([status, createdAt])
   @@index([reporterId])
+  @@index([status, priority])
 }
 
 model ModerationAction {
@@ -892,6 +900,21 @@ model Notification {
 }
 
 /// Views and watch time of one video on one day (UTC), written by the view counter's batches. Creator Hub's charts read it.
+/// Words and phrases the automatic text check looks for (safety/rules.ts), kept by moderators per language.
+/// Built-in lists cover the basics; native speakers add what only they know (slang, coded words, local slurs).
+model SafetyTerm {
+  id                    String            @id @default(uuid())
+  term                  String            // lower case; matched as a whole word or phrase after normalising
+  language              String            // BCP 47 (rw, fr, en, sw …) or "any"
+  category              String            // hate, harassment, sexual, violence, self-harm, illicit, spam
+  /// 1: always hold or refuse; 0.6: hold only together with another finding
+  weight                Float             @default(1)
+  createdById           String?
+  createdAt             DateTime          @default(now())
+
+  @@unique([term, language, category])
+}
+
 /// What viewers experienced while playing, per hour (UTC) and per country, codec, device and connection
 /// (media/qoe.ts): sessions, time to first frame (histogram), seconds played, rebuffering, quality shown, errors.
 /// No account, video or address: only counts.

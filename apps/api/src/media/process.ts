@@ -10,7 +10,8 @@ import { AudioOnly, MediaError, keyframeGap, probe, run, type ProbeResult } from
 import { mediaPrefix, wantedLocation } from './keys';
 import { LATE_FOLDERS } from './captions';
 import { extractSpeech } from './autocaptions';
-import { hold, screen } from './screening';
+import { frames, hold, screen } from './screening';
+import { checkVideo } from '../safety/check';
 import { announceVideo } from '../notifications/notify';
 import type { Storage } from './storage';
 import { publish, room } from '../realtime/publish';
@@ -127,9 +128,12 @@ export class VideoProcessor {
         await this.setProgress(videoId, 4, 'Processing SD', { durationSeconds: Math.round(info.durationSeconds), width: info.width, height: info.height, isShort: isShort && !podcast, isPodcast: podcast } as Partial<Video>);
         // Nothing is published before the safety check: a match holds the video for a moderator.
         // The uploaded file itself is fingerprinted (for a podcast, the sound file).
-        const held = await timed('screeningMs', () => screen(this.prisma, this.config, video, source, info, work));
+        const held = await timed('screeningMs', () => screen(this.prisma, video, source));
         signal?.throwIfAborted();
-        if (held) { await hold(this.prisma, videoId, held); this.log.warn(`${videoId}: held for review: ${held}`); return { speech: null, more: false }; }
+        if (held) { await hold(this.prisma, videoId, held, 100); this.log.warn(`${videoId}: held for review: ${held}`); return { speech: null, more: false }; }
+        // The safety check (safety/) runs while the first version is encoded; nothing is published before its answer.
+        const safety = this.safetyGate(video, source2, info, work, signal);
+        safety.catch(() => undefined); // awaited below; an early failure must not be an unhandled rejection meanwhile
         // These steps use independent video and audio streams. Keep the two-pass loudness target.
         const [thumbs, loud] = await Promise.all([
           timed('thumbnailsMs', () => this.thumbnails(source2, work, info, hdr, signal)),
@@ -138,6 +142,7 @@ export class VideoProcessor {
         signal?.throwIfAborted();
         await timed('sdEncodeMs', () => this.encode(source2, work, fast, info, hdr, info.hasAudio ? { loudness: loud } : null, (f) => this.setProgress(videoId, 5 + f * fastWeight, 'Processing SD').catch(() => undefined), signal, { videoId, sourceKey: podcast ? null : video.sourceFileS3Key!, background: false }));
         signal?.throwIfAborted();
+        if (!(await timed('safetyMs', () => safety))) return { speech: null, more: false };
         const playable = await timed('sdPublishMs', () => this.publish(videoId, work, fast, info, done, thumbs, passes.length ? 'Playable · adding qualities' : 'Playable · preparing seek previews', 5 + fastWeight));
         if (playable !== null && !video.hlsMasterKey) this.log.log({ event: 'video_first_playable', videoId, processingToPlayableMs: Math.round(playable - started), ...timings });
         // Seek previews from the 360p rendition just made: cheap, so they come with the first job.
@@ -157,6 +162,8 @@ export class VideoProcessor {
           return { speech: null, more: true };
         }
       } else {
+        // Second job: a video that was never checked (an interrupted first job) is checked before anything more is published.
+        if (!video.safetyCheckedAt && !(await this.safetyGate(video, source2, info, work, signal))) return { speech: null, more: false };
         // Second job: the renditions already published stay in the master playlist and are not encoded again.
         done.push(...await this.publishedEntries(videoId, ladder));
         const have = new Set(done.filter((d) => d.codec !== 'av1').map((d) => d.name));
@@ -213,6 +220,23 @@ export class VideoProcessor {
     const gap = await keyframeGap(this.config.media.ffprobePath, source, signal).catch(() => Infinity);
     if (gap > 4.5) return null;
     return { rung: top, copy: { codecs: `avc1.${profiles[info.profile!]}${info.level!.toString(16).padStart(2, '0')}`, kbps: info.videoKbps! } };
+  }
+
+  /**
+   * The safety check of a new upload (safety/check.ts): its text, and its pictures when an engine can see them. Passed:
+   * `safetyCheckedAt` is set and publishing goes ahead. Otherwise the video is held for a moderator (FLAGGED, in the
+   * queue by priority) and false is returned. A video a moderator released, or already checked, is not checked again.
+   */
+  private async safetyGate(video: Video, source: string, info: ProbeResult, work: string, signal?: AbortSignal): Promise<boolean> {
+    if (video.safetyCheckedAt) return true;
+    if (video.screeningClearedAt) { await this.prisma.video.update({ where: { id: video.id }, data: { safetyCheckedAt: new Date() } }); return true; }
+    const verdict = await checkVideo(this.prisma, this.config, video, () => frames(this.config.media.ffmpegPath, source, info, join(work, 'safety')), signal);
+    signal?.throwIfAborted();
+    this.log.log({ event: 'video_safety_checked', videoId: video.id, hold: verdict.hold, category: verdict.category, scanned: verdict.scanned, unscanned: verdict.unscanned, scores: verdict.scores });
+    if (verdict.hold) { await hold(this.prisma, video.id, verdict.reason ?? 'Held by the automatic check', verdict.priority); return false; }
+    await this.prisma.video.update({ where: { id: video.id }, data: { safetyCheckedAt: new Date() } });
+    video.safetyCheckedAt = new Date();
+    return true;
   }
 
   /** The video's per-title CRF: the one chosen before, else measured now from samples (off: PER_TITLE_ENCODING=false). */

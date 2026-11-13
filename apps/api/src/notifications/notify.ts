@@ -14,7 +14,7 @@ const safe = async (what: string, fn: () => Promise<unknown>) => { try { await f
 export function announceVideo(prisma: PrismaClient, videoId: string) {
   return safe(`announce ${videoId}`, async () => {
     const claimed = await prisma.video.updateMany({
-      where: { id: videoId, announcedAt: null, status: 'READY', visibility: 'PUBLIC', takenDownAt: null, publishedAt: { not: null } },
+      where: { id: videoId, announcedAt: null, status: 'READY', visibility: 'PUBLIC', takenDownAt: null, publishedAt: { not: null }, safetyCheckedAt: { not: null }, reviewHoldAt: null },
       data: { announcedAt: new Date() },
     });
     if (!claimed.count) return;

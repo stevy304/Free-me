@@ -120,7 +120,7 @@ export async function finishLive(prisma: PrismaClient, storage: Storage, sync: L
     await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-allowed_extensions', 'ALL', '-i', replayPlaylist, '-c', 'copy', '-movflags', '+faststart', recording]);
     const size = (await stat(recording)).size;
     // The replay starts with the visibility and description the host chose (private by default).
-    const v = await prisma.video.create({ data: { channelId: s.channelId, title: `${s.title} (live)`.slice(0, 100), description: s.description, status: 'PROCESSING', visibility: s.replayVisibility,
+    const v = await prisma.video.create({ data: { channelId: s.channelId, safetyCheckedAt: null, title: `${s.title} (live)`.slice(0, 100), description: s.description, status: 'PROCESSING', visibility: s.replayVisibility,
       ...(s.replayVisibility === 'PUBLIC' ? { publishedAt: new Date() } : {}), processingStage: 'Waiting to process', sourceSizeBytes: BigInt(size) } });
     const key = sourceKey(v.id, '.mp4');
     await storage.putFile(key, recording, { contentType: 'video/mp4' });

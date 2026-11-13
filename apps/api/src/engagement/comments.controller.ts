@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Inject, BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { APP_CONFIG, type AppConfig } from '../config/config';
+import { checkText, refusal } from '../safety/check';
 import { badgeOf } from '../catalog/serialize';
 import { notifyComment } from '../notifications/notify';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
@@ -32,7 +34,7 @@ const isModerator = (auth: AuthContext | null) => !!auth && auth.user.roles.some
 @ApiTags('comments')
 @Controller()
 export class CommentsController {
-  constructor(private readonly prisma: PrismaService, private readonly limits: RateLimitService) {}
+  constructor(private readonly prisma: PrismaService, private readonly limits: RateLimitService, @Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
   private view(c: Row, video: { channelId: string; channel: { userId: string } }, auth: AuthContext | null) {
     const deleted = !!c.deletedAt;
@@ -104,6 +106,9 @@ export class CommentsController {
     const v = await watchable(this.prisma, id, auth);
     if (!v.commentsEnabled || v.madeForKids) throw new ForbiddenException('Comments are turned off for this video.');
     const content = clean(body.content);
+    // Checked before anyone sees it (safety/): over the line, it is not posted and the writer is told why.
+    const verdict = await checkText(this.prisma, this.config, content);
+    if (verdict.hold) throw new BadRequestException(refusal(verdict, 'comment'));
     let parentId: string | null = null;
     let replyingTo: string | null = null;
     if (body.parentId) {

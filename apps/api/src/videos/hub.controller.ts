@@ -1,4 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Patch, Put, Query, Req } from '@nestjs/common';
+import { APP_CONFIG, type AppConfig } from '../config/config';
+import { checkText, videoText } from '../safety/check';
+import { AUTOMATED_MATCH } from '../media/screening';
 import { forgetHotVideo } from '../engagement/hot-video';
 import { feedsChanged } from '../catalog/feed-cache';
 import { announceVideo } from '../notifications/notify';
@@ -37,7 +40,7 @@ const IMAGE: Array<[string, number[], string]> = [['image/jpeg', [0xff, 0xd8, 0x
 export class HubController {
   constructor(
     private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly queue: MediaQueue,
-    private readonly urls: MediaUrls, @Inject(STORAGE) private readonly storage: Storage,
+    private readonly urls: MediaUrls, @Inject(STORAGE) private readonly storage: Storage, @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   private async mine(auth: AuthContext, id: string) {
@@ -101,8 +104,17 @@ export class HubController {
       data.visibility = body.visibility;
       if (body.visibility !== 'PRIVATE' && !v.publishedAt) data.publishedAt = new Date();
     }
+    // Changed words are checked before they are saved (safety/): over the line, the video is hidden at the same moment
+    // (reviewHoldAt) and a moderator is asked, so it is never shown with them.
+    let flagged: Awaited<ReturnType<typeof checkText>> | null = null;
+    if (body.title !== undefined || body.description !== undefined || body.tags !== undefined) {
+      const tags = body.tags ?? (await this.prisma.videoTag.findMany({ where: { videoId: id }, select: { tag: { select: { name: true } } } })).map((t) => t.tag.name);
+      const verdict = await checkText(this.prisma, this.config, videoText({ title: (data.title as string | undefined) ?? v.title, description: body.description !== undefined ? (data.description as string | null) : v.description, tags }));
+      if (verdict.hold && !v.reviewHoldAt) { data.reviewHoldAt = new Date(); flagged = verdict; }
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.video.update({ where: { id }, data });
+      if (flagged) await tx.report.create({ data: { videoId: id, reason: AUTOMATED_MATCH, details: `${flagged.reason} — in the title, description or tags`, priority: flagged.priority } });
       forgetHotVideo(id);
       if (body.tags) {
         const names = [...new Set(body.tags.map((t) => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean))].slice(0, 30);
@@ -114,7 +126,7 @@ export class HubController {
       }
     });
     // Media follows visibility: public/unlisted to the CDN prefix, private (and removed) behind signed links.
-    const want = wantedLocation({ visibility: (data.visibility as string | undefined) ?? v.visibility, takenDownAt: v.takenDownAt });
+    const want = wantedLocation({ visibility: (data.visibility as string | undefined) ?? v.visibility, safetyCheckedAt: v.safetyCheckedAt, takenDownAt: v.takenDownAt });
     if (v.hlsMasterKey && want !== v.mediaLocation) await this.queue.add({ name: 'relocate', videoId: id });
     await feedsChanged();
     await announceVideo(this.prisma, id);
