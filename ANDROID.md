@@ -6,6 +6,10 @@ screen, uploads work, and the camera and microphone work for going live. Links t
 browser. The app shows the live site, so every change to Free Me reaches it at once without a new APK. A new APK
 is only needed for a new icon, name or address.
 
+While the site loads, the app shows a loading screen. If the site answers with an error (a stopped Codespace, a port
+that is not Public) it says so. A phone whose "Android System WebView" is too old for the site (before version 111)
+is offered the update in Google Play.
+
 **Which site it opens:**
 - A build made for a site (`FREEME_HOST`, or the address given when the workflow is run by hand) opens it directly.
 - A build made without one asks for the address the first time it opens and remembers it. This is for testing, such

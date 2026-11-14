@@ -11,6 +11,15 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.content.pm.PackageInfo;
+import android.net.http.SslError;
+import android.webkit.SslErrorHandler;
+import android.webkit.WebResourceResponse;
+import android.webkit.RenderProcessGoneDetail;
+import android.view.WindowInsets;
+import android.widget.ProgressBar;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -58,6 +67,12 @@ public class MainActivity extends Activity {
     private View fullscreen;
     private WebChromeClient.CustomViewCallback fullscreenDone;
     private FrameLayout root;
+    private View loading;
+    private boolean shown;
+    private final Handler later = new Handler(Looper.getMainLooper());
+    /** The site's styles need a recent WebView (Chrome 111+, as Tailwind v4 does); older ones show a dark, empty page. */
+    private static final int WEBVIEW_NEEDED = 111;
+    private boolean oldWebViewAccepted;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -66,6 +81,15 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(INK);
         root = new FrameLayout(this);
         root.setBackgroundColor(INK);
+        // Android 15 draws apps under the status and navigation bars: keep Free Me between them.
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            if (fullscreen != null) v.setPadding(0, 0, 0, 0);
+            else if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets i = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
+                v.setPadding(i.left, i.top, i.right, i.bottom);
+            } else v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(), insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            return insets;
+        });
         setContentView(root);
 
         String fixed = getString(R.string.launch_url);
@@ -75,7 +99,19 @@ public class MainActivity extends Activity {
         Uri link = getIntent().getData();
         String start = home != null && link != null && sameSite(link, Uri.parse(home)) ? link.toString() : home;
         if (start == null) ask(null);
+        else if (webViewTooOld() > 0) oldWebView(start);
         else browse(start, state);
+    }
+
+    /** The phone's WebView (Chrome) major version when it is too old for the site, else 0. */
+    private int webViewTooOld() {
+        if (oldWebViewAccepted) return 0;
+        try {
+            PackageInfo p = Build.VERSION.SDK_INT >= 26 ? WebView.getCurrentWebViewPackage() : null;
+            if (p == null || p.versionName == null) return 0;
+            int major = Integer.parseInt(p.versionName.split("\\.")[0]);
+            return major < WEBVIEW_NEEDED ? major : 0;
+        } catch (RuntimeException e) { return 0; }
     }
 
     // ---- The site ---------------------------------------------------------------------------------------------
@@ -112,6 +148,33 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError error) {
                 if (req.isForMainFrame()) offline(error.getDescription() == null ? "" : error.getDescription().toString());
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest req, WebResourceResponse res) {
+                // A stopped Codespace (502), a port that is not Public (401/403/404): say so instead of a blank page.
+                if (!shown && req.isForMainFrame() && res.getStatusCode() >= 400) offline("The site answered " + res.getStatusCode() + (home != null && home.contains(".github.dev") ? ". Is the Codespace running, and its port set to Public?" : "."));
+            }
+
+            @Override
+            public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+                handler.cancel();
+                offline("The site's security certificate is not valid.");
+            }
+
+            @Override
+            public void onPageCommitVisible(WebView view, String url) { ready(); }
+
+            @Override
+            public void onPageFinished(WebView view, String url) { ready(); }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                // The page's process crashed (low memory): start it again rather than leave a dead, dark window.
+                if (web == view) { web = null; root.removeView(view); }
+                view.destroy();
+                browse(home, null);
+                return true;
             }
         });
 
@@ -153,7 +216,59 @@ public class MainActivity extends Activity {
 
         root.removeAllViews();
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        if (state == null || web.restoreState(state) == null) web.loadUrl(url);
+        showLoading();
+        if (state == null || web.restoreState(state) == null || web.copyBackForwardList().getSize() == 0) web.loadUrl(url);
+    }
+
+    /** Free Me's mark and a spinner over the page until it shows; after 20 s, ways out (a slow or stopped site). */
+    private void showLoading() {
+        shown = false;
+        LinearLayout box = screen();
+        box.setGravity(Gravity.CENTER);
+        ProgressBar spin = new ProgressBar(this);
+        box.addView(spin, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView note = text("Opening Free Me…", "#B0A397", 15);
+        note.setGravity(Gravity.CENTER);
+        box.addView(note);
+        loading = box;
+        root.addView(box, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        later.removeCallbacksAndMessages(null);
+        later.postDelayed(() -> {
+            if (shown || loading != box) return;
+            note.setText("This is taking long. A Codespace can need a minute to wake up.");
+            Button retry = button("Try again", true);
+            retry.setOnClickListener(v -> browse(home, null));
+            box.addView(retry, wide());
+            if (getString(R.string.launch_url).isEmpty()) {
+                Button change = button("Change the address", false);
+                change.setOnClickListener(v -> ask(home));
+                box.addView(change, wide());
+            }
+        }, 20_000);
+    }
+
+    private void ready() {
+        if (shown || web == null) return;
+        shown = true;
+        later.removeCallbacksAndMessages(null);
+        if (loading != null) { root.removeView(loading); loading = null; }
+    }
+
+    /** The phone's WebView is too old to draw the site: offer the update (Google Play), or carry on. */
+    private void oldWebView(String start) {
+        LinearLayout box = screen();
+        box.addView(text("Free Me needs a newer \"Android System WebView\" (this phone has version " + webViewTooOld() + "). Update it, and Chrome, in Google Play, then open Free Me again.", "#F4EDE3", 16));
+        Button update = button("Update in Google Play", true);
+        update.setOnClickListener(v -> {
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.google.android.webview"))); }
+            catch (ActivityNotFoundException e) { outside(Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.webview")); }
+        });
+        box.addView(update, wide());
+        Button go = button("Open anyway", false);
+        go.setOnClickListener(v -> { oldWebViewAccepted = true; browse(start, null); });
+        box.addView(go, wide());
+        root.removeAllViews();
+        root.addView(box);
     }
 
     private static boolean sameSite(Uri a, Uri b) {
@@ -165,6 +280,7 @@ public class MainActivity extends Activity {
     }
 
     private void immersive(boolean on) {
+        root.requestApplyInsets();
         View d = getWindow().getDecorView();
         d.setSystemUiVisibility(on ? View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY : 0);
         if (on) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -307,7 +423,7 @@ public class MainActivity extends Activity {
             e.putString(KEY, url);
             e.apply();
             home = url;
-            browse(url, null);
+            if (webViewTooOld() > 0) oldWebView(url); else browse(url, null);
         };
         go.setOnClickListener(v -> submit.run());
         field.setOnEditorActionListener((v, actionId, event) -> { submit.run(); return true; });
@@ -328,6 +444,8 @@ public class MainActivity extends Activity {
             change.setOnClickListener(v -> ask(home));
             box.addView(change, wide());
         }
+        later.removeCallbacksAndMessages(null);
+        loading = null;
         if (web != null) { web.stopLoading(); web.destroy(); web = null; }
         root.removeAllViews();
         root.addView(box);
