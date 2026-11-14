@@ -9,6 +9,7 @@ import type { Payment } from '@/lib/types';
 import { useShell } from '@/components/shell/ShellContext';
 
 interface Settings {
+  adEconomics?: { status: 'MODELLED' | 'UNVERIFIED_COSTS'; minimumCpmUsdCents: number | null; estimatedMarginUsdCents: number | null; paymentFeeBps: number; targetMarginBps: number };
   prices: { plusUsdCents: number; plusByCountry?: Record<string, number>; familyUsdCents: number; familyByCountry?: Record<string, number>; creatorPassUsdCents: number; creatorFreeVideos: number; premiumUsdCents: number; premiumByCountry?: Record<string, number>; adDayUsdCents: number; adCpmUsdCents: number; adMinBudgetUsdCents: number; verificationUsdCents: number; payoutMinUsdCents: number };
   momo: { source: string; active: boolean; enabled: boolean; sandbox: boolean; baseUrl: string; targetEnvironment: string; apiUser: string; subscriptionKey: string; apiKey: string; currency: string; perUsd: number | null };
   flutterwave: { source: string; active: boolean; enabled: boolean; secretKey: string; webhookHash: string; webhookUrl: string };
@@ -93,6 +94,11 @@ export function PaymentSettings({ onSaved }: { onSaved: () => void }) {
       {msg && <p role="status" className="rounded-xl bg-brand-soft px-3 py-2 text-[14px] text-brand">{msg}</p>}
       {error && <p role="alert" className="rounded-xl bg-danger/10 px-3 py-2 text-[14px] text-danger">{error}</p>}
 
+      {s.adEconomics && <aside className="rounded-xl border border-line p-4 text-sm">
+        <h3 className="font-semibold">Advertising cost model</h3>
+        <p className="mt-1 text-muted">{s.adEconomics.status === 'UNVERIFIED_COSTS' ? 'Costs are not configured. Launch prices are experimental; profitability is unverified.' : `Modelled minimum CPM: ${usd(s.adEconomics.minimumCpmUsdCents ?? 0)}. Estimated remainder per 1,000 paid impressions: ${usd(s.adEconomics.estimatedMarginUsdCents ?? 0)}.`}</p>
+        <p className="mt-1 text-muted">Collection allowance: {s.adEconomics.paymentFeeBps / 100}%. Target remainder: {s.adEconomics.targetMarginBps / 100}%. Set AD_COST_PER_1000_USD_CENTS to total costs allocated to 1,000 paid impressions, including viewing without ads. New campaign prices respect this floor; existing prepaid delivery keeps its rate.</p>
+      </aside>}
       {/* Prices */}
       <div className="rounded-xl bg-surface p-3">
         <p className="font-semibold">Prices (US dollars)</p>
@@ -100,7 +106,7 @@ export function PaymentSettings({ onSaved }: { onSaved: () => void }) {
           <label><span className={label}>Premium per month</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.premium} onChange={(e) => set('premium', e.target.value)} /></label>
           <label><span className={label}>Smallest ad funds</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.adMin} onChange={(e) => set('adMin', e.target.value)} /></label>
           <label><span className={label}>Verified business badge, per year</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.verification} onChange={(e) => set('verification', e.target.value)} /></label>
-          <label><span className={label}>Ad, per 1,000 views</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.adCpm} onChange={(e) => set('adCpm', e.target.value)} /></label>
+          <label><span className={label}>Ad, per 1,000 impressions</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.adCpm} onChange={(e) => set('adCpm', e.target.value)} /></label>
           <label><span className={label}>Plus per month</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.plus} onChange={(e) => set('plus', e.target.value)} /></label>
           <label><span className={label}>Family & TV per month</span><input type="number" min={0.01} step={0.01} className={`mt-1 ${inputClass}`} value={form.family} onChange={(e) => set('family', e.target.value)} /></label>
           <label className="sm:col-span-2"><span className={label}>Plus in some countries (US cents, e.g. RW=172)</span><input className={`mt-1 ${inputClass}`} value={form.plusByCountry ?? ''} onChange={(e) => set('plusByCountry', e.target.value)} /></label>

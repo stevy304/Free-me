@@ -1,3 +1,4 @@
+import { adEconomics } from '@free-me/shared';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AppConfig, BillingConfig } from '../config/config';
@@ -79,7 +80,8 @@ export function effective(config: AppConfig, s: StoredBilling): EffectiveBilling
     subscriptionCreatorShareBps: e.subscriptionCreatorShareBps,
     airtel: e.airtel,
     adDayUsdCents: s.adDayUsdCents ?? e.adDayUsdCents,
-    adCpmUsdCents: s.adCpmUsdCents ?? e.adCpmUsdCents,
+    adEconomics: e.adEconomics,
+    adCpmUsdCents: adEconomics(s.adCpmUsdCents ?? e.adCpmUsdCents, e.adEconomics).effectiveCpmUsdCents,
     adMinBudgetUsdCents: s.adMinBudgetUsdCents ?? e.adMinBudgetUsdCents,
     verificationUsdCents: s.verificationUsdCents ?? e.verificationUsdCents,
     payoutMinUsdCents: s.payoutMinUsdCents ?? e.payoutMinUsdCents,

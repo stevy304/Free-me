@@ -4,7 +4,7 @@ import { Suspense } from 'react';
 import { getViewer } from '@/lib/server-api';
 import { AdStudio } from './AdStudio';
 
-export const metadata: Metadata = { title: 'Ad Studio', description: 'Upload video ads and run them before videos on Free Me, by the day.' };
+export const metadata: Metadata = { title: 'Ad Studio', description: 'Start a small video advertising campaign on Free Me. Set a total budget and pay for ad impressions.' };
 
 export default async function AdStudioPage() {
   const viewer = await getViewer();

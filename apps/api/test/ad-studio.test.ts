@@ -73,3 +73,35 @@ test('before payments are switched on, an administrator approves an ad without p
   expect(days.length).toBeGreaterThan(0);
   expect(days.every((d) => d.grossCents === 0n && d.creatorPoolCents === 0n)).toBe(true);
 });
+
+
+test('a $2 starter campaign works; measured costs protect new commitments without changing existing campaign rates', async () => {
+  const originalCosts = ctx.config.billing.adEconomics;
+  try {
+    const admin = (await signIn(ctx.http, ctx.mail, 'admin@example.com')).agent;
+    const shop = (await signIn(ctx.http, ctx.mail, 'starter@example.com')).agent;
+    const ch = (await shop.post('/api/channels').set('Origin', WEB).send({ handle: 'starter', name: 'Starter shop' }).expect(201)).body.channel;
+    const clip = await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Starter ad', isAd: true, durationSeconds: 15, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8' } });
+    const form = { businessName: 'Starter Shop', country: 'RW', headline: 'Local sale', destinationUrl: 'https://shop.example.com', videoId: clip.id, budgetUsdCents: 200, days: 2 };
+    await shop.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, budgetUsdCents: 199 }).expect(400);
+    const old = (await shop.post('/api/ads/campaigns').set('Origin', WEB).send(form).expect(201)).body.campaign;
+    expect(old).toMatchObject({ totalCents: 200, cpmCents: 100, viewsBought: 2000 });
+    expect((await admin.get('/api/admin/billing/settings').expect(200)).body.adEconomics.status).toBe('UNVERIFIED_COSTS');
+    ctx.config.billing.adEconomics = { costPer1000UsdCents: 50, paymentFeeBps: 600, targetMarginBps: 1000 };
+    // A saved low price must not bypass the floor.
+    const settings = (await admin.put('/api/admin/billing/settings').set('Origin', WEB).send({ prices: { adCpmUsdCents: 25 } }).expect(200)).body;
+    expect(settings.prices.adCpmUsdCents).toBe(358);
+    expect(settings.adEconomics).toMatchObject({ status: 'MODELLED', minimumCpmUsdCents: 358 });
+    const plans = (await shop.get('/api/billing/plans').expect(200)).body;
+    expect(plans.ads).toMatchObject({ usdCentsPer1000Views: 358, minBudgetUsdCents: 200, creatorShareBps: 7000, momentsCreatorShareBps: 6000, billingUnit: 'IMPRESSION' });
+    const fresh = (await shop.post('/api/ads/campaigns').set('Origin', WEB).send(form).expect(201)).body.campaign;
+    expect(fresh).toMatchObject({ cpmCents: 358, totalCents: 200, viewsBought: 558 });
+    const refused = await shop.post(`/api/ads/campaigns/${old.id}/pay`).set('Origin', WEB).send({ method: 'manual' }).expect(400);
+    expect(refused.body.message).toMatch(/Prices have changed/);
+    await ctx.prisma.campaign.update({ where: { id: old.id }, data: { status: 'ACTIVE', reviewedAt: new Date() } });
+    const topup = await shop.post(`/api/ads/campaigns/${old.id}/funds`).set('Origin', WEB).send({ method: 'manual', usdCents: 200 }).expect(400);
+    expect(topup.body.message).toMatch(/older rate/);
+    expect((await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: old.id } })).cpmRateCents).toBe(100);
+    await shop.get('/api/admin/billing/settings').expect(403);
+  } finally { ctx.config.billing.adEconomics = originalCosts; }
+});

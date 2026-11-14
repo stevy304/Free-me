@@ -1,11 +1,17 @@
-import type { AppConfig } from '../src/config/config';
+import { loadConfig, type AppConfig } from '../src/config/config';
 import type { AppRequest, AuthContext } from '../src/common/request';
 import { UploadsController } from '../src/videos/uploads.controller';
 
 test('large S3 uploads keep the negotiated part size when the server configuration changes', async () => {
   const MiB = 1024 ** 2;
   const sizeBytes = 100 * 1024 * MiB;
-  const config = { media: { driver: 's3', maxUploadBytes: sizeBytes, partBytes: 16 * MiB }, billing: { creatorFreeVideos: 3, creatorPassUsdCents: 200 } } as AppConfig;
+  // Use validated defaults: upload access reads the complete effective billing configuration,
+  // including the ad cost model, even though this test only exercises multipart sizing.
+  const config = loadConfig({
+    NODE_ENV: 'test', DATABASE_URL: 'postgresql://test:test@localhost/upload_sizing',
+    SESSION_SECRET: 'test-session-secret-0123456789-abcdefghijklmnop',
+  });
+  config.media = { ...config.media, driver: 's3', maxUploadBytes: sizeBytes, partBytes: 16 * MiB };
   const video = { id: 'video', updatedAt: new Date(), uploadId: 'multipart', sourceFileS3Key: 'source' };
   const create = jest.fn(async ({ data }) => Object.assign(video, data));
   const prisma = {

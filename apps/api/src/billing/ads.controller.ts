@@ -190,6 +190,8 @@ export class AdsController {
     await this.limits.consume(`pay:${auth.user.id}`, 10, 3600, 'Too many payment attempts. Please wait a little.');
     const c = await this.own(auth, id);
     if (c.status !== 'DRAFT') throw new BadRequestException('This campaign is already paid.');
+    const current = await this.billing.settings();
+    if (c.cpmRateCents > 0 && c.cpmRateCents < current.adCpmUsdCents) throw new BadRequestException('Prices have changed since this draft was created. Create a new campaign to confirm the current rate.');
     const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'AD_CAMPAIGN', method: body.method, phone: body.phone, campaignId: c.id, usdCents: Number(c.budgetAmountCents), description: 'Free Me ad funds', returnPath: '/studio/ads' }));
     return { payment: paymentView(p) };
   }
@@ -204,7 +206,8 @@ export class AdsController {
     if (c.status === 'DRAFT') throw new BadRequestException('Pay for this ad first; then you can add more funds.');
     if (c.status === 'REJECTED') throw new BadRequestException('This ad was not approved. Create a new ad instead.');
     if (!c.cpmRateCents) throw new BadRequestException('This older ad is priced per day. Create a new ad to keep advertising.');
-    const { adMinBudgetUsdCents: minimum } = await this.billing.settings();
+    const { adMinBudgetUsdCents: minimum, adCpmUsdCents: currentCpm } = await this.billing.settings();
+    if (c.cpmRateCents < currentCpm) throw new BadRequestException('This campaign has an older rate. Create a new campaign at the current price to add more funds.');
     if (body.usdCents < minimum) throw new BadRequestException(`Add at least $${(minimum / 100).toFixed(minimum % 100 ? 2 : 0)}.`);
     const p = await this.billing.attempt(() => this.billing.start(auth.user, { purpose: 'AD_CAMPAIGN', method: body.method, phone: body.phone, campaignId: c.id, usdCents: body.usdCents, description: 'Free Me ad funds', returnPath: '/studio/ads' }));
     return { payment: paymentView(p) };

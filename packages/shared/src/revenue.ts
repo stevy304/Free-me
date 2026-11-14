@@ -13,7 +13,7 @@ export interface RevenueSplitConfig {
   reinvestmentBps: number;
 }
 
-/** The proposed launch split (60 / 30 / 10). Administrators can change it; the split in force is stored with each entry. */
+/** Historical launch split (60 / 30 / 10). Current advertising uses adRevenuePolicy(day); each ledger entry records its earning-day split. */
 export const PROPOSED_SPLIT: RevenueSplitConfig = { creatorPoolBps: 6000, platformBps: 3000, reinvestmentBps: 1000 };
 
 export function splitProblem(c: RevenueSplitConfig): string | null {

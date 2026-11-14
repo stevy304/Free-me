@@ -17,7 +17,7 @@ export interface PayAccount { label: string; number: string; name: string }
 export interface PayMethod { name: 'mtn_momo' | 'airtel_money' | 'flutterwave' | 'manual'; currency: string; perUsd: number; accounts?: PayAccount[]; instructions?: string | null }
 /** One plan's price for this viewer (per month; the Creator pass per year) and the lengths on sale. */
 export interface PlanPrice { usdCents: number; months: number[]; standardUsdCents?: number; country?: string | null }
-export interface Plans { premium: PlanPrice; plus?: PlanPrice; family?: PlanPrice & { seats: number }; creatorPass?: PlanPrice & { freeVideos: number; videosPerYear?: number }; uploadMaxBytes?: number; ads: { usdCentsPer1000Views?: number; minBudgetUsdCents?: number; maxAdsPerVideo: number }; payoutMinimumUsdCents: number; methods: PayMethod[] }
+export interface Plans { premium: PlanPrice; plus?: PlanPrice; family?: PlanPrice & { seats: number }; creatorPass?: PlanPrice & { freeVideos: number; videosPerYear?: number }; uploadMaxBytes?: number; ads: { usdCentsPer1000Views?: number; minBudgetUsdCents?: number; maxAdsPerVideo: number; billingUnit?: 'IMPRESSION'; creatorShareBps?: number; momentsCreatorShareBps?: number }; payoutMinimumUsdCents: number; methods: PayMethod[] }
 export interface Payment {
   id: string; purpose: 'PREMIUM' | 'AD_CAMPAIGN' | 'CREATOR_SUPPORT' | 'CREATOR_PASS' | 'PLUS' | 'FAMILY' | 'VERIFICATION'; supportChannelId?: string | null; supportClearedAt?: string | null; method: PayMethod['name']; status: 'PENDING' | 'SUCCEEDED' | 'FAILED'; amount: string; currency: string; usdCents: number;
   months: number | null; campaignId: string | null; checkoutUrl: string | null; failureReason: string | null; createdAt: string; paidAt: string | null;

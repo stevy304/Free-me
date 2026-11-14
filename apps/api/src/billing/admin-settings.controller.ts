@@ -1,3 +1,4 @@
+import { adEconomics } from '@free-me/shared';
 import { BadRequestException, Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Req } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
@@ -48,6 +49,7 @@ export class AdminPaymentSettingsController {
     const source = (k: 'momo' | 'flutterwave') => (stored[k] !== undefined ? 'app' : env[k] ? 'environment' : 'none');
     const m = stored.momo ?? null;
     return {
+      adEconomics: adEconomics(stored.adCpmUsdCents ?? env.adCpmUsdCents, eff.adEconomics),
       prices: { plusUsdCents: eff.plusUsdCents, plusByCountry: eff.plusByCountry, familyUsdCents: eff.familyUsdCents, familyByCountry: eff.familyByCountry, creatorPassUsdCents: eff.creatorPassUsdCents, creatorFreeVideos: eff.creatorFreeVideos, premiumUsdCents: eff.premiumUsdCents, premiumByCountry: eff.premiumByCountry, adDayUsdCents: eff.adDayUsdCents, adCpmUsdCents: eff.adCpmUsdCents, adMinBudgetUsdCents: eff.adMinBudgetUsdCents, verificationUsdCents: eff.verificationUsdCents, payoutMinUsdCents: eff.payoutMinUsdCents },
       momo: {
         source: source('momo'), active: !!eff.momo,
