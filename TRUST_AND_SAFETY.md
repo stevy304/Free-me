@@ -66,7 +66,7 @@ closes as soon as it is saved. Only the names of changed keys go into the audit 
 | The uploaded file's fingerprint (SHA-256, MD5) | Before anything else | Held (priority 100). Matches videos moderators removed and imported lists |
 | Title, description, tags, and pictures with the AI moderator | While it is transcoded | AI: published, limited or rejected with a reason. Without it: held before it is ever shown |
 | Pictures (frames across the video) | While it is transcoded, when an engine is configured | Held before it is ever shown |
-| No picture engine configured | While it is transcoded | First videos of new Spaces (under a week old or under 3 published videos) wait for a person (`SAFETY_UNSCANNED_REVIEW`) |
+| No picture engine configured | While it is transcoded | Published at once (the text rules and blocked files still apply). With `SAFETY_UNSCANNED_REVIEW=new`, the first videos of new Spaces (under a week old or under 3 published videos) wait for a person |
 | Videos copied from other apps, platforms or TV | While it is transcoded | Not published, and the creator is told at once on the upload screen. Decided by the marks in the file, or by the AI moderator when it sees another service's logo |
 | Copies of protected works (Content ID, RIGHTS.md) | While it is transcoded | The picture and sound are fingerprinted and matched against every published video and registered work. A copy is blocked (or, for verified rights holders who chose it, published with its ad money going to them). The uploader can dispute; the owner decides |
 | Edits to title, description, tags | Before they are saved | The video is hidden at the same moment, and a moderator is asked |

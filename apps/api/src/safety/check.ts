@@ -198,3 +198,28 @@ async function needsPerson(prisma: PrismaClient, config: AppConfig, channelId: s
   if (!ch) return true;
   return Date.now() - ch.createdAt.getTime() < 7 * 86_400_000 || ch._count.videos < 3;
 }
+
+/**
+ * With the unscanned-video rule off (SAFETY_UNSCANNED_REVIEW=none, the default), videos it held earlier are let go
+ * when the worker starts: processed again and published as their creators chose. Holds for anything else (blocked
+ * files, the text rules, reports, a scanner's findings) stay for a moderator.
+ */
+export async function releaseUnscannedHolds(prisma: PrismaClient, config: AppConfig, enqueue: (videoId: string) => Promise<void>): Promise<number> {
+  if (config.safety.unscannedReview !== 'none') return 0;
+  const open = { status: { in: ['PENDING', 'INVESTIGATING'] as ('PENDING' | 'INVESTIGATING')[] } };
+  const held = await prisma.report.findMany({ where: { reason: 'AUTOMATED_MATCH', ...open, details: { startsWith: 'New Space:' }, video: { status: 'FLAGGED', takenDownAt: null } }, select: { videoId: true } });
+  let released = 0;
+  for (const videoId of [...new Set(held.map((r) => r.videoId).filter((x): x is string => !!x))]) {
+    // Only when this rule is the sole open reason.
+    const others = await prisma.report.count({ where: { videoId, ...open, NOT: { reason: 'AUTOMATED_MATCH', details: { startsWith: 'New Space:' } } } });
+    if (others) continue;
+    const now = new Date();
+    await prisma.$transaction([
+      prisma.video.update({ where: { id: videoId }, data: { status: 'PROCESSING', processingStage: 'Queued' } }),
+      prisma.report.updateMany({ where: { videoId, ...open }, data: { status: 'DISMISSED', resolution: 'Released: new Spaces’ videos no longer wait for a person.', resolvedAt: now } }),
+    ]);
+    await enqueue(videoId);
+    released++;
+  }
+  return released;
+}

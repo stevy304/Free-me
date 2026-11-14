@@ -172,6 +172,25 @@ describe('without an engine, and where people write', () => {
     expect((await upload(known.agent)).status).toBe('READY');
   });
 
+  test('with the rule off (the default), videos it held are released and processed again; other holds stay', async () => {
+    const fresh = await space('waiting');
+    const held = await upload(fresh.agent);
+    expect(held.status).toBe('FLAGGED');
+    // Another video held for a different reason stays held.
+    const other = await ctx.prisma.video.create({ data: { channelId: fresh.channelId, title: 'Other', status: 'FLAGGED', visibility: 'PUBLIC', mediaLocation: 'PUBLIC' } });
+    await ctx.prisma.report.create({ data: { videoId: other.id, reason: 'AUTOMATED_MATCH', details: 'Same file as a video moderators removed', priority: 40 } });
+
+    const { releaseUnscannedHolds } = await import('../src/safety/check');
+    const queued: string[] = [];
+    const off = { ...ctx.config, safety: { ...ctx.config.safety, unscannedReview: 'none' as const } };
+    expect(await releaseUnscannedHolds(ctx.prisma, ctx.config, async (id) => { queued.push(id); })).toBe(0);
+    expect(await releaseUnscannedHolds(ctx.prisma, off, async (id) => { queued.push(id); })).toBe(1);
+    expect(queued).toEqual([held.id]);
+    expect(await ctx.prisma.video.findUniqueOrThrow({ where: { id: held.id } })).toMatchObject({ status: 'PROCESSING' });
+    expect(await ctx.prisma.report.findFirstOrThrow({ where: { videoId: held.id } })).toMatchObject({ status: 'DISMISSED' });
+    expect(await ctx.prisma.video.findUniqueOrThrow({ where: { id: other.id } })).toMatchObject({ status: 'FLAGGED' });
+  });
+
   test('a title changed to hate speech hides a published video at once and asks a moderator', async () => {
     const { agent, channelId } = await space('editor');
     const v = await ctx.prisma.video.create({ data: { channelId, title: 'Market day', status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', publishedAt: new Date(), hlsMasterKey: 'hls/master.m3u8' } });

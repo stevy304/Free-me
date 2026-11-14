@@ -77,7 +77,7 @@ Values for local development are in [.env.example](.env.example). In production 
 | `SAFETY_SCAN_URL` | | off | Optional outside matching service for uploads (e.g. a PDQ/TMK service such as Meta's Hasher-Matcher-Actioner behind a small adapter, or a vendor). Receives `POST { videoId, sha256, md5, durationSeconds, frames: [base64 JPEG] }`, answers `{ match: boolean, label? }` |
 | `SAFETY_ENGINE` | | `none` (`http` when `SAFETY_SCAN_URL` is set) | What looks at pictures (and text) beyond the built-in rules: `openai`, `http` or `none`. See TRUST_AND_SAFETY.md |
 | `SAFETY_OPENAI_KEY` | with `SAFETY_ENGINE=openai` | | OpenAI API key for its moderation model (free to use). Frames and text are sent to OpenAI |
-| `SAFETY_UNSCANNED_REVIEW` | | `new` | Without a picture engine, which uploads a person checks before they are shown: `new` (Spaces under a week old or with fewer than 3 published videos), `all`, or `none` |
+| `SAFETY_UNSCANNED_REVIEW` | | `none` | Without a picture engine, which uploads a person checks before they are shown: `none` (uploads are published at once; the text rules and blocked files still apply), `new` (Spaces under a week old or with fewer than 3 published videos), or `all` |
 | `SAFETY_SCAN_TOKEN` | | | Sent as `Authorization: Bearer …` to the scanner |
 | `SAFETY_SCAN_TIMEOUT_MS` | | `60000` | How long to wait for the scanner |
 | `SAFETY_SCAN_FAIL_CLOSED` | | `false` | `true`: hold uploads when the scanner cannot be reached, instead of letting them through |

@@ -404,7 +404,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       reportHoldThreshold: count('REPORT_HOLD_THRESHOLD', 5),
       engine: (['openai', 'http'].includes(env.SAFETY_ENGINE?.trim() ?? '') ? env.SAFETY_ENGINE!.trim() : env.SAFETY_SCAN_URL?.trim() ? 'http' : 'none') as SafetyConfig['engine'],
       openaiKey: env.SAFETY_OPENAI_KEY?.trim() || null, anthropicUrl: env.SAFETY_ANTHROPIC_URL?.trim() || null, aiCommentsPerDay: Math.max(0, Number(env.SAFETY_AI_COMMENTS_PER_DAY) || 0), openaiUrl: env.SAFETY_OPENAI_URL?.trim() || null,
-      unscannedReview: (['new', 'all', 'none'].includes(env.SAFETY_UNSCANNED_REVIEW?.trim() ?? '') ? env.SAFETY_UNSCANNED_REVIEW!.trim() : nodeEnv === 'test' ? 'none' : 'new') as SafetyConfig['unscannedReview'],
+      unscannedReview: (['new', 'all', 'none'].includes(env.SAFETY_UNSCANNED_REVIEW?.trim() ?? '') ? env.SAFETY_UNSCANNED_REVIEW!.trim() : 'none') as SafetyConfig['unscannedReview'],
     },
   };
 }

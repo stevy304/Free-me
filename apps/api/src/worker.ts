@@ -1,3 +1,4 @@
+import { releaseUnscannedHolds } from './safety/check';
 import { MailService } from './mail/mail.service';
 import { QoeCounter, summarise } from './media/qoe';
 import { refreshSignals } from './recommend/signals';
@@ -69,6 +70,10 @@ async function main() {
     await queue.add(job.name, job, jobOptions(job));
   };
   const jobs = new MediaJobs(prisma, storage, config, new Redis(config.redisUrl), enqueue, new QueueChunks(chunkQueue, chunkEvents, chunkDestinations));
+  // Videos the new-Space rule held before it was turned off are published now.
+  releaseUnscannedHolds(prisma, config, (videoId) => enqueue({ name: 'transcode', videoId }))
+    .then((n) => { if (n) log.log(`released ${n} video(s) held only because their Space was new`); })
+    .catch((e) => log.warn(`releasing held videos: ${(e as Error).message}`));
   // Every node handles CPU fallback. Hardware queues are consumed only by a verified compatible node.
   const encoders = config.media.encoder === 'libx264' ? ['libx264'] as const : ['libx264', config.media.encoder] as const;
   const chunkWorkers = encoders.map((encoder) => {
