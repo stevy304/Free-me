@@ -56,20 +56,36 @@ export function VideoDetailsForm({ video, onSaved, saveLabel }: { video: HubVide
   const [comments, setComments] = useState(video.commentsEnabled);
   const [thumb, setThumb] = useState<number | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  // Moments (vertical videos; shown while the shape is not known yet): the sound used, and a series to be an episode of.
+  const moment = video.isShort || !video.width || (video.height ?? 0) > (video.width ?? 0);
+  const [sound, setSound] = useState(video.soundTitle ?? '');
+  const [seriesId, setSeriesId] = useState(video.seriesId ?? '');
+  const [episode, setEpisode] = useState(video.episodeNumber ? String(video.episodeNumber) : '');
+  const [series, setSeries] = useState<Array<{ id: string; title: string; episodes: number }>>([]);
+  const [newSeries, setNewSeries] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const file = useRef<HTMLInputElement>(null);
 
+  useEffect(() => { if (moment) api<{ series: Array<{ id: string; title: string; episodes: number }> }>('/hub/series').then((r) => setSeries(r.series)).catch(() => undefined); }, [moment]);
   useEffect(() => { fetch('/api/categories').then((r) => r.json()).then((d) => setCategories(d.categories ?? [])).catch(() => undefined); }, []);
 
   const save = async () => {
     if (kids === null) { setMessage({ ok: false, text: t('details.kidsRequired') }); return; }
     setBusy(true); setMessage(null);
     try {
+      // A new series is made first, then the video goes in it.
+      let sid = seriesId;
+      if (moment && newSeries !== null && newSeries.trim()) {
+        const made = await api<{ series: { id: string; title: string; episodes: number } }>('/hub/series', { method: 'POST', body: { title: newSeries.trim() } });
+        setSeries((x) => [made.series, ...x]); setSeriesId(made.series.id); setNewSeries(null); sid = made.series.id;
+      }
       const r = await api<{ video: HubVideo }>(`/hub/videos/${video.id}`, { method: 'PATCH', body: {
         title, description, visibility, category: category || null, language, madeForKids: kids, commentsEnabled: comments,
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean), ...(thumb !== null ? { thumbnail: thumb } : {}),
+        ...(moment ? { soundTitle: sound.trim() || null, seriesId: sid || null, ...(sid && Number(episode) > 0 ? { episodeNumber: Number(episode) } : {}) } : {}),
       } });
+      if (r.video.episodeNumber) setEpisode(String(r.video.episodeNumber));
       setMessage({ ok: true, text: visibility === 'PRIVATE' ? t('details.saved') : video.status === 'READY' ? t('watch.published') : t('details.savedLater') });
       onSaved(r.video);
     } catch (e) { setMessage({ ok: false, text: e instanceof Error ? e.message : t('details.couldNotSave') }); } finally { setBusy(false); }
@@ -135,6 +151,37 @@ export function VideoDetailsForm({ video, onSaved, saveLabel }: { video: HubVide
         </div>
         <div><label htmlFor="v-lang" className={label}>{t('details.language')}</label><div className="mt-2"><LanguageSelect id="v-lang" allowEmpty value={language} onChange={setLanguage} /></div></div>
         <div className="sm:col-span-2"><Captions video={video} onSaved={onSaved} /></div>
+        {moment && (
+          <>
+            <div className="sm:col-span-2">
+              <label htmlFor="v-sound" className={label}><span className="inline-flex items-center gap-1.5"><Icon.Music size={15} />Sound</span></label>
+              <input id="v-sound" value={sound} maxLength={100} onChange={(e) => setSound(e.target.value)} placeholder="Original sound (or the song's name, such as Amahoro by …)" className={`${inputClass} mt-2`} />
+              <p className="mt-1 text-[12px] text-muted">Shown on your Moment. A song a rights holder lets people use is named automatically.</p>
+            </div>
+            <div>
+              <label htmlFor="v-series" className={label}>Series</label>
+              {newSeries === null ? (
+                <select id="v-series" value={seriesId} onChange={(e) => { if (e.target.value === '__new') setNewSeries(''); else { setSeriesId(e.target.value); setEpisode(''); } }} className={`${inputClass} mt-2`}>
+                  <option value="">Not part of a series</option>
+                  {series.map((s) => <option key={s.id} value={s.id}>{s.title} ({s.episodes})</option>)}
+                  <option value="__new">+ New series…</option>
+                </select>
+              ) : (
+                <div className="mt-2 flex gap-2">
+                  <input id="v-series" autoFocus value={newSeries} maxLength={80} onChange={(e) => setNewSeries(e.target.value)} placeholder="Series name, such as The Lake House" className={inputClass} />
+                  <button type="button" onClick={() => setNewSeries(null)} className="shrink-0 rounded-xl px-3 text-[13px] font-semibold hover:bg-surface">Cancel</button>
+                </div>
+              )}
+              <p className="mt-1 text-[12px] text-muted">A story in parts: people see &quot;Episode 2 of 5&quot; and can play the next one.</p>
+            </div>
+            {(seriesId || newSeries !== null) && (
+              <div>
+                <label htmlFor="v-episode" className={label}>Episode number</label>
+                <input id="v-episode" inputMode="numeric" value={episode} onChange={(e) => setEpisode(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="Next after the last one" className={`${inputClass} mt-2`} />
+              </div>
+            )}
+          </>
+        )}
         <div className="sm:col-span-2"><label htmlFor="v-tags" className={label}>{t('details.tags')}</label><input id="v-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('details.tagsPlaceholder')} className={`${inputClass} mt-2`} /></div>
       </div>
       <label className={`flex items-start gap-3 rounded-xl border border-line p-3 ${kids ? 'opacity-60' : 'cursor-pointer hover:bg-surface'}`}>

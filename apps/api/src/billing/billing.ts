@@ -492,10 +492,13 @@ export class Billing {
     const momentsGross = placed && placed.all > 0n ? (gross * placed.moments) / placed.all : 0n;
     // Before and during videos: 60% to the creators whose videos the ads played with, by ads shown.
     const split = splitRevenue(gross - momentsGross, PROPOSED_SPLIT);
+    // A copy a rights holder claimed to earn from (Content ID) pays its share to the owner instead of the uploader.
     const rows = await this.prisma.$queryRaw<Array<{ channelId: string; n: bigint }>>`
-      SELECT v."channelId", count(*)::bigint AS n FROM "AdImpression" i JOIN "Video" v ON v.id = i."videoId"
-      JOIN "CreatorEligibility" e ON e."channelId" = v."channelId" AND e."isEligible"
-      WHERE i."placement" = 'PRE_ROLL' AND i."createdAt" >= ${day.toISOString()}::timestamp AND i."createdAt" < ${end.toISOString()}::timestamp GROUP BY v."channelId"`;
+      SELECT COALESCE(cl."ownerChannelId", v."channelId") AS "channelId", count(*)::bigint AS n FROM "AdImpression" i JOIN "Video" v ON v.id = i."videoId"
+      LEFT JOIN LATERAL (SELECT c."ownerChannelId" FROM "ContentClaim" c WHERE c."videoId" = v.id AND c."policy" = 'MONETIZE' AND c."status" = 'ACTIVE' ORDER BY c."createdAt" LIMIT 1) cl ON true
+      LEFT JOIN "CreatorEligibility" e ON e."channelId" = v."channelId" AND e."isEligible"
+      WHERE i."placement" = 'PRE_ROLL' AND (cl."ownerChannelId" IS NOT NULL OR e."channelId" IS NOT NULL)
+        AND i."createdAt" >= ${day.toISOString()}::timestamp AND i."createdAt" < ${end.toISOString()}::timestamp GROUP BY 1`;
     const shares = allocatePool(rows.length ? split.creatorPool : 0n, Object.fromEntries(rows.map((r) => [r.channelId, r.n])));
     // Between Moments (like Shorts on YouTube): MOMENTS_CREATOR_SHARE (45%) is shared by the monetised creators'
     // Moments views that day, whoever's Moment the ad followed.

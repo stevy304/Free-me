@@ -94,7 +94,7 @@ function Dock({ v }: { v: DockVideo }) {
   const toggle = () => { const x = el.current; if (!x) return; if (x.paused) void x.play().catch(() => undefined); else { x.pause(); save(); } };
 
   return (
-    <div role="region" aria-label="Mini-player" className="fixed inset-x-3 bottom-[92px] z-40 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1413] text-white shadow-[0_18px_50px_rgb(0_0_0/0.45)] md:inset-x-auto md:bottom-6 md:right-6 md:w-[320px]">
+    <div role="region" aria-label="Mini-player" className="fixed inset-x-3 bottom-[92px] z-40 overflow-hidden rounded-2xl border border-white/10 bg-[#14110f] text-white shadow-[0_18px_50px_rgb(0_0_0/0.45)] md:inset-x-auto md:bottom-6 md:right-6 md:w-[320px]">
       <div className="flex items-center gap-3 md:block">
         <button type="button" onClick={expand} aria-label={`Back to ${v.title}`} className="group relative aspect-video w-[132px] shrink-0 bg-black md:w-full">
           <video ref={el} playsInline poster={v.poster ?? undefined} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); save(true); }} className="h-full w-full object-cover" />
@@ -109,7 +109,7 @@ function Dock({ v }: { v: DockVideo }) {
           <button type="button" onClick={close} aria-label="Close the mini-player" className="grid h-10 w-10 shrink-0 place-items-center rounded-full hover:bg-white/10"><Icon.Close size={20} /></button>
         </div>
       </div>
-      <div className="h-[3px] bg-white/10"><div className="h-full bg-[#2bb5ab]" style={{ width: `${progress * 100}%` }} /></div>
+      <div className="h-[3px] bg-white/10"><div className="h-full bg-[#22ada2]" style={{ width: `${progress * 100}%` }} /></div>
     </div>
   );
 }

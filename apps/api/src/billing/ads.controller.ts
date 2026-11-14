@@ -51,6 +51,11 @@ class ImpressionDto {
 }
 class AdEventDto { @ApiProperty({ enum: ['COMPLETE', 'SKIP', 'CLICK'] }) @IsIn(['COMPLETE', 'SKIP', 'CLICK']) type!: string; @ApiProperty() @IsInt() @Min(0) @Max(3_600_000) ms!: number }
 
+/** A rights holder earns from this video (an active "earn" claim, rights/claims.ts): its ads' money goes to them. */
+async function earningClaim(prisma: PrismaService, videoId: string) {
+  return !!(await prisma.contentClaim.findFirst({ where: { videoId, policy: 'MONETIZE', status: 'ACTIVE' }, select: { id: true } }));
+}
+
 /** A campaign can show: running, inside its period (or its make-good period), with views left in its budget. */
 const running = (c: Campaign, now: Date) => c.status === 'ACTIVE' && c.startDate <= now && (c.endDate > now || (!!c.deliverUntil && c.deliverUntil > now))
   && (!c.cpmRateCents || (c.impressionsCount + 1n) * BigInt(c.cpmRateCents) <= c.budgetAmountCents * 1000n);
@@ -241,7 +246,8 @@ export class AdsController {
     if (auth && await hasPlus(this.prisma, auth.user)) return { slots: [] };
     const v = await this.prisma.video.findFirst({ where: { id, ...LINKED_VIDEO }, include: { channel: { include: { eligibility: true, user: { select: { premiumUntil: true, roles: true } } } } } });
     const now = new Date();
-    if (!v || v.isShort || v.isAd || !v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now)) return { slots: [] };
+    // Ads play on monetised creators' videos, and on copies a rights holder claimed to earn from (Content ID).
+    if (!v || v.isShort || v.isAd || (!(v.channel.eligibility?.isEligible && hasPremiumAccess(v.channel.user, now)) && !(await earningClaim(this.prisma, v.id)))) return { slots: [] };
     const country = await this.viewerCountry(auth, req);
     const candidates = await this.prisma.campaign.findMany({
       where: { status: 'ACTIVE', startDate: { lte: now }, videoId: { not: id }, AND: [
@@ -306,7 +312,7 @@ export class AdsController {
       // Between Moments: any public Moment; untargeted campaigns only. Creators are paid from the Moments pool.
       if (v.visibility !== 'PUBLIC' || c.targetVideoIds.length || c.targetChannelIds.length) return { impressionId: null };
     } else {
-      if (!v.channel.eligibility?.isEligible || !hasPremiumAccess(v.channel.user, now)) return { impressionId: null };
+      if (!(v.channel.eligibility?.isEligible && hasPremiumAccess(v.channel.user, now)) && !(await earningClaim(this.prisma, v.id))) return { impressionId: null };
       if ((c.targetVideoIds.length || c.targetChannelIds.length) &&
           (v.visibility !== 'PUBLIC' || (!c.targetVideoIds.includes(v.id) && !c.targetChannelIds.includes(v.channelId)))) return { impressionId: null };
     }

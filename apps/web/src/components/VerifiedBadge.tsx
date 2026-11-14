@@ -16,7 +16,7 @@ export function VerifiedBadge({ size = 16, className = '', kind = 'verified', la
       <title>{label}</title>
       <defs>
         <linearGradient id={`fmv-${id}`} x1="3" y1="2" x2="21" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#2bc4b8" /><stop offset="1" stopColor="#0a6b67" /></linearGradient>
-        <linearGradient id={`fmg-${id}`} x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#ffd88a" /><stop offset="1" stopColor="#e39a2a" /></linearGradient>
+        <linearGradient id={`fmg-${id}`} x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#ffd88a" /><stop offset="1" stopColor="#d9962e" /></linearGradient>
       </defs>
       <polygon points={pts} fill={premium ? `url(#fmg-${id})` : `url(#fmv-${id})`} stroke={premium ? `url(#fmv-${id})` : `url(#fmg-${id})`} strokeWidth="1.1" strokeLinejoin="round" />
       {premium

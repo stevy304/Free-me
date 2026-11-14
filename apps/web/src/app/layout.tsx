@@ -22,7 +22,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 export const viewport: Viewport = {
-  themeColor: [{ media: '(prefers-color-scheme: light)', color: '#f7f5ef' }, { media: '(prefers-color-scheme: dark)', color: '#0a1110' }],
+  themeColor: [{ media: '(prefers-color-scheme: light)', color: '#f6f0e7' }, { media: '(prefers-color-scheme: dark)', color: '#14110f' }],
   width: 'device-width', initialScale: 1,
 };
 

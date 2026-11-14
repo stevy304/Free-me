@@ -178,8 +178,9 @@ export function UploadDialog() {
             <span className="grid h-16 w-16 place-items-center rounded-full bg-danger/15 text-danger"><Icon.Warning size={34} /></span>
             <h3 className="mt-5 max-w-lg font-display text-[22px] font-bold">{t('upload.notPublishedTitle')}</h3>
             {rejected.reason && <p className="mt-3 max-w-lg text-[15px] leading-6">{rejected.reason}</p>}
-            <p className="mt-3 max-w-lg text-[13px] text-muted">{rejected.appealedAt ? t('hub.appealed') : t('upload.notPublishedNext')}</p>
+            <p className="mt-3 max-w-lg text-[13px] text-muted">{rejected.rightsClaim ? t('upload.disputeNext') : rejected.appealedAt ? t('hub.appealed') : t('upload.notPublishedNext')}</p>
             <div className="mt-6 flex flex-wrap justify-center gap-2">
+              {rejected.rightsClaim && <Link href="/hub?tab=rights" onClick={closeDialog} className="flex h-10 items-center rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover">{t('upload.dispute')}</Link>}
               {rejected.canAppeal && <button type="button" disabled={appealing} onClick={() => void appeal()} className="h-10 rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover disabled:opacity-60">{t('hub.appeal')}</button>}
               <button type="button" onClick={closeDialog} className="h-10 rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand hover:opacity-90">{t('upload.close')}</button>
             </div>

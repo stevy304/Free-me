@@ -81,7 +81,7 @@ export function HubMoney() {
         <section className="flex flex-col gap-4 rounded-3xl bg-[#071312] p-6 text-white sm:flex-row sm:items-center">
           <VerifiedBadge size={52} kind="premium" />
           <div className="flex-1"><p className="font-display text-[22px] font-extrabold">{t('money.partOfPremium')}</p><p className="text-[15px] text-[#c9d6d4]">{t('money.premiumPitch', { price: usd(p.premiumUsdCents, locale) })}</p></div>
-          <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />{t('money.upgrade')}</Link>
+          <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#e8b04a] to-[#d9962e] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />{t('money.upgrade')}</Link>
         </section>
       ) : !m.joined ? (
         <section className="rounded-3xl border-2 border-brand bg-elevated p-6">

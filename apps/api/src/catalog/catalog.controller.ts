@@ -8,6 +8,7 @@ import { CurrentAuth, RequireAuth } from '../common/auth.guard';
 import type { AuthContext } from '../common/request';
 import { publicChannel } from '../users/serialize';
 import { PUBLIC_VIDEO, videoCard } from './serialize';
+import { momentDetails } from './moments';
 import { MediaUrls } from '../videos/media-urls';
 import { hasPlus } from '../billing/billing';
 import { RedisService } from '../database/redis.service';
@@ -54,12 +55,21 @@ export class CatalogController {
   @ApiOperation({ summary: 'Latest public videos (home feed), optionally in one category' })
   @ApiQuery({ name: 'category', required: false }) @ApiQuery({ name: 'cursor', required: false }) @ApiQuery({ name: 'limit', required: false })
   @ApiQuery({ name: 'moments', required: false, description: 'true = only Moments (short vertical videos), false = no Moments' })
-  async videos(@Query('category') category?: string, @Query('cursor') cursor?: string, @Query('limit') limit?: string, @Query('moments') moments?: string) {
+  @ApiQuery({ name: 'first', required: false, description: 'Moments: start with this one (a shared link, or an episode chosen from its series)' })
+  async videos(@Query('category') category?: string, @Query('cursor') cursor?: string, @Query('limit') limit?: string, @Query('moments') moments?: string, @Query('first') first?: string) {
     const where: Prisma.VideoWhereInput = {
       ...(category ? { category: { slug: category } } : {}),
       ...(moments === 'true' ? { isShort: true } : moments === 'false' ? { isShort: false } : {}),
     };
-    return this.page(where, cursor, limit);
+    const page = await this.page(where, cursor, limit);
+    if (moments !== 'true') return page;
+    // Moments carry what is shown over them: description, tags, sound, and their place in a series.
+    const lead = first && !cursor && /^[0-9a-f-]{36}$/.test(first)
+      ? await this.prisma.video.findFirst({ where: { id: first, isShort: true, ...PUBLIC_VIDEO }, include: { channel: true } }) : null;
+    const cards = lead ? [videoCard(lead, this.urls), ...page.videos.filter((v) => v.id !== lead.id)] : page.videos;
+    const rows = await this.prisma.video.findMany({ where: { id: { in: cards.map((c) => c.id) } }, select: { id: true, description: true, soundTitle: true, seriesId: true, episodeNumber: true } });
+    const details = await momentDetails(this.prisma as never, rows);
+    return { ...page, videos: cards.map((c) => ({ ...c, moment: details.get(c.id) ?? null })) };
   }
 
   @Get('videos/:id')

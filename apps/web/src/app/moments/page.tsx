@@ -7,8 +7,10 @@ import { MomentsFeed } from './MomentsFeed';
 
 export const metadata: Metadata = { title: 'Moments' };
 
-export default async function MomentsPage() {
-  const page = await apiGet<VideoPage>('/videos?moments=true&limit=12');
+/** /moments?first=<id> opens at that Moment (a shared link, or an episode chosen from its series). */
+export default async function MomentsPage({ searchParams }: { searchParams: Promise<{ first?: string }> }) {
+  const first = (await searchParams).first;
+  const page = await apiGet<VideoPage>(`/videos?moments=true&limit=12${first && /^[0-9a-f-]{36}$/.test(first) ? `&first=${first}` : ''}`);
   if (!page?.videos.length) return <EmptyState icon={<Icon.Moments size={36} strokeWidth={1.4} />} title="No Moments yet">Vertical videos up to 3 minutes become Moments and appear here as creators publish them.</EmptyState>;
   return <MomentsFeed first={page} />;
 }

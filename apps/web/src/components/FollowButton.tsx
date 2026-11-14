@@ -26,7 +26,7 @@ export function FollowButton({ handle, initial, initialCount, onCount, pill = fa
   return (
     <div className="flex flex-col items-start gap-1">
       <button type="button" onClick={toggle} disabled={busy} aria-pressed={following} title={following ? `Stop tuning in (${followersLabel(initialCount, locale)})` : undefined}
-        className={`flex items-center gap-2 font-semibold ${pill ? 'h-9 rounded-full px-4 text-[13px]' : 'h-10 rounded-xl px-4 text-[14px]'} disabled:opacity-60 ${following ? 'bg-surface hover:bg-surface-hover' : 'bg-brand text-on-brand hover:bg-brand-strong'}`}>
+        className={`flex items-center gap-2 font-semibold ${pill ? 'facet-sm h-9 px-4 text-[13px]' : 'facet-sm h-10 px-4 text-[14px]'} disabled:opacity-60 ${following ? 'bg-surface hover:bg-surface-hover' : 'bg-brand text-on-brand hover:bg-brand-strong'}`}>
         {pill ? null : following ? <Icon.Check size={18} strokeWidth={2.2} /> : <Icon.Plus size={18} strokeWidth={2.2} />}{following ? 'Tuned in' : 'Tune in'}
       </button>
       {error && <span role="alert" className="text-[12px] text-danger">{error}</span>}

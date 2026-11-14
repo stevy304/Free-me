@@ -2,7 +2,7 @@ import type { Key } from './en';
 
 /** French. Product names stay as they are (Moments, Creator Hub, Signal Room, Ad Studio, Premium). */
 export const fr: Partial<Record<Key, string>> = {
-  'nav.current': 'À la une',
+  'nav.current': 'Accueil',
   'nav.following': 'Abonnements',
   'nav.moments': 'Moments',
   'nav.explore': 'Explorer',
@@ -39,6 +39,7 @@ export const fr: Partial<Record<Key, string>> = {
   'account.moderation': 'Modération',
   'account.administration': 'Administration',
   'account.install': 'Installer l’application',
+  'account.getApp': 'Télécharger l’application (Android)',
   'account.settings': 'Paramètres',
   'account.signOut': 'Se déconnecter',
   'account.appearance': 'Apparence',
@@ -62,7 +63,8 @@ export const fr: Partial<Record<Key, string>> = {
   'find.recent': 'Récents',
   'find.twoLetters': 'Saisissez au moins deux lettres.',
 
-  'home.title': 'À la une',
+  'home.title': 'Accueil',
+  'home.welcome': 'Bon retour, {name}',
   'home.subtitle': 'Reprenez une histoire. Trouvez la suivante.',
   'home.continue': 'Reprendre la lecture',
   'home.yourTrail': 'Votre historique',
@@ -196,6 +198,8 @@ export const fr: Partial<Record<Key, string>> = {
   'watch.removed': 'Cette vidéo a été retirée. Voir Creator Hub pour les détails.',
   'watch.processing': 'Cette vidéo est encore en cours de traitement.',
   'watch.spark': 'Spark',
+  'watch.save': 'Enregistrer',
+  'watch.saved': 'Enregistrée',
   'watch.passAlong': 'Partager',
   'watch.copied': 'Copié',
   'watch.conversation': 'Discussion',
@@ -380,6 +384,8 @@ export const fr: Partial<Record<Key, string>> = {
   'upload.notPublishedTitle': 'Malheureusement, nous n’allons pas publier cette vidéo',
   'upload.notPublishedShort': 'Non publiée',
   'upload.notPublishedNext': 'Si vous pensez que c’est une erreur, vous pouvez demander un nouvel examen une fois. Vous pouvez aussi mettre en ligne une autre vidéo.',
+  'upload.dispute': 'Contester la revendication',
+  'upload.disputeNext': 'S’il s’agit de votre propre œuvre, ou si vous avez l’autorisation, contestez la revendication : le propriétaire décide. Vous pouvez aussi mettre en ligne une autre vidéo.',
   'upload.unavailable': 'Vidéo indisponible',
   'upload.complete': 'Traitement terminé',
   'upload.higherQualities': 'Les qualités supérieures sont en préparation',
@@ -485,6 +491,7 @@ export const fr: Partial<Record<Key, string>> = {
   'hub.tabStats': 'Statistiques',
   'hub.tabMoney': 'Monétisation',
   'hub.tabNotices': 'Retraits et avis',
+  'hub.tabRights': 'Droits',
   'hub.noVideos': 'Aucune vidéo pour l’instant',
   'hub.firstVideo': 'Mettez en ligne votre première vidéo. Elle reste privée jusqu’à sa publication.',
   'hub.colVideo': 'Vidéo',

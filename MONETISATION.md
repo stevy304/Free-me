@@ -79,6 +79,11 @@ the server's own clock. Views from automated browsers and scripts, and floods fr
 recorded as "not valid" instead. Creators see that number in their statistics. Details are in SECURITY.md, under
 "Views and watch time".
 
+## Rights holders earning from copies
+
+When a verified rights holder chooses **earn** for a work (RIGHTS.md), copies of it are published with ads, even if
+their uploader does not earn. The creators' share of those ads goes to the rights holder, not the uploader.
+
 ## How the ad money is shared
 
 Each day, the money earned from ads that day is split **60 / 30 / 10**. For campaigns priced per 1,000 views that is the views delivered that day (at $1 per 1,000 by default); budget a campaign could not deliver by the end of its make-good period is counted on that last day, because it was paid for. (Older campaigns priced per day count what they paid for the hours they ran.)

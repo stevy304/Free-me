@@ -4,53 +4,58 @@
 
 /* Free Me design tokens. Light and dark share names; components never hard-code colours. */
 :root {
-  /* Free Me: warm paper, lagoon teal and saffron. No red in the brand; red is reserved for errors. */
-  --bg: #f7f5ef;
-  --bg-elevated: #ffffff;
-  --surface: #e9efee;
-  --surface-hover: #dce5e3;
-  --surface-strong: #10201f;
-  --on-surface-strong: #f7f5ef;
-  --text: #10201f;
-  --muted: #5b6866;
-  --faint: #8a9693;
-  --line: #e2e8e6;
-  --brand: #0c827e;
+  /* Free Me: the colours of Imigongo (kaolin white, red clay, black) with Lake Kivu teal for actions and sorghum gold
+     for highlights. Clay marks the brand (logo, zigzag, the create button), never errors: errors keep their own red. */
+  --bg: #f6f0e7;
+  --bg-elevated: #fffdf9;
+  --surface: #ece4d8;
+  --surface-hover: #e1d7c8;
+  --surface-strong: #1b1612;
+  --on-surface-strong: #f6f0e7;
+  --text: #1b1612;
+  --muted: #6b5f55;
+  --faint: #93867a;
+  --line: #e4dbcd;
+  --brand: #0e857d;
   /* Chart marks (validated: chroma and contrast on light surfaces) */
   --chart-1: #009188;
-  --brand-strong: #0a6b67;
-  --brand-soft: #ddf1ee;
+  --brand-strong: #0a6a63;
+  --brand-soft: #dcefe9;
   --on-brand: #ffffff;
-  --accent: #f2a93b;
-  --accent-soft: #fdf1dc;
-  --on-accent-soft: #8a5a10;
+  --accent: #e3a63a;
+  --accent-soft: #fbefd8;
+  --on-accent-soft: #82560f;
+  --clay: #c24e2b;
+  --on-clay: #fffaf3;
   --danger: #b42318;
-  --shadow: 0 10px 40px rgb(8 40 38 / 0.14);
-  --stage: #050a0a;
+  --shadow: 0 10px 40px rgb(40 24 12 / 0.14);
+  --stage: #0b0908;
   color-scheme: light;
 }
 .dark {
-  --bg: #0a1110;
-  --bg-elevated: #121b1a;
-  --surface: #1b2726;
-  --surface-hover: #243231;
-  --surface-strong: #eef4f3;
-  --on-surface-strong: #0a1110;
-  --text: #eef4f3;
-  --muted: #9fb0ad;
-  --faint: #6b7d7a;
-  --line: #243231;
-  --brand: #2bb5ab;
+  --bg: #14110f;
+  --bg-elevated: #1e1916;
+  --surface: #2a231f;
+  --surface-hover: #362e28;
+  --surface-strong: #f4ede3;
+  --on-surface-strong: #14110f;
+  --text: #f4ede3;
+  --muted: #b0a397;
+  --faint: #85786d;
+  --line: #352d27;
+  --brand: #22ada2;
   --chart-1: #22a79d;
   --brand-strong: #5fd6cb;
-  --brand-soft: #0f2e2c;
-  --on-brand: #04201e;
-  --accent: #f5b95c;
-  --accent-soft: #3b2e14;
-  --on-accent-soft: #f5b95c;
+  --brand-soft: #123330;
+  --on-brand: #062320;
+  --accent: #e8b04a;
+  --accent-soft: #3a2c14;
+  --on-accent-soft: #f0c46e;
+  --clay: #d65f36;
+  --on-clay: #fffaf3;
   --danger: #ff6b6b;
   --shadow: 0 12px 40px rgb(0 0 0 / 0.55);
-  --stage: #050a0a;
+  --stage: #0b0908;
   color-scheme: dark;
 }
 
@@ -74,12 +79,19 @@
   --color-accent-soft: var(--accent-soft);
   --color-on-accent-soft: var(--on-accent-soft);
   --color-stage: var(--stage);
+  --color-clay: var(--clay);
+  --color-on-clay: var(--on-clay);
+  /* Sharper than the usual soft cards: Free Me's shapes are cut, not rounded (see .facet). */
+  --radius-lg: 0.4rem;
+  --radius-xl: 0.5rem;
+  --radius-2xl: 0.625rem;
+  --radius-3xl: 0.875rem;
   --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
-  --font-display: 'Plus Jakarta Sans Variable', 'Inter Variable', system-ui, sans-serif;
+  --font-display: 'Bricolage Grotesque Variable', 'Inter Variable', system-ui, sans-serif;
 }
 
 html, body { background: var(--bg); color: var(--text); }
-h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: -0.02em; }
+h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: -0.025em; }
 body { -webkit-font-smoothing: antialiased; }
 ::selection { background: color-mix(in srgb, var(--brand) 30%, transparent); }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
@@ -88,10 +100,39 @@ body { -webkit-font-smoothing: antialiased; }
 .thin-scrollbar { scrollbar-width: thin; scrollbar-color: transparent transparent; }
 .thin-scrollbar:hover { scrollbar-color: var(--surface-hover) transparent; }
 
+/*
+ * Free Me's signature shapes (BRAND.md): the facet, two corners cut on the diagonal like Imigongo's lines, instead of
+ * rounded corners; and the Imigongo zigzag. The cut hides the outline at the corners, so focus is drawn inside.
+ */
+@utility facet { clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px)); border-radius: 0 !important; }
+@utility facet-sm { clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px)); border-radius: 0 !important; }
+@utility facet-lg { clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px)); border-radius: 0 !important; }
+@utility diamond { clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.facet:focus-visible, .facet-sm:focus-visible, .facet-lg:focus-visible, .diamond:focus-visible { outline-offset: -3px; }
+
+/* The Imigongo zigzag: a clay line under headings and as the played part of progress bars. */
+.zigzag {
+  height: 6px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6'%3E%3Cpath d='M0 5.5 3 .8 6 5.5 9 .8 12 5.5' fill='none' stroke='%23d65f36' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: repeat-x; background-position: left center; background-size: 12px 6px;
+}
+/* The band: clay and kaolin zigzags on black, along the bottom of the Spotlight. */
+.imigongo-band {
+  height: 10px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='10'%3E%3Crect width='20' height='10' fill='%2314110f'/%3E%3Cpath d='M0 10 5 0 10 10 15 0 20 10' fill='none' stroke='%23d65f36' stroke-width='2.4'/%3E%3Cpath d='M0 0 5 10 10 0 15 10 20 0' fill='none' stroke='%23f4ede3' stroke-width='1'/%3E%3C/svg%3E") repeat-x left center / 20px 10px;
+}
+
+/* A Space without its own banner: an Imigongo wall, softened so the name in front stays the focus. */
+.imigongo-wall {
+  background:
+    linear-gradient(color-mix(in srgb, var(--bg) 35%, transparent), color-mix(in srgb, var(--bg) 35%, transparent)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' fill='%2314110f'/%3E%3Cpath d='M0 20 10 2 20 20zm20 0L30 2l10 18z' fill='%23d65f36'/%3E%3Cpath d='M10 38 20 20l10 18zm-20 0L0 20l10 18zm40 0 10-18 10 18z' fill='%23f4ede3'/%3E%3C/svg%3E") 0 0 / 40px 40px;
+}
+
 /* Imigongo: the zigzag of Rwanda's traditional geometric art, Free Me's own accent under card titles. */
 .imigongo {
   height: 8px; border-radius: 2px; opacity: 0.55;
   background:
-    linear-gradient(135deg, var(--zig, #2bb5ab) 25%, transparent 25%) -5px 0 / 10px 8px,
-    linear-gradient(225deg, var(--zig, #2bb5ab) 25%, transparent 25%) -5px 0 / 10px 8px;
+    linear-gradient(135deg, var(--zig, var(--clay)) 25%, transparent 25%) -5px 0 / 10px 8px,
+    linear-gradient(225deg, var(--zig, var(--clay)) 25%, transparent 25%) -5px 0 / 10px 8px;
 }

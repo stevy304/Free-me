@@ -77,7 +77,7 @@ test('unknown pages and channels show a clear message; phones get the floating d
   await page.goto('/@no-such-channel-here');
   await expect(page.getByRole('heading', { name: "This page isn't available" })).toBeVisible();
   await page.goto('/');
-  await expect(page.getByRole('navigation', { name: 'Main' }).last().getByRole('link', { name: 'Current' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Main' }).last().getByRole('link', { name: 'Home' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
 });
 
@@ -85,7 +85,7 @@ test('the interface follows the browser language (French), and the language menu
   const page = await (await browser.newContext({ locale: 'fr-FR' })).newPage();
   await page.goto('/');
   await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
-  await expect(page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'À la une' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Accueil' })).toBeVisible();
   await expect(page.getByRole('banner').getByRole('link', { name: 'Se connecter' })).toBeVisible();
   await page.getByRole('button', { name: 'Langue' }).click();
   await page.getByRole('menuitemradio', { name: 'Kinyarwanda' }).click();

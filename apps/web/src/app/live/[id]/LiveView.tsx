@@ -56,13 +56,13 @@ export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[
       <div className="min-w-0">
         {live ? (
           <div className="relative">
-            <LivePlayer src={s.playbackUrl!} latency={s.latencyMode ?? 'normal'} className="aspect-video w-full sm:rounded-[24px]" />
+            <LivePlayer src={s.playbackUrl!} latency={s.latencyMode ?? 'normal'} className="aspect-video w-full sm:rounded-2xl" />
             {cc && caption && s.captionsEnabled !== false && (
               <p aria-live="polite" className="pointer-events-none absolute inset-x-0 bottom-20 mx-auto w-fit max-w-[88%] rounded-lg bg-black/75 px-3 py-1.5 text-center text-[clamp(14px,2.2vw,22px)] font-semibold leading-snug text-white">{caption.text}</p>
             )}
             {s.captionsEnabled !== false && (
               <button type="button" onClick={toggleCc} aria-pressed={cc} aria-label="Live captions" title="Live captions"
-                className={`absolute right-3 top-3 grid h-8 place-items-center rounded-lg px-2 text-[11px] font-extrabold tracking-wide ${cc ? 'bg-white text-[#04201e]' : 'bg-black/60 text-white hover:bg-black/75'}`}>CC</button>
+                className={`absolute right-3 top-3 grid h-8 place-items-center rounded-lg px-2 text-[11px] font-extrabold tracking-wide ${cc ? 'bg-white text-[#062320]' : 'bg-black/60 text-white hover:bg-black/75'}`}>CC</button>
             )}
             {reconnecting && (
               <div role="status" className="pointer-events-none absolute inset-x-3 top-3 w-fit rounded-xl border border-amber-400/40 bg-[#1c170f]/95 px-4 py-3 text-sm text-amber-50">
@@ -72,7 +72,7 @@ export function LiveView({ initial, chat }: { initial: LiveInfo; chat: ChatLine[
             )}
           </div>
         ) : (
-          <div className="grid aspect-video w-full place-items-center bg-[radial-gradient(circle_at_30%_30%,#123b38,#050a0a)] px-6 text-center text-white sm:rounded-[24px]">
+          <div className="grid aspect-video w-full place-items-center bg-[radial-gradient(circle_at_30%_30%,#123b38,#0b0908)] px-6 text-center text-white sm:rounded-2xl">
             <div>
               <Avatar name={s.channel.name} src={s.channel.avatarUrl} size={72} className="mx-auto" />
               <p className="mt-4 font-display text-[22px] font-bold">{s.status === 'ENDED' ? t('live.ended') : t('live.startingSoon')}</p>

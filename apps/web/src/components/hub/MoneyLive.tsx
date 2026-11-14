@@ -52,13 +52,13 @@ export function EarningsHero({ todayCents, impressions, availableCents, lifetime
       <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[1fr_auto]">
         <div>
           <h3 id="today-heading" className="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.1em] text-[#9fd8d2]">
-            {earning ? <span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full rounded-full bg-[#2bb5ab] opacity-75 motion-safe:animate-ping" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#2bb5ab]" /></span> : <span className="h-2.5 w-2.5 rounded-full bg-white/30" />}
+            {earning ? <span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full rounded-full bg-[#22ada2] opacity-75 motion-safe:animate-ping" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#22ada2]" /></span> : <span className="h-2.5 w-2.5 rounded-full bg-white/30" />}
             {t('money.earnedToday')}
           </h3>
           <p className="mt-2 font-display text-[44px] font-extrabold leading-none sm:text-[56px]">{todayCents === null ? '—' : <AnimatedMoney cents={todayCents} locale={locale} />}</p>
           <p className="mt-2 text-[14px] text-[#c9d6d4]">
             {t(impressions === 1 ? 'money.adsShown.one' : 'money.adsShown.other', { count: impressions.toLocaleString(locale) })}
-            {since > 0 && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-[#2bb5ab]/20 px-2 py-0.5 text-[12px] font-bold text-[#7ff3e8]"><Icon.ChevronUp size={14} />{t('money.sinceOpened', { amount: usd(since, locale) })}</span>}
+            {since > 0 && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-[#22ada2]/20 px-2 py-0.5 text-[12px] font-bold text-[#7ff3e8]"><Icon.ChevronUp size={14} />{t('money.sinceOpened', { amount: usd(since, locale) })}</span>}
           </p>
           <p className="mt-1 text-[12px] text-white/50">{t('money.estimate')}</p>
         </div>
@@ -71,7 +71,7 @@ export function EarningsHero({ todayCents, impressions, availableCents, lifetime
         <div className="border-t border-white/10 px-5 pb-4 pt-3 sm:px-7">
           <p className="text-[12px] text-white/50">{t('money.lastDays', { count: daily.length + 1 })}</p>
           <div className="mt-2 flex h-16 items-end gap-1" role="img" aria-label={t('money.dailyAria', { count: daily.length + 1 })}>
-            {daily.map((d) => <div key={d.day} title={`${d.day}: ${usd(d.cents, locale)}`} className="flex-1 rounded-t bg-[#2bb5ab]/45" style={{ height: `${Math.max(4, (d.cents / max) * 100)}%` }} />)}
+            {daily.map((d) => <div key={d.day} title={`${d.day}: ${usd(d.cents, locale)}`} className="flex-1 rounded-t bg-[#22ada2]/45" style={{ height: `${Math.max(4, (d.cents / max) * 100)}%` }} />)}
             <div title={`${t('money.today')}: ${usd(todayCents ?? 0, locale)}`} className="flex-1 rounded-t bg-[#f5c46b] transition-[height] duration-700" style={{ height: `${Math.max(4, ((todayCents ?? 0) / max) * 100)}%` }} />
           </div>
         </div>

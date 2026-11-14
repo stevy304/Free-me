@@ -36,25 +36,25 @@ export default async function Channel({ params, searchParams }: { params: Promis
   const { channel: c, videos, videoCount, viewer } = data;
   const tab = (await searchParams).tab === 'about' ? 'about' : 'videos';
   const locale = await getLocale();
-  const tabClass = (on: boolean) => `border-b-2 px-1 pb-3 text-[16px] font-medium ${on ? 'border-ink' : 'border-transparent text-muted hover:text-ink'}`;
+  const tabClass = (on: boolean) => `border-b-2 px-1 pb-3 text-[16px] font-medium ${on ? 'border-clay' : 'border-transparent text-muted hover:text-ink'}`;
   return (
     <div className="mx-auto max-w-[1284px] px-4 sm:px-6">
       {c.bannerUrl
-        ? <img src={c.bannerUrl} alt="" className="mt-2 aspect-[6/1] w-full rounded-2xl object-cover" />
-        : <div className="mt-2 aspect-[6/1] w-full rounded-2xl bg-[linear-gradient(120deg,var(--brand-soft),color-mix(in_srgb,var(--brand)_35%,var(--surface)))]" />}
+        ? <img src={c.bannerUrl} alt="" className="facet-lg mt-2 aspect-[6/1] w-full object-cover" />
+        : <div aria-hidden="true" className="imigongo-wall facet-lg mt-2 aspect-[6/1] w-full" />}
       <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
-        <div className="hidden sm:block"><Avatar name={c.name} src={c.avatarUrl} size={160} /></div>
-        <div className="sm:hidden"><Avatar name={c.name} src={c.avatarUrl} size={72} /></div>
+        <div className="hidden sm:block"><Avatar name={c.name} src={c.avatarUrl} size={160} facet /></div>
+        <div className="sm:hidden"><Avatar name={c.name} src={c.avatarUrl} size={72} facet /></div>
         <div className="min-w-0">
           <h1 className="flex items-center gap-2 text-[28px] font-extrabold leading-tight sm:text-[38px]">{c.name}{c.isVerified && <VerifiedBadge size={23} kind={c.badge} />}</h1>
           <p className="mt-1.5 text-[14px] text-muted"><span className="font-medium text-ink">@{c.handle}</span> · {followersLabel(c.followerCount, locale)} · {compactNumber(videoCount, locale)} {videoCount === 1 ? 'video' : 'videos'}</p>
           {c.description && <Link href={`/@${c.handle}?tab=about`} className="mt-1.5 line-clamp-1 max-w-xl text-[14px] text-muted hover:text-ink">{c.description}</Link>}
           <div className="mt-4">
             {viewer.isOwner
-              ? <span className="flex flex-wrap gap-2"><Link href="/settings#channel" className="inline-flex h-10 items-center rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover">Edit your Space</Link><Link href="/hub" className="inline-flex h-10 items-center rounded-xl bg-brand px-4 text-[14px] font-semibold text-on-brand hover:bg-brand-strong">Creator Hub</Link></span>
+              ? <span className="flex flex-wrap gap-2"><Link href="/settings#channel" className="facet-sm inline-flex h-10 items-center bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover">Edit your Space</Link><Link href="/hub" className="facet-sm inline-flex h-10 items-center bg-brand px-4 text-[14px] font-semibold text-on-brand hover:bg-brand-strong">Creator Hub</Link></span>
               : <span className="flex flex-wrap items-center gap-2">
                   <FollowButton handle={c.handle} initial={viewer.following} initialCount={c.followerCount} />
-                  <Link href={`/messages?to=${encodeURIComponent(c.handle)}`} className="inline-flex h-10 items-center gap-2 rounded-xl bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover"><Icon.Message size={18} />Message</Link>
+                  <Link href={`/messages?to=${encodeURIComponent(c.handle)}`} className="facet-sm inline-flex h-10 items-center gap-2 bg-surface px-4 text-[14px] font-semibold hover:bg-surface-hover"><Icon.Message size={18} />Message</Link>
                 </span>}
           </div>
         </div>

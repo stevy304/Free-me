@@ -49,7 +49,7 @@ export function MomentAd({ ad, after, active, muted, setMuted }: { ad: MomentAdD
 
   return (
     <section aria-label={`Sponsored: ${ad.headline}`} className="relative flex h-full snap-start snap-always items-center justify-center sm:py-3">
-      <div className="relative h-full w-full overflow-hidden bg-black text-white sm:aspect-[9/16] sm:w-auto sm:max-h-[calc(100dvh-6.5rem)] sm:rounded-[26px] sm:shadow-[var(--shadow)]">
+      <div className="relative h-full w-full overflow-hidden bg-black text-white sm:aspect-[9/16] sm:w-auto sm:max-h-[calc(100dvh-6.5rem)] sm:rounded-2xl sm:shadow-[var(--shadow)]">
       <video ref={el} playsInline loop={false} poster={ad.thumbnailUrl ?? undefined} className="h-full w-full object-contain"
         onPlaying={() => { if (!imp.current) imp.current = post('/ads/impressions', { campaignId: ad.campaignId, videoId: after, placement: 'MOMENTS' }).then((r) => r.json()).then((j) => j.impressionId ?? null).catch(() => null); }}
         onTimeUpdate={(e) => { const d = e.currentTarget.duration || ad.durationSeconds; setProgress(d ? e.currentTarget.currentTime / d : 0); }}
@@ -60,19 +60,19 @@ export function MomentAd({ ad, after, active, muted, setMuted }: { ad: MomentAdD
       </button>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/80 to-transparent" />
       <div className="absolute inset-x-3 bottom-5 flex items-end gap-3">
-        <span aria-hidden className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#f5b95c] font-display text-[18px] font-extrabold text-[#2a1a02]">{ad.businessName.trim().charAt(0).toUpperCase() || 'A'}</span>
+        <span aria-hidden className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#e8b04a] font-display text-[18px] font-extrabold text-[#2a1a02]">{ad.businessName.trim().charAt(0).toUpperCase() || 'A'}</span>
         <div className="min-w-0 flex-1 leading-tight">
           <p className="truncate text-[15px] font-bold">{ad.businessName}</p>
           <p className="line-clamp-2 text-[14px] text-white/90">{ad.headline}</p>
           <p className="mt-1 flex items-center gap-1.5 text-[12px] text-white/75">
-            <span className="rounded bg-[#f5b95c] px-1 text-[10px] font-extrabold uppercase tracking-wide text-[#2a1a02]">Sponsored</span>
+            <span className="rounded bg-[#e8b04a] px-1 text-[10px] font-extrabold uppercase tracking-wide text-[#2a1a02]">Sponsored</span>
             <span className="truncate">{host(ad.destinationUrl)}</span>
           </p>
         </div>
         <a href={ad.destinationUrl} target="_blank" rel="noopener noreferrer nofollow sponsored" onClick={() => { el.current?.pause(); report('CLICK'); }}
           className="inline-flex h-10 shrink-0 items-center rounded-full bg-[#3ea6ff] px-4 text-[14px] font-bold text-[#04121f] hover:bg-[#65b8ff]">Visit</a>
       </div>
-      <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20"><div className="h-full bg-[#f5b95c]" style={{ width: `${progress * 100}%` }} /></div>
+      <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20"><div className="h-full bg-[#e8b04a]" style={{ width: `${progress * 100}%` }} /></div>
       </div>
     </section>
   );

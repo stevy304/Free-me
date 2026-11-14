@@ -6,6 +6,7 @@ import type { User } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { APP_CONFIG, type AppConfig } from '../config/config';
 import { AuditService } from '../common/audit.service';
+import { syncSpacePicture } from '../users/pictures';
 
 /** The first supported language in the browser's Accept-Language header ("fr-CA,fr;q=0.9" → "fr"). */
 export function languageFromHeader(header: string | undefined): string {
@@ -48,7 +49,7 @@ export class AccountsService {
       authChanged(user.id);
       await this.audit.record({ userId: user.id, action: 'ADMIN_GRANTED_BY_CONFIG', entityType: 'User', entityId: user.id, req });
     }
-    if (extras.avatarUrl) await this.prisma.profile.updateMany({ where: { userId: user.id, avatarUrl: null }, data: { avatarUrl: extras.avatarUrl } });
+    if (extras.avatarUrl && (await this.prisma.profile.updateMany({ where: { userId: user.id, avatarUrl: null }, data: { avatarUrl: extras.avatarUrl } })).count) await syncSpacePicture(this.prisma, user.id);
     return { user, created };
   }
 }

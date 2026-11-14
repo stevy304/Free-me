@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { COMMENT_MAX } from '@free-me/shared';
 import * as Icon from '@/components/icons';
 import { Avatar } from '@/components/Avatar';
+import { me } from '@/lib/me';
 import { buttonClass } from '@/components/Dialog';
 import { useShell, useT } from '@/components/shell/ShellContext';
 import { api } from '@/lib/client-api';
@@ -114,7 +115,7 @@ function CommentItem({ c, videoId, onChange, onRemoved, onReplied, isReply = fal
         )}
         {replying && (
           <div className="mt-2 flex gap-3">
-            <Avatar name={viewer?.profile?.displayName ?? viewer?.user.email ?? ''} src={viewer?.profile?.avatarUrl} size={24} />
+            {viewer ? <Avatar {...me(viewer)} size={24} /> : <Avatar name="" size={24} />}
             <Composer placeholder={t('comments.replyPlaceholder')} initial={isReply && author.handle ? `@${author.handle} ` : ''} submitLabel={t('comments.replyBtn')} autoFocus onCancel={() => setReplying(false)}
               onSubmit={async (text) => {
                 const r = await api<{ comment: CommentData }>(`/videos/${videoId}/comments`, { body: { content: text, parentId: c.id } });
@@ -209,7 +210,7 @@ export function Comments({ videoId, initialCount, variant }: { videoId: string; 
 
   const card = variant === 'card';
   const sortPicker = (
-    <label className={`flex items-center gap-2 text-[14px] font-medium ${card ? 'rounded-xl bg-white/[0.07] px-2.5 py-1 text-[13px] text-white' : ''}`}>
+    <label className={`flex items-center gap-2 text-[14px] font-medium ${card ? 'facet-sm bg-white/[0.08] px-2.5 py-1 text-[13px] text-white' : ''}`}>
       <Icon.Sort size={card ? 16 : 20} /><span className="sr-only">{t('comments.sortBy')}</span>
       <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} className="rounded-md bg-transparent py-1 outline-none hover:bg-surface">
         <option value="newest">{t('comments.newest')}</option><option value="oldest">{t('comments.oldest')}</option>
@@ -221,13 +222,13 @@ export function Comments({ videoId, initialCount, variant }: { videoId: string; 
       {card ? (
         <>
           <div className="flex items-center justify-between gap-2">
-            <h2 className="flex items-center gap-2 text-[20px] font-extrabold uppercase tracking-wide text-[#2bb5ab]">
-              {t('watch.comments')}<span className="grid h-6 w-6 place-items-center rounded-md bg-[#2bb5ab] text-[#04201e]"><Icon.Comment size={14} /></span>
-              <span className="rounded-full bg-white/[0.08] px-2 py-0.5 font-sans text-[12px] font-bold normal-case tracking-normal text-[#9fb0ad]" suppressHydrationWarning>{compactNumber(count, locale)}</span>
+            <h2 className="flex items-baseline gap-2 text-[20px] font-extrabold text-white">
+              {t('watch.comments')}
+              <span className="font-sans text-[14px] font-semibold text-[#b0a397]" suppressHydrationWarning>{compactNumber(count, locale)}</span>
             </h2>
             {sortPicker}
           </div>
-          <div className="imigongo mb-3 mt-3" aria-hidden />
+          <div className="zigzag mb-3 mt-2.5" aria-hidden />
         </>
       ) : (
       <div className="flex items-center gap-6">
@@ -237,7 +238,7 @@ export function Comments({ videoId, initialCount, variant }: { videoId: string; 
       )}
       <div className={card ? 'flex gap-2.5' : 'mt-5 flex gap-3'}>
         {viewer
-          ? <><Avatar name={viewer.profile?.displayName ?? viewer.user.email} src={viewer.profile?.avatarUrl} size={card ? 34 : 40} />
+          ? <><Avatar {...me(viewer)} size={card ? 34 : 40} />
             <Composer placeholder={t('comments.joinPlaceholder')} submitLabel={t('comments.post')} onSubmit={async (text) => {
               const r = await api<{ comment: CommentData }>(`/videos/${videoId}/comments`, { body: { content: text } });
               setCount((n) => n + 1);

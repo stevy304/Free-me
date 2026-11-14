@@ -163,11 +163,11 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   const cdn = mediaOrigin(v.playbackUrl);
   const player = v.playbackUrl
     ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} storyboard={v.storyboardUrl} captions={v.captions ?? []} markers={moments} withAds onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
-    : <div className="grid aspect-video w-full place-items-center rounded-[24px] bg-[#0b1413] text-center text-[15px] text-[#9fb0ad]"><div><Icon.Spinner className="mx-auto mb-3 animate-spin" />{v.takenDownAt ? t('watch.removed') : v.processingStage ?? t('watch.processing')}</div></div>;
+    : <div className="grid aspect-video w-full place-items-center rounded-2xl bg-[#14110f] text-center text-[15px] text-[#b0a397]"><div><Icon.Spinner className="mx-auto mb-3 animate-spin" />{v.takenDownAt ? t('watch.removed') : v.processingStage ?? t('watch.processing')}</div></div>;
 
-  const pill = 'flex h-11 shrink-0 items-center gap-2 rounded-full border border-[#2bb5ab]/70 px-5 text-[14px] font-semibold text-white shadow-[0_0_14px_rgb(43_181_171/0.16)] transition-colors hover:bg-[#2bb5ab]/12';
-  const phonePill = 'flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-white/25 px-4 text-[14px] font-semibold text-white';
-  const phoneIcon = 'grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/25 text-white';
+  const pill = 'flex h-11 shrink-0 items-center gap-2 rounded-full border border-[#22ada2]/70 px-5 text-[14px] font-semibold text-white shadow-[0_0_14px_rgb(34_173_162/0.16)] transition-colors hover:bg-[#22ada2]/12';
+  const phonePill = 'facet-sm flex h-10 shrink-0 items-center gap-1.5 bg-white/[0.09] px-4 text-[14px] font-semibold text-white';
+  const phoneIcon = 'facet-sm grid h-10 w-10 shrink-0 place-items-center bg-white/[0.09] text-white';
   const menuItems = (
     <>
       {!initialViewer.isOwner && <button type="button" role="menuitemcheckbox" aria-checked={reaction === 'dislike'} onClick={() => { setMenu(false); void react('dislike'); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] hover:bg-surface"><Icon.NotForMe size={20} filled={reaction === 'dislike'} /><span className="flex-1 text-left">{t('watch.notForMe')}</span><span className="text-[11px] text-muted">{t('watch.private')}</span></button>}
@@ -189,11 +189,11 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
       <section className="sticky top-0 z-30 bg-stage sm:relative sm:z-auto sm:px-6 sm:pb-10 sm:pt-6" style={{ backgroundImage: 'radial-gradient(ellipse at 50% 35%, rgb(12 130 126 / 0.32), transparent 62%)' }}>
         <div className="mx-auto flex max-w-[1880px] justify-center gap-7">
           <div className={`min-w-0 flex-1 transition-[max-width] duration-300 ${theater ? 'sm:max-w-[min(1800px,calc((100dvh-6rem)*16/9))]' : 'sm:max-w-[min(1280px,calc((100dvh-15rem)*16/9))] xl:max-w-[calc((100dvh-7.5rem)*16/9)]'}`}>
-          <div ref={stage} className={`relative isolate ${docked ? 'aspect-video' : 'sm:rounded-[24px] sm:shadow-[0_0_0_1px_rgb(43_181_171/0.45),0_0_36px_rgb(43_181_171/0.22)]'}`}>
+          <div ref={stage} className={`relative isolate ${docked ? 'aspect-video' : 'sm:facet-lg'}`}>
             {/* A soft glow of the video's own colours around the player. */}
             {!docked && v.thumbnailUrl && <div aria-hidden className="pointer-events-none absolute inset-x-6 -bottom-6 top-10 -z-10 hidden rounded-[40px] bg-cover bg-center opacity-45 blur-[60px] saturate-150 sm:block" style={{ backgroundImage: `url(${v.thumbnailUrl})` }} />}
-            {docked && <div className="absolute inset-0 grid place-items-center rounded-[24px] border border-white/10 text-[14px] text-[#9fb0ad]">{t('watch.corner')}</div>}
-            <div className={docked ? 'fixed bottom-4 right-4 z-50 w-[min(400px,calc(100vw-2rem))] overflow-hidden rounded-[20px] bg-stage shadow-[0_18px_48px_rgb(0_0_0/0.45)] [&_video]:rounded-none' : 'relative'}>
+            {docked && <div className="absolute inset-0 grid place-items-center rounded-2xl border border-white/10 text-[14px] text-[#b0a397]">{t('watch.corner')}</div>}
+            <div className={docked ? 'fixed bottom-4 right-4 z-50 w-[min(400px,calc(100vw-2rem))] overflow-hidden rounded-2xl bg-stage shadow-[0_18px_48px_rgb(0_0_0/0.45)] [&_video]:rounded-none' : 'relative'}>
               {player}
               {docked && (
                 <div className="flex items-center gap-2 px-3 py-2 text-white">
@@ -203,19 +203,19 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
                 </div>
               )}
               {countdown !== null && next && (
-                <div className="absolute inset-0 z-20 grid place-items-center bg-[rgb(5_10_10/0.82)] p-4 text-white backdrop-blur-sm sm:rounded-[24px]">
+                <div className="absolute inset-0 z-20 grid place-items-center bg-[rgb(20_17_15/0.82)] p-4 text-white backdrop-blur-sm sm:rounded-2xl">
                   <div className="w-full max-w-[420px]">
-                    <p className="text-[13px] font-semibold text-[#f5b95c]" aria-live="polite">Next in {countdown} s</p>
+                    <p className="text-[13px] font-semibold text-[#e8b04a]" aria-live="polite">Next in {countdown} s</p>
                     <Link href={`/watch?v=${next.id}`} className="mt-2 flex items-center gap-3">
                       <span className="relative block w-[42%] shrink-0 overflow-hidden rounded-xl">
                         {next.thumbnailUrl ? <img src={next.thumbnailUrl} alt="" className="aspect-video w-full object-cover" /> : <span className="block aspect-video w-full bg-white/10" />}
-                        <svg viewBox="0 0 36 36" className="absolute right-1.5 top-1.5 h-7 w-7 -rotate-90" aria-hidden><circle cx="18" cy="18" r="15" fill="rgb(0 0 0/0.5)" stroke="rgb(255 255 255/0.25)" strokeWidth="3" /><circle cx="18" cy="18" r="15" fill="none" stroke="#f5b95c" strokeWidth="3" strokeDasharray="94.2" strokeDashoffset={94.2 * (countdown / 8)} className="transition-[stroke-dashoffset] duration-1000 ease-linear" /></svg>
+                        <svg viewBox="0 0 36 36" className="absolute right-1.5 top-1.5 h-7 w-7 -rotate-90" aria-hidden><circle cx="18" cy="18" r="15" fill="rgb(0 0 0/0.5)" stroke="rgb(255 255 255/0.25)" strokeWidth="3" /><circle cx="18" cy="18" r="15" fill="none" stroke="#e8b04a" strokeWidth="3" strokeDasharray="94.2" strokeDashoffset={94.2 * (countdown / 8)} className="transition-[stroke-dashoffset] duration-1000 ease-linear" /></svg>
                       </span>
-                      <span className="min-w-0"><span className="line-clamp-2 text-[15px] font-bold leading-tight sm:text-[17px]">{next.title}</span><span className="mt-1 block truncate text-[12px] text-[#9fb0ad]">{next.channel.name}</span></span>
+                      <span className="min-w-0"><span className="line-clamp-2 text-[15px] font-bold leading-tight sm:text-[17px]">{next.title}</span><span className="mt-1 block truncate text-[12px] text-[#b0a397]">{next.channel.name}</span></span>
                     </Link>
                     <div className="mt-4 flex gap-2">
                       <button type="button" onClick={() => setCountdown(null)} className="h-10 flex-1 rounded-xl bg-white/10 text-[14px] font-semibold hover:bg-white/15">{t('watch.stayHere')}</button>
-                      <Link href={`/watch?v=${next.id}`} className="flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[#2bb5ab] text-[14px] font-semibold text-[#04201e]"><Icon.Play size={18} />{t('watch.playNow')}</Link>
+                      <Link href={`/watch?v=${next.id}`} className="flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[#22ada2] text-[14px] font-semibold text-[#062320]"><Icon.Play size={18} />{t('watch.playNow')}</Link>
                     </div>
                   </div>
                 </div>
@@ -226,15 +226,15 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
           <div className="hidden items-start gap-6 pt-5 text-white sm:flex">
             <div className="min-w-0 flex-1">
               <h1 className="text-[24px] font-extrabold leading-[1.15] lg:text-[32px]">{v.title}</h1>
-              {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#9fb0ad]">Up to {v.qualityLimit}p · <Link href="/plans" className="font-semibold text-[#2bb5ab] hover:underline">every quality and no ads with Plus</Link></p> : null}
-              <p className="mt-1.5 text-[14px] text-[#9fb0ad]" suppressHydrationWarning>
+              {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#b0a397]">Up to {v.qualityLimit}p · <Link href="/plans" className="font-semibold text-[#22ada2] hover:underline">every quality and no ads with Plus</Link></p> : null}
+              <p className="mt-1.5 text-[14px] text-[#b0a397]" suppressHydrationWarning>
                 {viewsLabel(views, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : t('watch.notPublished')}
-                {v.category && <> · <Link href={`/explore?topic=${v.category.slug}`} className="font-semibold text-[#2bb5ab] hover:underline">{v.category.name}</Link></>}
+                {v.category && <> · <Link href={`/explore?topic=${v.category.slug}`} className="font-semibold text-[#22ada2] hover:underline">{v.category.name}</Link></>}
               </p>
               <div className="dark mt-3.5 flex flex-wrap items-center gap-3">
                 <Link href={`/@${v.channel.handle}`} className="flex min-w-0 items-center gap-3">
                   <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={44} />
-                  <span className="min-w-0"><span className="flex items-center gap-1 truncate font-display text-[16px] font-bold text-white">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={15} kind={v.channel.badge} />}</span><span className="block text-[13px] text-[#9fb0ad]" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</span></span>
+                  <span className="min-w-0"><span className="flex items-center gap-1 truncate font-display text-[16px] font-bold text-white">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={15} kind={v.channel.badge} />}</span><span className="block text-[13px] text-[#b0a397]" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</span></span>
                 </Link>
                 {initialViewer.isOwner
                   ? <Link href="/hub" className="flex h-10 items-center gap-2 rounded-xl bg-white/[0.08] px-4 text-[14px] font-semibold hover:bg-white/[0.14]"><Icon.Hub size={17} />{t('watch.creatorHub')}</Link>
@@ -243,15 +243,15 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
             </div>
             <div className="flex shrink-0 items-center gap-2 pt-1.5">
               {/* Spark and Pass along, small, side by side. */}
-              <div className="flex h-10 overflow-hidden rounded-[14px] border border-[#2bb5ab]/45 bg-white/[0.04] text-[14px] font-semibold">
-                <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Spark (${likes})`} className={`flex items-center gap-1.5 px-3.5 transition-colors hover:bg-white/[0.08] ${reaction === 'like' ? 'bg-[#f5b95c]/15 text-[#f5b95c]' : ''}`}>
-                  <Icon.Spark size={17} filled={reaction === 'like'} className="text-[#f5b95c]" /><span suppressHydrationWarning>{likes > 0 ? compactNumber(likes, locale) : t('watch.spark')}</span>
+              <div className="facet-sm flex h-10 overflow-hidden bg-white/[0.08] text-[14px] font-semibold">
+                <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Spark (${likes})`} className={`flex items-center gap-1.5 px-3.5 transition-colors hover:bg-white/[0.08] ${reaction === 'like' ? 'bg-[#e8b04a]/15 text-[#e8b04a]' : ''}`}>
+                  <Icon.Spark size={17} filled={reaction === 'like'} className="text-[#e8b04a]" /><span suppressHydrationWarning>{likes > 0 ? compactNumber(likes, locale) : t('watch.spark')}</span>
                 </button>
-                <button type="button" onClick={share} className="flex items-center gap-1.5 border-l border-[#2bb5ab]/30 px-3.5 transition-colors hover:bg-white/[0.08]"><Icon.PassAlong size={17} />{copied ? t('live.linkCopied') : t('watch.passAlong')}</button>
+                <button type="button" onClick={share} className="flex items-center gap-1.5 border-l border-white/10 px-3.5 transition-colors hover:bg-white/[0.08]"><Icon.PassAlong size={17} />{copied ? t('live.linkCopied') : t('watch.passAlong')}</button>
               </div>
-              <button type="button" onClick={() => need('save')} aria-pressed={saved} className={`flex h-10 items-center gap-1.5 rounded-[14px] border border-[#2bb5ab]/45 bg-white/[0.04] px-3.5 text-[14px] font-semibold transition-colors hover:bg-white/[0.08] ${saved ? 'bg-[#2bb5ab]/15' : ''}`}><Icon.Bookmark size={16} filled={saved} />{saved ? 'Kept' : 'Keep'}</button>
+              <button type="button" onClick={() => need('save')} aria-pressed={saved} className={`facet-sm flex h-10 items-center gap-1.5 bg-white/[0.08] px-3.5 text-[14px] font-semibold transition-colors hover:bg-white/[0.08] ${saved ? 'bg-[#22ada2]/15' : ''}`}><Icon.Bookmark size={16} filled={saved} />{saved ? t('watch.saved') : t('watch.save')}</button>
               <div className="relative">
-                <button type="button" onClick={() => setMenu((m) => !m)} aria-label={t('watch.moreActions')} aria-haspopup="menu" aria-expanded={menu} className="grid h-10 w-10 place-items-center rounded-[14px] border border-[#2bb5ab]/45 bg-white/[0.04] transition-colors hover:bg-white/[0.08]"><Icon.More size={18} /></button>
+                <button type="button" onClick={() => setMenu((m) => !m)} aria-label={t('watch.moreActions')} aria-haspopup="menu" aria-expanded={menu} className="facet-sm grid h-10 w-10 place-items-center bg-white/[0.08] transition-colors hover:bg-white/[0.14]"><Icon.More size={18} /></button>
                 {menu && <div role="menu" className="absolute right-0 top-full z-40 mt-2 w-[240px] rounded-2xl border border-line bg-elevated p-1.5 text-ink shadow-[var(--shadow)]">{menuItems}</div>}
               </div>
             </div>
@@ -262,34 +262,34 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
             <aside aria-label={t('watch.upNext')} className="relative order-first hidden w-[360px] shrink-0 xl:block">
               <div className="absolute inset-0 flex flex-col gap-5">
                 {more.length > 0 && (
-                  <div className="flex max-h-[44%] min-h-0 shrink-0 flex-col rounded-[24px] bg-white/[0.04] shadow-[0_0_0_1px_rgb(43_181_171/0.3),0_0_28px_rgb(43_181_171/0.12)]">
+                  <div className="facet flex max-h-[44%] min-h-0 shrink-0 flex-col bg-white/[0.05]">
                     <div className="flex items-center justify-between px-5 pt-5 text-white">
-                      <h2 className="flex items-center gap-2 text-[20px] font-extrabold uppercase tracking-wide text-[#2bb5ab]">{t('watch.upNext')}<span className="grid h-6 w-6 place-items-center rounded-md bg-[#2bb5ab] text-[#04201e]"><Icon.Play size={14} /></span></h2>
-                      <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 text-[12px] font-semibold text-[#9fb0ad]">
+                      <h2 className="text-[20px] font-extrabold text-white">{t('watch.upNext')}</h2>
+                      <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 text-[12px] font-semibold text-[#b0a397]">
                         Flow on
-                        <span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-[#2bb5ab]' : 'bg-white/20'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span>
+                        <span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-[#22ada2]' : 'bg-white/20'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span>
                       </button>
                     </div>
-                    <div className="imigongo mx-5 mb-2 mt-3" aria-hidden />
+                    <div className="zigzag mx-5 mb-2 mt-3" aria-hidden />
                     <div className="no-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-3">
                   {more.slice(0, 10).map((x, i) => (
-                    <Link key={x.id} href={`/watch?v=${x.id}`} className="group flex gap-3 rounded-2xl p-2 hover:bg-white/[0.06]">
-                      <span className="relative block w-[148px] shrink-0 overflow-hidden rounded-xl shadow-[0_0_0_1px_rgb(43_181_171/0.35)]">
+                    <Link key={x.id} href={`/watch?v=${x.id}`} className="group flex gap-3 rounded-lg p-2 hover:bg-white/[0.06]">
+                      <span className="facet-sm relative block w-[148px] shrink-0 overflow-hidden">
                         {x.thumbnailUrl ? <img src={x.thumbnailUrl} alt="" loading="lazy" className="aspect-video w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]" /> : <span className="block aspect-video w-full bg-white/10" />}
-                        {x.durationSeconds ? <span className="absolute bottom-1.5 right-1.5 rounded-md bg-[#2bb5ab] px-1.5 text-[11px] font-bold text-[#04201e]">{duration(x.durationSeconds)}</span> : null}
-                        {i === 0 && flow && <span className="absolute left-1 top-1 rounded-md bg-[#f5b95c] px-1.5 text-[10px] font-bold uppercase tracking-wide text-[#2a1a00]">{t('watch.upFirst')}</span>}
+                        {x.durationSeconds ? <span className="absolute bottom-1.5 right-1.5 bg-[rgb(20_17_15/0.85)] px-1.5 text-[11px] font-bold text-[#f4ede3]">{duration(x.durationSeconds)}</span> : null}
+                        {i === 0 && flow && <span className="absolute left-1 top-1 bg-[#e8b04a] px-1.5 text-[10px] font-bold uppercase tracking-wide text-[#2a1a00]">{t('watch.upFirst')}</span>}
                       </span>
                       <span className="min-w-0 self-center">
                         <span className="line-clamp-2 text-[14px] font-bold leading-snug text-white">{x.title}</span>
-                        <span className="mt-1 block truncate text-[12px] text-[#9fb0ad]">{x.channel.name}</span>
-                        <span className="block text-[12px] text-[#9fb0ad]" suppressHydrationWarning>{viewsLabel(x.viewCount, locale)} · {timeAgo(x.publishedAt, locale)}</span>
+                        <span className="mt-1 flex items-center gap-1.5 truncate text-[12px] text-[#b0a397]"><Avatar name={x.channel.name} src={x.channel.avatarUrl} size={16} /><span className="truncate">{x.channel.name}</span></span>
+                        <span className="block text-[12px] text-[#b0a397]" suppressHydrationWarning>{viewsLabel(x.viewCount, locale)} · {timeAgo(x.publishedAt, locale)}</span>
                       </span>
                     </Link>
                   ))}
                     </div>
                   </div>
                 )}
-                <div className="min-h-0 flex-1 rounded-[24px] bg-white/[0.04] p-5 shadow-[0_0_0_1px_rgb(43_181_171/0.3),0_0_28px_rgb(43_181_171/0.12)]">
+                <div className="facet min-h-0 flex-1 bg-white/[0.05] p-5">
                   <Comments videoId={v.id} initialCount={v.commentCount} variant="card" />
                 </div>
               </div>
@@ -311,55 +311,55 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
         <div className="px-4 pt-3.5">
           <button type="button" onClick={() => openSheet('about')} className="block w-full text-left">
             <h1 className="line-clamp-2 text-[18px] font-extrabold leading-[1.25]">{v.title}</h1>
-            <p className="mt-1 text-[12px] text-[#9fb0ad]" suppressHydrationWarning>
-              {viewsLabel(views, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : t('watch.notPublished')}{v.category ? <> · <span className="text-[#2bb5ab]">#{v.category.name.replace(/\s+/g, '')}</span></> : null} <span className="font-semibold text-white">…more</span>
+            <p className="mt-1 text-[12px] text-[#b0a397]" suppressHydrationWarning>
+              {viewsLabel(views, locale)} · {v.publishedAt ? timeAgo(v.publishedAt, locale) : t('watch.notPublished')}{v.category ? <> · <span className="text-[#22ada2]">#{v.category.name.replace(/\s+/g, '')}</span></> : null} <span className="font-semibold text-white">…more</span>
             </p>
           </button>
-          {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#9fb0ad]">Up to {v.qualityLimit}p · <Link href="/plans" className="font-semibold text-[#2bb5ab] hover:underline">every quality and no ads with Plus</Link></p> : null}
+          {v.qualityLimit ? <p className="mt-1 text-[12px] text-[#b0a397]">Up to {v.qualityLimit}p · <Link href="/plans" className="font-semibold text-[#22ada2] hover:underline">every quality and no ads with Plus</Link></p> : null}
         </div>
         <div className="no-scrollbar mt-3.5 flex gap-2 overflow-x-auto px-4">
           <button type="button" onClick={() => react('like')} aria-pressed={reaction === 'like'} aria-label={`Spark (${likes})`}
-            className={`flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-4 text-[14px] font-bold shadow-[0_0_14px_rgb(43_181_171/0.2)] ${reaction === 'like' ? 'border-[#f5b95c] bg-[#f5b95c]/15 text-[#f5b95c]' : 'border-[#2bb5ab] text-[#2bb5ab]'}`}>
-            <Icon.Spark size={18} filled={reaction === 'like'} /><span suppressHydrationWarning>{likes > 0 ? compactNumber(likes, locale) : t('watch.spark')}</span>
+            className={`facet-sm flex h-10 shrink-0 items-center gap-1.5 px-4 text-[14px] font-bold ${reaction === 'like' ? 'bg-[#e8b04a]/20 text-[#e8b04a]' : 'bg-white/[0.09] text-white'}`}>
+            <Icon.Spark size={18} filled={reaction === 'like'} className="text-[#e8b04a]" /><span suppressHydrationWarning>{likes > 0 ? compactNumber(likes, locale) : t('watch.spark')}</span>
           </button>
           <button type="button" onClick={share} className={phonePill}><Icon.PassAlong size={18} />{copied ? t('watch.copied') : t('watch.passAlong')}</button>
-          <button type="button" onClick={() => need('save')} aria-pressed={saved} className={`${phonePill} ${saved ? 'border-[#2bb5ab] text-[#2bb5ab]' : ''}`}><Icon.Bookmark size={18} filled={saved} />{saved ? 'Kept' : 'Keep'}</button>
-          {!initialViewer.isOwner && <button type="button" onClick={() => react('dislike')} aria-pressed={reaction === 'dislike'} aria-label={t('watch.notForMe')} className={`${phoneIcon} ${reaction === 'dislike' ? 'border-[#2bb5ab] text-[#2bb5ab]' : ''}`}><Icon.NotForMe size={18} filled={reaction === 'dislike'} /></button>}
+          <button type="button" onClick={() => need('save')} aria-pressed={saved} className={`${phonePill} ${saved ? 'border-[#22ada2] text-[#22ada2]' : ''}`}><Icon.Bookmark size={18} filled={saved} />{saved ? t('watch.saved') : t('watch.save')}</button>
+          {!initialViewer.isOwner && <button type="button" onClick={() => react('dislike')} aria-pressed={reaction === 'dislike'} aria-label={t('watch.notForMe')} className={`${phoneIcon} ${reaction === 'dislike' ? 'border-[#22ada2] text-[#22ada2]' : ''}`}><Icon.NotForMe size={18} filled={reaction === 'dislike'} /></button>}
           <button type="button" onClick={() => setMenu(true)} aria-label={t('watch.moreActions')} className={phoneIcon}><Icon.More size={18} /></button>
         </div>
         <div className="mx-4 mt-4 flex items-center gap-3">
           <Link href={`/@${v.channel.handle}`} className="flex min-w-0 flex-1 items-center gap-2.5">
             <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={36} />
-            <span className="min-w-0"><span className="flex items-center gap-1 truncate text-[14px] font-semibold">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={14} kind={v.channel.badge} />}</span><span className="block text-[12px] text-[#9fb0ad]" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</span></span>
+            <span className="min-w-0"><span className="flex items-center gap-1 truncate text-[14px] font-semibold">{v.channel.name}{v.channel.isVerified && <VerifiedBadge size={14} kind={v.channel.badge} />}</span><span className="block text-[12px] text-[#b0a397]" suppressHydrationWarning>{followersLabel(v.channel.followerCount, locale)}</span></span>
           </Link>
           {initialViewer.isOwner
             ? <Link href="/hub" className="flex h-9 shrink-0 items-center rounded-full border border-white/25 px-4 text-[13px] font-semibold">{t('watch.creatorHub')}</Link>
             : <FollowButton pill handle={v.channel.handle} initial={initialViewer.following} initialCount={v.channel.followerCount} />}
         </div>
-        <button type="button" onClick={() => openSheet('conversation')} className="mx-4 mt-4 block w-[calc(100%-2rem)] rounded-2xl bg-white/[0.06] px-3.5 py-3 text-left ring-1 ring-white/10">
-          <p className="text-[14px] font-bold">{t('watch.conversation')} <span className="font-normal text-[#9fb0ad]" suppressHydrationWarning>{v.commentsOpen ? compactNumber(v.commentCount, locale) : ''}</span></p>
-          {!v.commentsOpen ? <p className="mt-1.5 text-[13px] text-[#9fb0ad]">{t('watch.closed')}</p>
+        <button type="button" onClick={() => openSheet('conversation')} className="facet mx-4 mt-4 block w-[calc(100%-2rem)] bg-white/[0.07] px-3.5 py-3 text-left">
+          <p className="text-[14px] font-bold">{t('watch.conversation')} <span className="font-normal text-[#b0a397]" suppressHydrationWarning>{v.commentsOpen ? compactNumber(v.commentCount, locale) : ''}</span></p>
+          {!v.commentsOpen ? <p className="mt-1.5 text-[13px] text-[#b0a397]">{t('watch.closed')}</p>
             : firstComment?.author ? (
               <span className="mt-2 flex items-center gap-2.5"><Avatar name={firstComment.author.name} src={firstComment.author.avatarUrl} size={24} /><span className="line-clamp-2 text-[13px] text-white/90">{firstComment.content}</span></span>
-            ) : <span className="mt-2 flex items-center gap-2.5"><Icon.PersonCircle size={24} className="text-[#9fb0ad]" /><span className="flex-1 rounded-full bg-white/[0.08] px-3 py-1.5 text-[13px] text-[#9fb0ad]">{t('watch.start')}</span></span>}
+            ) : <span className="mt-2 flex items-center gap-2.5"><Icon.PersonCircle size={24} className="text-[#b0a397]" /><span className="flex-1 rounded-full bg-white/[0.08] px-3 py-1.5 text-[13px] text-[#b0a397]">{t('watch.start')}</span></span>}
         </button>
         {more.length > 0 && (
           <section className="mt-6 px-4">
             <div className="flex items-center justify-between pb-3">
-              <h2 className="text-[20px] font-extrabold">{t('watch.upNext1')} <span className="text-[#2bb5ab]">{t('watch.upNext2')}</span></h2>
-              <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 text-[12px] font-semibold text-[#9fb0ad]">{t('watch.flowOn')}<span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-[#2bb5ab]' : 'bg-white/20'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span></button>
+              <h2 className="text-[20px] font-extrabold">{t('watch.upNext1')} <span className="text-[#22ada2]">{t('watch.upNext2')}</span></h2>
+              <button type="button" role="switch" aria-checked={flow} onClick={toggleFlow} className="flex items-center gap-2 text-[12px] font-semibold text-[#b0a397]">{t('watch.flowOn')}<span className={`relative h-5 w-9 rounded-full transition-colors ${flow ? 'bg-[#22ada2]' : 'bg-white/20'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${flow ? 'left-[18px]' : 'left-0.5'}`} /></span></button>
             </div>
             <div className="grid gap-4">
               {more.map((x, i) => (
                 <Link key={x.id} href={`/watch?v=${x.id}`} className="flex gap-3">
-                  <span className="relative block w-[44%] max-w-[180px] shrink-0 overflow-hidden rounded-xl shadow-[0_0_0_1px_rgb(43_181_171/0.35)]">
+                  <span className="relative block w-[44%] max-w-[180px] shrink-0 overflow-hidden rounded-xl shadow-[0_0_0_1px_rgb(34_173_162/0.35)]">
                     {x.thumbnailUrl ? <img src={x.thumbnailUrl} alt="" loading="lazy" className="aspect-video w-full object-cover" /> : <span className="block aspect-video w-full bg-white/10" />}
-                    {x.durationSeconds ? <span className="absolute bottom-1.5 right-1.5 rounded-md bg-[#2bb5ab] px-1.5 text-[11px] font-bold text-[#04201e]">{duration(x.durationSeconds)}</span> : null}
-                    {i === 0 && flow && <span className="absolute left-1.5 top-1.5 rounded-md bg-[#f5b95c] px-1.5 text-[10px] font-bold uppercase tracking-wide text-[#2a1a00]">{t('watch.upFirst')}</span>}
+                    {x.durationSeconds ? <span className="absolute bottom-1.5 right-1.5 bg-[rgb(20_17_15/0.85)] px-1.5 text-[11px] font-bold text-[#f4ede3]">{duration(x.durationSeconds)}</span> : null}
+                    {i === 0 && flow && <span className="absolute left-1.5 top-1.5 rounded-md bg-[#e8b04a] px-1.5 text-[10px] font-bold uppercase tracking-wide text-[#2a1a00]">{t('watch.upFirst')}</span>}
                   </span>
                   <span className="min-w-0 self-center">
                     <span className="line-clamp-2 text-[14px] font-bold leading-snug">{x.title}</span>
-                    <span className="mt-1 line-clamp-2 text-[12px] text-[#9fb0ad]" suppressHydrationWarning>{x.channel.name} · {viewsLabel(x.viewCount, locale)} · {timeAgo(x.publishedAt, locale)}</span>
+                    <span className="mt-1 line-clamp-2 text-[12px] text-[#b0a397]" suppressHydrationWarning>{x.channel.name} · {viewsLabel(x.viewCount, locale)} · {timeAgo(x.publishedAt, locale)}</span>
                   </span>
                 </Link>
               ))}
@@ -369,7 +369,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
       </div>
       {/* Phones: About and Conversation open as panels under the video, as in video apps. */}
       {sheet && (
-        <div role="dialog" aria-modal="true" aria-label={sheet === 'about' ? t('watch.about') : t('watch.conversation')} className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(100dvh-56.25vw)] flex-col rounded-t-[22px] bg-elevated shadow-[0_-12px_32px_rgb(0_0_0/0.18)] sm:hidden">
+        <div role="dialog" aria-modal="true" aria-label={sheet === 'about' ? t('watch.about') : t('watch.conversation')} className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(100dvh-56.25vw)] flex-col rounded-t-2xl bg-elevated shadow-[0_-12px_32px_rgb(0_0_0/0.18)] sm:hidden">
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
             <p className="text-[16px] font-bold">{sheet === 'about' ? t('watch.about') : t('watch.conversation')}</p>
             <button type="button" onClick={() => setSheet(null)} aria-label={t('watch.close')} className="grid h-9 w-9 place-items-center rounded-full hover:bg-surface"><Icon.Close size={20} /></button>

@@ -63,7 +63,7 @@ export function ImageField({ label, hint, url, endpoint, shape, fallback, onChan
 
   const preview = shape === 'banner'
     ? <div className="aspect-[6/1] w-full overflow-hidden rounded-2xl bg-gradient-to-br from-brand-soft to-surface">{url && <img src={url} alt="" className="h-full w-full object-cover" />}</div>
-    : <div className={`grid h-24 w-24 shrink-0 place-items-center overflow-hidden bg-brand-soft text-[36px] font-bold text-brand ${shape === 'round' ? 'rounded-full' : 'rounded-[28px]'}`}>{url ? <img src={url} alt="" className="h-full w-full object-cover" /> : (fallback ?? '?').slice(0, 1).toUpperCase()}</div>;
+    : <div className={`grid h-24 w-24 shrink-0 place-items-center overflow-hidden bg-brand-soft text-[36px] font-bold text-brand ${shape === 'round' ? 'rounded-full' : 'rounded-2xl'}`}>{url ? <img src={url} alt="" className="h-full w-full object-cover" /> : (fallback ?? '?').slice(0, 1).toUpperCase()}</div>;
 
   return (
     <div>

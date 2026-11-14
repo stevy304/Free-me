@@ -2,7 +2,7 @@
 export type Role = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'MODERATOR' | 'ADMIN';
 
 export interface ChannelInfo {
-  id: string; handle: string; name: string; description: string | null; avatarUrl: string | null; bannerUrl: string | null;
+  id: string; handle: string; name: string; description: string | null; avatarUrl: string | null; /** The Space shows its owner's profile picture (it has none of its own). */ avatarFromProfile?: boolean; bannerUrl: string | null;
   country: string | null; defaultLanguage: string | null; isVerified: boolean; badge?: 'verified' | 'premium' | null; followerCount: number; totalViews: string; createdAt: string;
 }
 export interface Profile { displayName: string; avatarUrl: string | null; bio: string | null; country: string | null; city: string | null; preferredLanguage: string; timezone: string | null; personalizedRecommendations?: boolean }
@@ -30,6 +30,14 @@ export interface VideoCardData {
   /** Seek-bar sprite sheet, for the hover preview on cards. */
   preview?: { url: string; count: number; cols: number; width: number; height: number } | null;
   channel: { handle: string; name: string; avatarUrl: string | null; isVerified: boolean; badge?: 'verified' | 'premium' | null };
+  /** Moments feed only: what is shown over the Moment. */
+  moment?: MomentDetails | null;
+}
+export type MomentSound = { kind: 'original' } | { kind: 'named'; title: string } | { kind: 'licensed'; title: string; owner: string };
+export interface MomentDetails {
+  description: string | null; tags: string[]; sound: MomentSound;
+  /** An episode of a series: its number, how many are published, and the next one. */
+  series: { id: string; title: string; episode: number; count: number; nextId: string | null } | null;
 }
 export interface VideoPage { videos: VideoCardData[]; nextCursor: string | null }
 export interface Category { id: string; name: string; slug: string }
