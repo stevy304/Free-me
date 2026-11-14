@@ -13,7 +13,8 @@ import { mediaPrefix, wantedLocation } from './keys';
 import { LATE_FOLDERS } from './captions';
 import { extractSpeech } from './autocaptions';
 import { frames, hold, screen } from './screening';
-import { checkVideo, recordAutomatic } from '../safety/check';
+import { checkVideo, recordAutomatic, reviewPublishedVideo } from '../safety/check';
+import { aiModerator } from '../safety/ai';
 import { announceVideo } from '../notifications/notify';
 import type { Storage } from './storage';
 import { publish, room } from '../realtime/publish';
@@ -144,7 +145,10 @@ export class VideoProcessor {
         // progress never writes over "Not published").
         const refused = new AbortController();
         const encoding = signal ? AbortSignal.any([signal, refused.signal]) : refused.signal;
-        const safety = this.safetyGate(video, source2, info, work, signal).then((ok) => { if (!ok) refused.abort(); return ok; });
+        // With the AI moderator, the video is published as soon as it plays and Claude looks at it straight after
+        // (aiReview): the quick local checks below still run first (blocked files, the words, other apps' marks).
+        const aiLater = await this.aiPending(video);
+        const safety = this.safetyGate(video, source2, info, work, signal, aiLater).then((ok) => { if (!ok) refused.abort(); return ok; });
         safety.catch(() => undefined); // awaited below; an early failure must not be an unhandled rejection meanwhile
         let thumbs: Awaited<ReturnType<VideoProcessor['thumbnails']>>;
         try {
@@ -162,8 +166,9 @@ export class VideoProcessor {
           throw e;
         }
         if (!(await timed('safetyMs', () => safety))) return { speech: null, more: false };
-        const playable = await timed('sdPublishMs', () => this.publish(videoId, work, fast, info, done, thumbs, passes.length ? 'Playable · adding qualities' : 'Playable · preparing seek previews', 5 + fastWeight));
+        const playable = await timed('sdPublishMs', () => this.publish(videoId, work, fast, info, done, thumbs, passes.length ? 'Playable · adding qualities' : 'Playable · preparing seek previews', 5 + fastWeight, !aiLater));
         if (playable !== null && !video.hlsMasterKey) this.log.log({ event: 'video_first_playable', videoId, processingToPlayableMs: Math.round(playable - started), ...timings });
+        if (aiLater && !(await timed('aiReviewMs', () => this.aiReview(videoId, source2, info, work, signal)))) return { speech: null, more: false };
         // Seek previews from the 360p rendition just made: cheap, so they come with the first job.
         try {
           const board = await timed('storyboardMs', () => this.storyboard(join(work, 'out', 'hls', first.name, 'index.m3u8'), work, info, null, signal));
@@ -182,7 +187,10 @@ export class VideoProcessor {
         }
       } else {
         // Second job: a video that was never checked (an interrupted first job) is checked before anything more is published.
-        if (!video.safetyCheckedAt && !(await this.safetyGate(video, source2, info, work, signal))) return { speech: null, more: false };
+        const aiLater = await this.aiPending(video);
+        if (!video.safetyCheckedAt && !(await this.safetyGate(video, source2, info, work, signal, aiLater))) return { speech: null, more: false };
+        // An interrupted first job may have published it before Claude looked: look now, before more is published.
+        if (aiLater && !(await this.aiReview(videoId, source2, info, work, signal))) return { speech: null, more: false };
         // Second job: the renditions already published stay in the master playlist and are not encoded again.
         done.push(...await this.publishedEntries(videoId, ladder));
         const have = new Set(done.filter((d) => d.codec !== 'av1').map((d) => d.name));
@@ -246,10 +254,33 @@ export class VideoProcessor {
    * `safetyCheckedAt` is set and publishing goes ahead. Otherwise the video is held for a moderator (FLAGGED, in the
    * queue by priority) and false is returned. A video a moderator released, or already checked, is not checked again.
    */
-  private async safetyGate(video: Video, source: string, info: ProbeResult, work: string, signal?: AbortSignal): Promise<boolean> {
+  /** Claude still has to look at this video (the AI moderator is set up, and neither it nor a moderator decided yet). */
+  private async aiPending(video: Video): Promise<boolean> {
+    return !video.screeningClearedAt && !video.safetyModel && !video.safetyDecision && !!(await aiModerator(this.prisma, this.config));
+  }
+
+  /**
+   * Claude's look at a video just published (safety/check.ts reviewPublishedVideo), from a few small frames to keep
+   * the cost down. Returns false when it is not published after all (hidden; its creator sees why and can appeal).
+   */
+  private async aiReview(videoId: string, source: string, info: ProbeResult, work: string, signal?: AbortSignal): Promise<boolean> {
+    const decision = await reviewPublishedVideo(this.prisma, this.config, videoId,
+      () => frames(this.config.media.ffmpegPath, source, info, join(work, 'ai'), { max: info.durationSeconds <= 60 ? 4 : 6, size: 512 }), signal);
+    if (decision === 'reject') {
+      // The creator's upload page and Creator Hub show it at once.
+      await this.setProgress(videoId, 100, 'Not published');
+      this.log.warn({ event: 'video_rejected_after_publish', videoId });
+      return false;
+    }
+    // Followers hear about it once Claude has looked (announceVideo skips a limited video).
+    await announceVideo(this.prisma, videoId);
+    return true;
+  }
+
+  private async safetyGate(video: Video, source: string, info: ProbeResult, work: string, signal?: AbortSignal, aiLater = false): Promise<boolean> {
     if (video.safetyCheckedAt) return true;
     if (video.screeningClearedAt) { await this.prisma.video.update({ where: { id: video.id }, data: { safetyCheckedAt: new Date() } }); return true; }
-    const verdict = await checkVideo(this.prisma, this.config, video, () => frames(this.config.media.ffmpegPath, source, info, join(work, 'safety')), signal, { madeBy: info.madeBy });
+    const verdict = await checkVideo(this.prisma, this.config, video, () => frames(this.config.media.ffmpegPath, source, info, join(work, 'safety')), signal, { madeBy: info.madeBy, aiLater });
     signal?.throwIfAborted();
     this.log.log({ event: 'video_safety_checked', videoId: video.id, action: verdict.action, model: verdict.model, category: verdict.category, scanned: verdict.scanned, unscanned: verdict.unscanned, scores: verdict.scores });
     // The reason is written for the creator when a machine decided alone (the AI, or the file's own marks).
@@ -629,7 +660,7 @@ export class VideoProcessor {
   }
 
   /** Uploads a pass's files, records the renditions and rewrites the master playlist so players see the new rungs. */
-  private async publish(videoId: string, work: string, rungs: PlannedRung[], info: ProbeResult, done: MasterEntry[], thumbs: string[] | null, stage: string, progress: number) {
+  private async publish(videoId: string, work: string, rungs: PlannedRung[], info: ProbeResult, done: MasterEntry[], thumbs: string[] | null, stage: string, progress: number, announce = true) {
     const video = await this.prisma.video.findUniqueOrThrow({ where: { id: videoId } });
     const location = wantedLocation(video);
     const prefix = mediaPrefix(videoId, location);
@@ -678,7 +709,7 @@ export class VideoProcessor {
     } });
     const playable = now?.takenDownAt ? null : performance.now();
     await feedsChanged();
-    await announceVideo(this.prisma, videoId);
+    if (announce) await announceVideo(this.prisma, videoId);
     if (moveFrom) {
       // A custom thumbnail saved to the old place while this pass ran is picked up here (see the thumbnail upload).
       for (const dir of LATE_FOLDERS) await this.storage.copyPrefix(moveFrom + dir, prefix + dir);

@@ -17,15 +17,20 @@ export function fingerprint(path: string): Promise<{ sha256: string; md5: string
   });
 }
 
-/** Up to 8 frames across the video, 640 px wide, for an outside matching service (perceptual hashes need pictures). */
-export async function frames(ffmpeg: string, source: string, info: ProbeResult, dir: string): Promise<string[]> {
+/**
+ * Frames across the video, for an outside matching service (perceptual hashes need pictures; up to 8, 640 px wide) or
+ * the AI moderator (fewer and smaller, to keep its cost down: `opts`).
+ */
+export async function frames(ffmpeg: string, source: string, info: ProbeResult, dir: string, opts: { max?: number; size?: number } = {}): Promise<string[]> {
   await mkdir(dir, { recursive: true });
-  const n = Math.max(1, Math.min(8, Math.floor(info.durationSeconds / 2)));
+  const n = Math.max(1, Math.min(opts.max ?? 8, Math.floor(info.durationSeconds / 2)));
+  // Longest side at most `size` px (vertical videos too), else 640 px wide.
+  const scale = opts.size ? `scale=${opts.size}:${opts.size}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2` : 'scale=640:-2';
   const out: string[] = [];
   for (let i = 0; i < n; i++) {
     const file = join(dir, `${i}.jpg`);
     try {
-      await run(ffmpeg, ['-hide_banner', '-y', '-ss', ((info.durationSeconds * (i + 0.5)) / n).toFixed(2), '-i', source, '-frames:v', '1', '-vf', 'scale=640:-2,format=yuvj420p', '-q:v', '4', file]);
+      await run(ffmpeg, ['-hide_banner', '-y', '-ss', ((info.durationSeconds * (i + 0.5)) / n).toFixed(2), '-i', source, '-frames:v', '1', '-vf', `${scale},format=yuvj420p`, '-q:v', '4', file]);
       out.push((await readFile(file)).toString('base64'));
     } catch { /* a frame that cannot be read is skipped */ }
   }

@@ -326,9 +326,15 @@ export class MediaJobs {
           void run().catch((e) => this.log.error(`${videoId}: ${(e as Error).message}`));
         }
       } else {
-        await this.prisma.video.update({ where: { id: videoId }, data: { ...base, reviewHoldAt: null, safetyLimitedAt: limited } });
+        // Published, then hidden by Claude's look just after (its higher qualities were not made yet): shown again, and finished.
+        const stopped = v.processingStage === 'Not published';
+        await this.prisma.video.update({ where: { id: videoId }, data: { ...base, reviewHoldAt: null, safetyLimitedAt: limited, ...(stopped ? { processingStage: 'Playable · adding qualities' } : {}) } });
         await feedsChanged();
         if (!limited) await announceVideo(this.prisma, videoId);
+        if (stopped) {
+          if (this.enqueue) await this.enqueue({ name: 'upgrade', videoId });
+          else void this.transcode(videoId, true, signal, 'rest').catch((e) => this.log.error(`${videoId}: ${(e as Error).message}`));
+        }
       }
       await recordAutomatic(this.prisma, videoId, `Appeal accepted by ${verdict.model} (${verdict.decision}): ${verdict.reason}`, null);
     } finally {

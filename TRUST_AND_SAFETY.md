@@ -27,10 +27,20 @@ Code: `apps/api/src/safety/ai.ts`. Turned on by saving an **Anthropic API key** 
 The key is checked, stored encrypted (AES-256-GCM), and never shown again, not even to administrators. The form
 closes as soon as it is saved. Only the names of changed keys go into the audit log.
 
+**Published at once, checked just after.** While a video uploads and is processed, the quick local checks run
+(blocked files, the words of its title and description, other apps' marks in the file, Content ID). As soon as it
+plays it is published, and the creator sees it published. Claude then looks at it straight away (a few seconds). If
+it breaks the Community Guidelines it is hidden from everyone but its creator, who sees **"Not published"** and the
+reason in Creator Hub and can ask for another look once. Followers are told about a new video only after Claude has
+looked. If Claude cannot be reached, the video stays published.
+
+To keep the cost down, Claude sees only a few small frames (2 to 4 for a short video, 6 for a long one, at most 512
+px), and Haiku decides alone unless it would reject a video while unsure.
+
 | Step | Model | When | Cost (about) |
 | --- | --- | --- | --- |
-| First look | Claude Haiku 5.5, low effort | Every video (frames plus title, description and tags), comment, edited title and transcript | $0.0005 a video; less for words |
-| Careful look | Claude Opus 5.5, high effort | When Haiku is unsure (confidence under 0.75), chooses "limit", or declines to answer | A few cents |
+| First look | Claude Haiku 5.5, low effort | Every video (frames plus title, description and tags), comment, edited title and transcript | Well under $0.001 a video; less for words |
+| Careful look | Claude Opus 5.5, medium effort | Only before rejecting a video Haiku is unsure about (confidence under 0.75), or when Haiku declines to answer | A few cents |
 | Appeal | Claude Opus 5.5, high effort | Once per video, when its creator asks (Creator Hub → "Ask for another look") | A few cents |
 
 - **What it reads:** the Community Guidelines and Rwanda's law on genocide ideology and divisionism, in the system

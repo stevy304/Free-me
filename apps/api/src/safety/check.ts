@@ -125,7 +125,7 @@ export interface VideoVerdict extends Decision {
  * JPEGs across the video (base64), taken once and shared by every engine.
  */
 export async function checkVideo(prisma: PrismaClient, config: AppConfig, video: { id: string; title: string; description: string | null; channelId: string; durationSeconds?: number },
-  frames: () => Promise<string[]>, signal?: AbortSignal, file: { madeBy?: string | null } = {}): Promise<VideoVerdict> {
+  frames: () => Promise<string[]>, signal?: AbortSignal, file: { madeBy?: string | null; aiLater?: boolean } = {}): Promise<VideoVerdict> {
   const tags = (await prisma.videoTag.findMany({ where: { videoId: video.id }, select: { tag: { select: { name: true } } } })).map((t) => t.tag.name);
   const text = videoText({ ...video, tags });
   const { scores } = scoreText(text, await moderatorTerms(prisma));
@@ -158,8 +158,8 @@ export async function checkVideo(prisma: PrismaClient, config: AppConfig, video:
     return { ...combined, hold: true, action: 'hold', reason: note ?? combined.reason, model: null, scanned, unscanned: false };
   }
 
-  // The AI moderator decides when there is one.
-  const ai = await aiModerator(prisma, config);
+  // The AI moderator decides when there is one (unless it looks after publishing: reviewPublishedVideo).
+  const ai = file.aiLater ? null : await aiModerator(prisma, config);
   if (ai) {
     try {
       const v = await ai.decide({ kind: 'video', text, frames: await pics(), hints: [...hintsOf(combined.scores), ...(note ? [note] : [])] }, signal);
@@ -180,10 +180,10 @@ export async function checkVideo(prisma: PrismaClient, config: AppConfig, video:
       reason: `The automatic check found ${what} in this video, which the Community Guidelines do not allow. If this is a mistake, you can ask for another look.` };
   }
   if (combined.hold) return { ...combined, action: 'hold', reason: note ?? combined.reason, model: null, scanned, unscanned: false };
-  if (!scanned && engine?.images && config.safety.failClosed) {
+  if (!scanned && !file.aiLater && engine?.images && config.safety.failClosed) {
     return { ...combined, hold: true, action: 'hold', priority: 40, reason: 'The automatic check could not run; held until a moderator looks at it', model: null, scanned: false, unscanned: true };
   }
-  if (!scanned && await needsPerson(prisma, config, video.channelId)) {
+  if (!scanned && !file.aiLater && await needsPerson(prisma, config, video.channelId)) {
     return { ...combined, hold: true, action: 'hold', priority: 30, reason: 'New Space: a moderator checks its first videos before they are shown (no automatic picture check is configured)', model: null, scanned: false, unscanned: true };
   }
   return { ...combined, action: 'publish', model: null, scanned, unscanned: false };
@@ -222,4 +222,40 @@ export async function releaseUnscannedHolds(prisma: PrismaClient, config: AppCon
     released++;
   }
   return released;
+}
+
+/**
+ * The AI moderator's look at a video just published (TRUST_AND_SAFETY.md): the creator sees it published at once, and
+ * Claude looks at a few frames and its words straight after. Rejected: hidden from everyone but its creator, who sees
+ * "Not published" and why, and can appeal. Limited: kept out of feeds and search. Returns the decision, or null when
+ * the AI moderator is not set up or could not answer (the video then stays published).
+ */
+export async function reviewPublishedVideo(prisma: PrismaClient, config: AppConfig, videoId: string,
+  frames: () => Promise<string[]>, signal?: AbortSignal): Promise<'publish' | 'limit' | 'reject' | null> {
+  const ai = await aiModerator(prisma, config);
+  if (!ai) return null;
+  const v = await prisma.video.findUnique({ where: { id: videoId }, select: { title: true, description: true, tags: { select: { tag: { select: { name: true } } } } } });
+  if (!v) return null;
+  const text = videoText({ title: v.title, description: v.description, tags: v.tags.map((t) => t.tag.name) });
+  let verdict: AiVerdict;
+  try {
+    verdict = await ai.decide({ kind: 'video', text, frames: await frames(), hints: hintsOf(scoreText(text, await moderatorTerms(prisma)).scores) }, signal);
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    log.warn(`${videoId}: AI moderator unavailable, the video stays published: ${(e as Error).message}`);
+    return null;
+  }
+  const now = new Date();
+  const base = { safetyDecision: verdict.decision, safetyReason: verdict.reason, safetyModel: verdict.model };
+  log.log({ event: 'video_ai_reviewed', videoId, decision: verdict.decision, category: verdict.category, model: verdict.model, confidence: verdict.confidence });
+  if (verdict.decision === 'publish') { await prisma.video.update({ where: { id: videoId }, data: base }); return 'publish'; }
+  if (verdict.decision === 'limit') {
+    await prisma.video.update({ where: { id: videoId }, data: { ...base, safetyLimitedAt: now } });
+    await feedsChanged();
+    return 'limit';
+  }
+  await prisma.video.updateMany({ where: { id: videoId, takenDownAt: null }, data: { ...base, reviewHoldAt: now } });
+  await recordAutomatic(prisma, videoId, `Not published, decided by ${verdict.model} after upload: ${verdict.reason}`, verdict.category === 'none' ? null : verdict.category);
+  await feedsChanged();
+  return 'reject';
 }

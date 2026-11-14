@@ -27,6 +27,7 @@ describe('AI moderator', () => {
   // How each model answers; by default everything is fine.
   let answer: (model: string, text: string) => Answer = () => ({ decision: 'publish' });
   let wordsToo = false; // the answer applies to words too (comments, titles, transcripts), not only videos
+  let wait: Promise<void> | null = null; // Claude takes its time over videos until this settles
   let ctx: Awaited<ReturnType<typeof makeApp>>;
   let clip: string;
 
@@ -36,8 +37,9 @@ describe('AI moderator', () => {
     claude = createServer((req, res) => {
       let body = '';
       req.on('data', (c) => { body += c; });
-      req.on('end', () => {
+      req.on('end', async () => {
         const j = JSON.parse(body);
+        if (wait && /A new video/.test(body)) await wait;
         const content = j.messages[0].content as Array<{ type: string; text?: string }>;
         const text = content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
         calls.push({ model: j.model, effort: j.output_config?.effort, images: content.filter((b) => b.type === 'image').length, text, cached: !!j.system?.[0]?.cache_control, system: String(j.system?.[0]?.text ?? ''), key: (req.headers['x-api-key'] ?? req.headers.authorization) as string | undefined });
@@ -54,7 +56,7 @@ describe('AI moderator', () => {
   }, 60_000);
   beforeEach(async () => {
     await resetDb(ctx.prisma); forgetSecrets(); ctx.mail.outbox.length = 0; await ctx.clearLimits();
-    calls = []; wordsToo = false; answer = () => ({ decision: 'publish' });
+    calls = []; wordsToo = false; wait = null; answer = () => ({ decision: 'publish' });
   });
   afterAll(async () => { await ctx.app.close(); claude.close(); });
 
@@ -75,7 +77,7 @@ describe('AI moderator', () => {
     return { agent: c.agent, id: start.videoId as string };
   }
   const settle = async (agent: any, id: string) => {
-    for (let i = 0; i < 300; i++) { const v = (await agent.get(`/api/hub/videos/${id}`)).body.video; if (v.status === 'FLAGGED' || (v.status === 'READY' && v.processingStage === 'Ready')) return v; await new Promise((r) => setTimeout(r, 100)); }
+    for (let i = 0; i < 300; i++) { const v = (await agent.get(`/api/hub/videos/${id}`)).body.video; if (v.status === 'FLAGGED' || v.processingStage === 'Not published' || (v.status === 'READY' && v.processingStage === 'Ready')) return v; await new Promise((r) => setTimeout(r, 100)); }
     throw new Error('not settled');
   };
   const listed = async () => (await request(ctx.http).get('/api/videos?limit=24').expect(200)).body.videos.map((x: any) => x.id);
@@ -126,14 +128,35 @@ describe('AI moderator', () => {
     expect(await listed()).toContain(id);
   });
 
+  test('published at once: people can watch while Claude looks; a rejection hides it and the creator reads why', async () => {
+    await admin();
+    let answerNow!: () => void;
+    wait = new Promise((r) => { answerNow = r; });
+    answer = () => ({ decision: 'reject', category: 'hate', confidence: 0.96, reason: 'It calls for violence against an ethnic group.' });
+    const { agent, id } = await upload('quick', 'Market day');
+    let v: any;
+    for (let i = 0; i < 300; i++) { v = (await agent.get(`/api/hub/videos/${id}`)).body.video; if (v.status === 'READY') break; await new Promise((r) => setTimeout(r, 100)); }
+    expect(v.status).toBe('READY');
+    await request(ctx.http).get(`/api/videos/${id}`).expect(200);
+    expect(await listed()).toContain(id);
+    // Only a few small frames go to Claude (tokens), and only Haiku looks while it is sure.
+    answerNow();
+    v = await settle(agent, id);
+    expect(calls.filter((c) => c.images > 0).map((c) => [c.model, c.images])).toEqual([['claude-haiku-5-5', 2]]);
+    expect(v).toMatchObject({ processingStage: 'Not published' });
+    expect(v.safety).toMatchObject({ decision: 'reject', reason: 'It calls for violence against an ethnic group.', canAppeal: true });
+    await request(ctx.http).get(`/api/videos/${id}`).expect(404);
+    expect(await listed()).not.toContain(id);
+  });
+
   test('Haiku unsure: Opus decides; a rejected video is never shown, the creator reads why and can appeal once', async () => {
     await admin();
     answer = (model) => (model === 'claude-haiku-5-5' ? { decision: 'reject', category: 'violence/graphic', confidence: 0.5 }
       : { decision: 'reject', category: 'violence/graphic', confidence: 0.9, reason: 'Real injuries are shown in close-up to shock.' });
     const { agent, id } = await upload('gore', 'Accident');
     const v = await settle(agent, id);
-    expect(calls.filter((c) => c.images > 0).map((c) => [c.model, c.effort])).toEqual([['claude-haiku-5-5', 'low'], ['claude-opus-5-5', 'high']]);
-    expect(v).toMatchObject({ status: 'FLAGGED', processingStage: 'Not published' });
+    expect(calls.filter((c) => c.images > 0).map((c) => [c.model, c.effort])).toEqual([['claude-haiku-5-5', 'low'], ['claude-opus-5-5', 'medium']]);
+    expect(v).toMatchObject({ processingStage: 'Not published' });
     expect(v.safety).toMatchObject({ decision: 'reject', reason: 'Real injuries are shown in close-up to shock.', canAppeal: true, appealedAt: null });
     await request(ctx.http).get(`/api/videos/${id}`).expect(404);
     expect(await ctx.prisma.report.findFirstOrThrow({ where: { videoId: id } })).toMatchObject({ reason: 'AUTOMATED_MATCH', status: 'RESOLVED' });
@@ -162,7 +185,7 @@ describe('AI moderator', () => {
     await agent.post(`/api/hub/videos/${id}/appeal`).set('Origin', WEB).send({}).expect(200);
     for (let i = 0; i < 200 && !(await ctx.prisma.video.findUniqueOrThrow({ where: { id } })).safetyReason?.startsWith('Looked again'); i++) await new Promise((r) => setTimeout(r, 100));
     const v = (await agent.get(`/api/hub/videos/${id}`)).body.video;
-    expect(v).toMatchObject({ status: 'FLAGGED' });
+    expect(v).toMatchObject({ processingStage: 'Not published' });
     expect(v.safety).toMatchObject({ decision: 'reject', reason: 'Looked again: explicit sexual activity is shown.', canAppeal: false });
     await request(ctx.http).get(`/api/videos/${id}`).expect(404);
   });
@@ -173,7 +196,7 @@ describe('AI moderator', () => {
     const a = await upload('borderline', 'Protest footage');
     const b = await upload('borderline2', 'Protest footage 2');
     await settle(a.agent, a.id); await settle(b.agent, b.id);
-    expect(calls.filter((c) => c.model === 'claude-opus-5-5' && c.images > 0)).toHaveLength(2); // "limit" always goes to Opus
+    expect(calls.filter((c) => c.model === 'claude-opus-5-5')).toHaveLength(0); // Haiku's "limit" stands: no Opus tokens
     expect((await a.agent.get(`/api/hub/videos/${a.id}`)).body.video.safety).toMatchObject({ decision: 'limit', limited: true, canAppeal: true });
     await request(ctx.http).get(`/api/videos/${a.id}`).expect(200);
     expect(await listed()).not.toContain(a.id);
@@ -198,7 +221,7 @@ describe('AI moderator', () => {
     const { agent, id } = await upload('refused', 'Untitled');
     const v = await settle(agent, id);
     expect(calls.filter((c) => c.images > 0).map((c) => c.model)).toEqual(['claude-haiku-5-5', 'claude-opus-5-5']);
-    expect(v.status).toBe('FLAGGED');
+    expect(v.processingStage).toBe('Not published');
     expect(v.safety).toMatchObject({ decision: 'reject', canAppeal: true });
     expect(v.safety.reason).toMatch(/declined/);
   });
@@ -278,7 +301,7 @@ describe('AI moderator', () => {
     expect(calls[0].system).toMatch(/YouTube or YouTube Shorts.*Netflix.*TV channels/s);
     expect(calls[0].system).toMatch(/Graphic injuries and gore.*always rejected/);
     expect(calls[0].system).toMatch(/TikTok/);
-    expect(v).toMatchObject({ status: 'FLAGGED', processingStage: 'Not published' });
+    expect(v).toMatchObject({ processingStage: 'Not published' });
     expect(v.safety).toMatchObject({ decision: 'reject', reason, canAppeal: true });
     await request(ctx.http).get(`/api/videos/${id}`).expect(404);
   });
