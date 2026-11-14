@@ -84,7 +84,7 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
     if (!viewer) { signIn(); return; }
     window.location.href = `/messages?to=${encodeURIComponent(v.channel.handle)}`;
   };
-  const action = 'flex w-full flex-col items-center gap-1 transition-transform hover:scale-105 [text-shadow:0_1px_3px_rgb(0_0_0/0.5)] sm:[text-shadow:none]';
+  const action = 'flex w-full flex-col items-center gap-0.5 sm:gap-1 transition-transform hover:scale-105 [text-shadow:0_1px_3px_rgb(0_0_0/0.5)] sm:[text-shadow:none]';
 
   return (
     <section className="relative flex h-full snap-start snap-always items-center justify-center gap-4 sm:py-3" aria-label={v.title}>
@@ -106,27 +106,27 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
       </div>
       {/* Actions on the right, each with its name or count under it, and the creator's picture under them (it opens
           their Space). Phones: floating over the video, no panel behind. Wide screens: a cut-corner panel beside it. */}
-      <div className="absolute bottom-24 right-2 flex flex-col items-center gap-2.5 text-white sm:static sm:self-end sm:pb-6 sm:text-ink">
-        <div className="flex w-[64px] flex-col items-center gap-4 text-[11px] font-semibold [filter:drop-shadow(0_1px_2px_rgb(0_0_0/0.6))] sm:facet sm:gap-3 sm:bg-elevated sm:py-3 sm:[filter:none]">
+      <div className="absolute bottom-7 right-1.5 flex flex-col items-center gap-2 text-white sm:static sm:self-end sm:pb-6 sm:text-ink">
+        <div className="flex w-[56px] flex-col items-center gap-2.5 text-[10px] font-semibold sm:w-[64px] sm:text-[11px] [filter:drop-shadow(0_1px_2px_rgb(0_0_0/0.6))] sm:facet sm:gap-3 sm:bg-elevated sm:py-3 sm:[filter:none]">
           <button type="button" onClick={() => vote('like')} aria-pressed={votes?.mine === 'like'} aria-label={`Like (${votes?.likes ?? 0})`} className={action}>
-            <Icon.Like size={26} filled={votes?.mine === 'like'} className={votes?.mine === 'like' ? 'text-[#e8b04a]' : undefined} />
+            <Icon.Like size={26} filled={votes?.mine === 'like'} className={`h-[21px] w-[21px] sm:h-[26px] sm:w-[26px] ${votes?.mine === 'like' ? 'text-[#e8b04a]' : ''}`} />
             <span suppressHydrationWarning>{votes && votes.likes > 0 ? compactNumber(votes.likes, locale) : 'Like'}</span>
           </button>
           <button type="button" onClick={() => vote('dislike')} aria-pressed={votes?.mine === 'dislike'} aria-label={`Dislike (${votes?.dislikes ?? 0})`} className={action}>
-            <Icon.Dislike size={26} filled={votes?.mine === 'dislike'} />
+            <Icon.Dislike size={26} filled={votes?.mine === 'dislike'} className="h-[21px] w-[21px] sm:h-[26px] sm:w-[26px]" />
             <span suppressHydrationWarning>{votes && votes.dislikes > 0 ? compactNumber(votes.dislikes, locale) : 'Dislike'}</span>
           </button>
           <button type="button" onClick={() => setTalk((x) => !x)} aria-expanded={talk} aria-label={`Comments (${comments ?? 0})`} className={action}>
-            <Icon.Comment size={26} filled={talk} className={talk ? 'text-[#22ada2]' : undefined} />
+            <Icon.Comment size={26} filled={talk} className={`h-[21px] w-[21px] sm:h-[26px] sm:w-[26px] ${talk ? 'text-[#22ada2]' : ''}`} />
             <span suppressHydrationWarning>{comments ? compactNumber(comments, locale) : 'Comments'}</span>
           </button>
-          <button type="button" onClick={share} aria-label="Share" className={action}><Icon.PassAlong size={26} /><span>{copied ? 'Copied' : 'Share'}</span></button>
+          <button type="button" onClick={share} aria-label="Share" className={action}><Icon.PassAlong size={26} className="h-[21px] w-[21px] sm:h-[26px] sm:w-[26px]" /><span>{copied ? 'Copied' : 'Share'}</span></button>
           {viewer?.channel?.handle !== v.channel.handle && (
-            <button type="button" onClick={message} aria-label={`Message @${v.channel.handle}`} className={action}><Icon.Message size={26} /><span>Message</span></button>
+            <button type="button" onClick={message} aria-label={`Message @${v.channel.handle}`} className={action}><Icon.Message size={26} className="h-[21px] w-[21px] sm:h-[26px] sm:w-[26px]" /><span>Message</span></button>
           )}
         </div>
-        <Link href={`/@${v.channel.handle}`} aria-label={`${v.channel.name}'s Space`} title={v.channel.name} className="relative mt-1 rounded-full ring-2 ring-[#f4ede3] shadow-[0_4px_14px_rgb(0_0_0/0.35)] transition-transform hover:scale-105 sm:ring-clay">
-          <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={42} />
+        <Link href={`/@${v.channel.handle}`} aria-label={`${v.channel.name}'s Space`} title={v.channel.name} className="relative mt-0.5 rounded-full ring-2 ring-[#f4ede3] shadow-[0_4px_14px_rgb(0_0_0/0.35)] transition-transform hover:scale-105 sm:ring-clay">
+          <span className="sm:hidden"><Avatar name={v.channel.name} src={v.channel.avatarUrl} size={34} /></span><span className="hidden sm:block"><Avatar name={v.channel.name} src={v.channel.avatarUrl} size={42} /></span>
         </Link>
       </div>
       {talk && (
