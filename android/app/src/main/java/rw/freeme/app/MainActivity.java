@@ -149,7 +149,7 @@ public class MainActivity extends Activity {
         });
 
         // Downloads (the APK itself, a file someone shares) go to the phone's browser, which saves them.
-        web.setDownloadListener((url, userAgent, contentDisposition, mimeType, length) -> outside(Uri.parse(url)));
+        web.setDownloadListener((file, userAgent, contentDisposition, mimeType, length) -> outside(Uri.parse(file)));
 
         root.removeAllViews();
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
