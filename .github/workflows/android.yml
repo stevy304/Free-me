@@ -21,7 +21,7 @@ on:
         required: false
         default: ''
       host:
-        description: 'Site the app opens, without https:// (for example a Codespace: name-3000.app.github.dev). Empty: the FREEME_HOST variable. A build with a host given here is also published.'
+        description: 'Site the app opens (for example name-3000.app.github.dev). Empty: the FREEME_HOST variable, else the app asks for the address when first opened. Builds run by hand are published.'
         required: false
         default: ''
 
@@ -49,8 +49,7 @@ jobs:
           FREEME_HOST=$(printf '%s' "$FREEME_HOST" | sed -E 's#^[a-zA-Z]+://##; s#/.*$##')
           echo "FREEME_HOST=$FREEME_HOST" >> "$GITHUB_ENV"
           if [ -z "$FREEME_HOST" ]; then
-            echo "::warning::The repository variable FREEME_HOST is not set: this APK opens localhost (a test build). Set it to the site's address, for example freeme.rw."
-            echo "FREEME_HOST=localhost" >> "$GITHUB_ENV"
+            echo "::notice::No site address (FREEME_HOST or the run's host): the app asks for the address the first time it opens (testing, such as a Codespace)."
           fi
       - name: Signing key
         env:
@@ -76,20 +75,21 @@ jobs:
         run: |
           # For Administration → Android app → Full screen (Digital Asset Links).
           keytool -printcert -jarfile "$RUNNER_TEMP/free-me-$VERSION.apk" | grep -E "SHA256:" | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "Version $VERSION for https://$FREEME_HOST" >> "$GITHUB_STEP_SUMMARY"
+          echo "Version $VERSION for ${FREEME_HOST:-the address given in the app}" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: free-me-apk
           path: ${{ runner.temp }}/free-me-${{ env.VERSION }}.apk
           if-no-files-found: error
-      - name: Publish (main)
-        # Only a build for the real site: a localhost test build is never offered to people.
-        if: (github.ref == 'refs/heads/main' || inputs.host != '') && env.FREEME_HOST != 'localhost'
+      - name: Publish
+        # Builds started by hand, and main's builds for the real site (FREEME_HOST).
+        if: github.event_name == 'workflow_dispatch' || (github.ref == 'refs/heads/main' && env.FREEME_HOST != '')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp "$RUNNER_TEMP/free-me-$VERSION.apk" "$RUNNER_TEMP/free-me.apk"
-          notes="Free Me for Android, version $VERSION, for https://$FREEME_HOST. Download free-me.apk on an Android phone, open it and tap Install."
+          site=${FREEME_HOST:+"for https://$FREEME_HOST"}; site=${site:-"(asks for the site's address the first time it opens)"}
+          notes="Free Me for Android, version $VERSION, $site. Download free-me.apk on an Android phone, open it and tap Install."
           if ! gh release view android-latest >/dev/null 2>&1; then
             gh release create android-latest --title "Free Me for Android" --notes "$notes" --latest "$RUNNER_TEMP/free-me.apk"
           else

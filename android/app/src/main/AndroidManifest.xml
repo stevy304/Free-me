@@ -15,6 +15,18 @@
 
         <meta-data android:name="asset_statements" android:resource="@string/asset_statements" />
 
+        <!-- The app's icon opens this: straight to the build's site, or (a build without one) asks for the address once. -->
+        <activity
+            android:name=".StartActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.Material.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
             android:exported="true"
@@ -29,10 +41,6 @@
             <!-- Phones without a browser that supports this open Free Me in a built-in web view instead. -->
             <meta-data android:name="android.support.customtabs.trusted.FALLBACK_STRATEGY" android:value="webview" />
 
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
             <!-- Free Me links open in the app. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />

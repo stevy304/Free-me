@@ -11,11 +11,12 @@ plugins {
  * ANDROID_KEY_PASSWORD). Keep that key: every update must be signed with it, or phones refuse to install it over the
  * old app. Without it the build is signed with the debug key (for testing only).
  */
-def host = (project.findProperty('freemeHost') ?: System.getenv('FREEME_HOST') ?: 'localhost').toString().trim()
+// No site (empty): the app asks for the address the first time it opens (testing, such as a GitHub Codespace).
+def host = (project.findProperty('freemeHost') ?: System.getenv('FREEME_HOST') ?: '').toString().trim()
 def appVersionName = (project.findProperty('versionName') ?: '1.0.0').toString()
 def appVersionCode = (project.findProperty('versionCode') ?: '1').toString().toInteger()
 def keystore = System.getenv('ANDROID_KEYSTORE_FILE')
-def assetStatements = '[{ \\"relation\\": [\\"delegate_permission/common.handle_all_urls\\"], \\"target\\": { \\"namespace\\": \\"web\\", \\"site\\": \\"https://' + host + '\\" } }]'
+def assetStatements = host ? '[{ \\"relation\\": [\\"delegate_permission/common.handle_all_urls\\"], \\"target\\": { \\"namespace\\": \\"web\\", \\"site\\": \\"https://' + host + '\\" } }]' : '[]'
 
 android {
     namespace 'rw.freeme.app'
@@ -27,8 +28,8 @@ android {
         targetSdk 35
         versionCode appVersionCode
         versionName appVersionName
-        manifestPlaceholders = [hostName: host]
-        resValue 'string', 'launch_url', "https://${host}/?source=android"
+        manifestPlaceholders = [hostName: host ?: 'freeme.invalid']
+        resValue 'string', 'launch_url', host ? "https://${host}/?source=android" : ''
         resValue 'string', 'asset_statements', assetStatements
     }
 
