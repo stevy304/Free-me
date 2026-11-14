@@ -62,7 +62,7 @@ export default async function Current() {
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
         {s ? (
           <Link href={`/watch?v=${s.id}`} className="facet-lg group relative block min-h-[300px] overflow-hidden bg-surface sm:min-h-[380px]">
-            {s.thumbnailUrl && <img src={s.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.02]" />}
+            {s.thumbnailUrl && <img src={s.thumbnailUrl} srcSet={s.thumbnailSmallUrl ? `${s.thumbnailSmallUrl} 480w, ${s.thumbnailUrl} 1280w` : undefined} sizes="(max-width: 1024px) 100vw, 70vw" alt="" className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.02]" />}
             <div className="absolute inset-0 bg-gradient-to-t from-[rgb(20_17_15/0.9)] via-[rgb(20_17_15/0.35)] to-transparent" />
             <span className="facet-sm absolute left-4 top-4 bg-[rgb(20_17_15/0.82)] px-2.5 py-0.5 text-[12px] font-semibold text-[#f4ede3]">{duration(s.durationSeconds)}</span>
             <div className="absolute inset-x-0 bottom-[10px] p-5 sm:p-7">

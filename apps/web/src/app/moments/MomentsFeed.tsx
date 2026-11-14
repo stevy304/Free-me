@@ -11,7 +11,9 @@ import { Avatar } from '@/components/Avatar';
 import { useShell } from '@/components/shell/ShellContext';
 import { compactNumber, duration, timeAgo, viewsLabel } from '@/lib/format';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
+import { warmUp } from '@/lib/warmup';
 import type { VideoCardData, VideoPage } from '@/lib/types';
+import { hlsSettings, weakConnection } from '@/lib/network';
 
 /** One Moment: plays when it fills the screen, pauses when scrolled away, reports a view after real watching. */
 function Moment({ v, muted, setMuted, active, jump }: { v: VideoCardData; muted: boolean; setMuted: (m: boolean) => void; active: boolean; jump: (id: string) => void }) {
@@ -38,7 +40,7 @@ function Moment({ v, muted, setMuted, active, jump }: { v: VideoCardData; muted:
     if (video.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) { video.src = v.playbackUrl; go(); }
     else import('hls.js').then(({ default: H }) => {
       if (cancelled || !H.isSupported()) return;
-      const h = new H({ capLevelToPlayerSize: true, maxBufferLength: 15 });
+      const h = new H({ capLevelToPlayerSize: true, maxBufferLength: 15, ...hlsSettings('short') });
       hls.current = h; h.loadSource(v.playbackUrl!); h.attachMedia(video); go();
     });
     return () => { cancelled = true; };
@@ -226,6 +228,12 @@ export function MomentsFeed({ first }: { first: VideoPage }) {
     if (!cursor || active < list.length - 3) return;
     fetch(`/api/videos?moments=true&limit=12&cursor=${encodeURIComponent(cursor)}`).then((r) => r.json()).then((d: VideoPage) => { setItems((x) => [...x, ...d.videos]); setCursor(d.nextCursor); }).catch(() => undefined);
   }, [active, cursor, list.length]);
+  // The next two Moments' first seconds load while this one plays, so a swipe starts at once (lib/warmup.ts skips
+  // this on 2G and with "save data"; on a weak connection only the next one, at the lowest quality).
+  useEffect(() => {
+    const next = list.slice(active + 1).filter((x): x is { kind: 'moment'; v: VideoCardData } => x.kind === 'moment').slice(0, weakConnection() ? 1 : 2);
+    for (const x of next) void warmUp(x.v.playbackUrl);
+  }, [active, list]);
   // Another Moment by id (the next episode, one picked from its series): here if it is loaded, else the feed opens at it.
   const jump = (id: string) => {
     const i = list.findIndex((x) => x.kind === 'moment' && x.v.id === id);
@@ -282,7 +290,7 @@ function Episodes({ seriesId, current, onPick, onClose }: { seriesId: string; cu
           <li key={e.id}>
             <button type="button" onClick={() => onPick(e.id)} aria-current={e.id === current ? 'true' : undefined} className={`flex w-full items-center gap-3 rounded-lg p-2 text-left ${e.id === current ? 'bg-white/[0.1]' : 'hover:bg-white/[0.06]'}`}>
               <span className="facet-sm relative block h-[72px] w-[48px] shrink-0 overflow-hidden bg-white/10">
-                {e.thumbnailUrl && <img src={e.thumbnailUrl} alt="" loading="lazy" className="h-full w-full object-cover" />}
+                {e.thumbnailUrl && <img src={e.thumbnailSmallUrl ?? e.thumbnailUrl} alt="" loading="lazy" className="h-full w-full object-cover" />}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[12px] font-bold uppercase tracking-wide text-[#e8b04a]">Episode {e.episode}{e.id === current ? ' · playing' : ''}</span>

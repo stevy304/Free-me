@@ -87,7 +87,7 @@ export function FindPanel({ open, onClose }: { open: boolean; onClose: () => voi
               <h4 className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{t('find.videos')}</h4>
               {res.videos.map((v) => { i++; const on = i === active; return (
                 <Link key={v.id} href={`/watch?v=${v.id}`} onClick={() => go(`/watch?v=${v.id}`, term)} className={row(on)}>
-                  <div className="relative aspect-[16/10] w-24 shrink-0 overflow-hidden rounded-lg bg-surface">{v.thumbnailUrl && <img src={v.thumbnailUrl} alt="" className="h-full w-full object-cover" />}</div>
+                  <div className="relative aspect-[16/10] w-24 shrink-0 overflow-hidden rounded-lg bg-surface">{v.thumbnailUrl && <img src={v.thumbnailSmallUrl ?? v.thumbnailUrl} alt="" className="h-full w-full object-cover" />}</div>
                   <div className="min-w-0"><p className="line-clamp-1 font-semibold">{v.title}</p><p className="text-[13px] text-muted">{v.channel.name} · {duration(v.durationSeconds)}</p></div>
                   {on && <span className="ml-auto shrink-0 text-[12px] text-muted">↵ Watch</span>}
                 </Link>

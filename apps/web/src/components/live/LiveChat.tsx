@@ -8,6 +8,7 @@ import { Avatar } from '@/components/Avatar';
 import { VerifiedBadge } from '@/components/VerifiedBadge';
 import { getSocket, useRealtime } from '@/lib/realtime';
 import { useShell } from '@/components/shell/ShellContext';
+import { hlsSettings } from '@/lib/network';
 
 export interface ChatLine { id: string; text: string; at: string; author: { name: string; handle: string | null; avatarUrl: string | null; verified: boolean; host: boolean } }
 
@@ -87,7 +88,7 @@ export function LiveVideo({ src, muted = false, className = '' }: { src: string;
     } else import('hls.js').then(({ default: H }) => {
       if (off) return;
       if (!H.isSupported()) { setErr('This browser cannot play live video.'); return; }
-      const x = new H({ liveSyncDurationCount: 3, lowLatencyMode: false, maxBufferLength: 20, startLevel: -1 });
+      const x = new H({ liveSyncDurationCount: 3, lowLatencyMode: false, maxBufferLength: 20, startLevel: -1, ...hlsSettings('live') });
       player.current = x;
       x.on(H.Events.MANIFEST_PARSED, (_, data) => {
         attempts = 0; setErr(null);

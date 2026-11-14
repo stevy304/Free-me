@@ -123,6 +123,9 @@ export class HubController {
       const key = v.thumbnailCandidates[body.thumbnail];
       if (!key) throw new BadRequestException('That thumbnail is not available yet.');
       data.thumbnailKey = key; data.customThumbnail = false;
+      // Its small copy, when processing made one (videos processed before small copies existed have none).
+      const small = key.replace(/\.jpg$/, '-s.jpg');
+      data.thumbnailSmallKey = small !== key && (await this.storage.head(mediaPrefix(v.id, v.mediaLocation) + small).catch(() => null)) ? small : null;
     }
     if (v.isAd && body.visibility === 'PUBLIC') throw new BadRequestException('An ad stays out of feeds: it plays only before videos.');
     if (body.visibility !== undefined && body.visibility !== v.visibility) {
@@ -194,7 +197,7 @@ export class HubController {
     for (let attempt = 0; ; attempt++) {
       const cur = await this.mine(auth, id);
       await this.storage.putBuffer(mediaPrefix(id, cur.mediaLocation) + rel, buf, { contentType: kind[0], cacheControl: 'public, max-age=31536000, immutable' });
-      const r = await this.prisma.video.updateMany({ where: { id, mediaLocation: cur.mediaLocation }, data: { thumbnailKey: rel, customThumbnail: true } });
+      const r = await this.prisma.video.updateMany({ where: { id, mediaLocation: cur.mediaLocation }, data: { thumbnailKey: rel, thumbnailSmallKey: null, customThumbnail: true } });
       if (r.count) break;
       if (attempt >= 2) throw new ConflictException('The video is being moved. Try again in a moment.');
     }

@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { extname, join, relative, sep } from 'node:path';
 import type { AppConfig } from '../config/config';
-import { AUDIO, HD_RUNGS, codecsFor, isHighRung, masterPlaylist, planLadder, type MasterEntry, type PlannedRung } from './ladder';
+import { AUDIO, AUDIO_LOW, HD_RUNGS, codecsFor, isHighRung, masterPlaylist, planLadder, type MasterEntry, type PlannedRung } from './ladder';
 import { BT709_H264, BT709_TAGS, ffmpegFilters, loudnessFilter, measureLoudness, toneMap, type Hdr, type Loudness } from './filters';
 import { AudioOnly, MediaError, keyframeGap, probe, run, type ProbeResult } from './probe';
 import { mediaPrefix, wantedLocation } from './keys';
@@ -323,10 +323,12 @@ export class VideoProcessor {
    */
   private async writeMasters(prefix: string, done: MasterEntry[], hasAudio: boolean): Promise<boolean> {
     const cap = this.config.media.freeMaxShort;
+    // Videos processed before the lighter audio existed have none: their smallest rungs keep the full audio.
+    const lowAudio = hasAudio && !!(await this.storage.head(`${prefix}hls/${AUDIO_LOW.playlist}`).catch(() => null));
     const free = cap ? done.filter((e) => Math.min(e.width, e.height) <= cap) : done;
     const limited = free.length > 0 && free.length < done.length;
-    await this.storage.putBuffer(`${prefix}hls/master.m3u8`, Buffer.from(masterPlaylist(limited ? free : done, hasAudio)), { contentType: TYPES['.m3u8'], cacheControl: SHORT });
-    if (limited) await this.storage.putBuffer(`${prefix}${FULL_MASTER}`, Buffer.from(masterPlaylist(done, hasAudio)), { contentType: TYPES['.m3u8'], cacheControl: SHORT });
+    await this.storage.putBuffer(`${prefix}hls/master.m3u8`, Buffer.from(masterPlaylist(limited ? free : done, hasAudio, lowAudio)), { contentType: TYPES['.m3u8'], cacheControl: SHORT });
+    if (limited) await this.storage.putBuffer(`${prefix}${FULL_MASTER}`, Buffer.from(masterPlaylist(done, hasAudio, lowAudio)), { contentType: TYPES['.m3u8'], cacheControl: SHORT });
     return limited;
   }
 
@@ -361,6 +363,10 @@ export class VideoProcessor {
       try {
         await run(this.config.media.ffmpegPath, ['-hide_banner', '-y', '-ss', (info.durationSeconds * at).toFixed(2), '-i', source, '-frames:v', '1', '-vf', `${scale},format=yuvj420p`, '-q:v', '3', out], undefined, signal);
         files.push(out);
+        // A small copy (480 px on the long side, about a tenth of the bytes) for lists and weak connections.
+        const small = join(dir, `${i + 1}-s.jpg`);
+        const fit = info.height > info.width ? 'scale=-2:480' : 'scale=480:-2';
+        await run(this.config.media.ffmpegPath, ['-hide_banner', '-y', '-i', out, '-vf', fit, '-q:v', '7', small], undefined, signal).then(() => files.push(small), () => undefined);
       } catch { /* a frame that cannot be read near the end is skipped */ }
     }
     return files;
@@ -505,6 +511,10 @@ export class VideoProcessor {
       const dir = join(work, 'out', 'hls', 'audio');
       await mkdir(dir, { recursive: true });
       args.push('-map', '0:a:0', '-af', loudnessFilter(audio.loudness), '-c:a', 'aac', '-b:a', `${AUDIO.kbps}k`, '-ac', '2', '-ar', '48000', ...hlsArgs(dir));
+      // The lighter audio for the smallest rungs (weak connections), from the same decode.
+      const low = join(work, 'out', 'hls', 'audio-low');
+      await mkdir(low, { recursive: true });
+      args.push('-map', '0:a:0', '-af', loudnessFilter(audio.loudness), '-c:a', 'aac', '-b:a', `${AUDIO_LOW.kbps}k`, '-ac', '2', '-ar', '48000', ...hlsArgs(low));
     }
     let last = 0;
     await run(this.config.media.ffmpegPath, args, (chunk) => {
@@ -629,7 +639,7 @@ export class VideoProcessor {
     if (moveFrom) await this.storage.copyPrefix(moveFrom, prefix);
     const out = join(work, 'out');
     // The shared audio is encoded with the first pass and uploaded with it.
-    const audioFiles = thumbs && info.hasAudio ? await walk(join(out, 'hls', 'audio')) : [];
+    const audioFiles = thumbs && info.hasAudio ? [...await walk(join(out, 'hls', 'audio')), ...await walk(join(out, 'hls', 'audio-low')).catch(() => [])] : [];
     const files = [...(await Promise.all(rungs.map((r) => walk(join(out, 'hls', r.name))))).flat(), ...audioFiles, ...(thumbs ?? [])];
     let i = 0;
     await Promise.all(Array.from({ length: 16 }, async () => {
@@ -656,13 +666,15 @@ export class VideoProcessor {
       done.push({ name: r.name, width: r.width, height: r.height, bandwidth, averageBandwidth: measured ? measured.averageKbps * 1000 : undefined, codecs, frameRate: data.frameRate, playlist: `${r.name}/index.m3u8`, codec: 'h264' });
     }
     const limited = await this.writeMasters(prefix, done, info.hasAudio);
-    const thumbKeys = thumbs?.map((t) => `thumbs/${relative(join(out, 'thumbs'), t)}`);
+    const allThumbs = thumbs?.map((t) => `thumbs/${relative(join(out, 'thumbs'), t)}`);
+    const thumbKeys = allThumbs?.filter((k) => !k.endsWith('-s.jpg'));
+    const smallOf = (k: string) => { const s = k.replace(/\.jpg$/, '-s.jpg'); return allThumbs?.includes(s) ? s : null; };
     // Read again now: uploading takes a while, and in the meantime moderators may have removed the video
     // or the creator may have chosen a thumbnail, which the default frame must not replace.
     const now = await this.prisma.video.findUnique({ where: { id: videoId }, select: { takenDownAt: true, thumbnailKey: true } });
     await this.prisma.video.update({ where: { id: videoId }, data: {
       status: now?.takenDownAt ? 'SUSPENDED' : 'READY', mediaLocation: location, hlsMasterKey: 'hls/master.m3u8', hlsFullMasterKey: limited ? FULL_MASTER : null, processingProgress: progress, processingStage: stage, processingError: null,
-      ...(thumbKeys?.length ? { thumbnailCandidates: thumbKeys, ...(now?.thumbnailKey ? {} : { thumbnailKey: thumbKeys[Math.min(1, thumbKeys.length - 1)] }) } : {}),
+      ...(thumbKeys?.length ? { thumbnailCandidates: thumbKeys, ...(now?.thumbnailKey ? {} : { thumbnailKey: thumbKeys[Math.min(1, thumbKeys.length - 1)], thumbnailSmallKey: smallOf(thumbKeys[Math.min(1, thumbKeys.length - 1)]) }) } : {}),
     } });
     const playable = now?.takenDownAt ? null : performance.now();
     await feedsChanged();

@@ -19,11 +19,13 @@ function ProgressRing({ progress }: { progress: number }) {
 }
 
 /** Media frame: 16:10, Free Me's cut corners (the facet), duration pill at the top left, optional progress ring and title inside. */
-export function Thumbnail({ v, className = '', progress, title = false, rounded = 'facet' }: { v: VideoCardData; className?: string; progress?: number; title?: boolean; rounded?: string }) {
+export function Thumbnail({ v, className = '', progress, title = false, rounded = 'facet', sizes = '(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 25vw' }: { v: VideoCardData; className?: string; progress?: number; title?: boolean; rounded?: string; sizes?: string }) {
   return (
     <div className={`relative aspect-[16/10] overflow-hidden bg-surface ${rounded} ${className}`}>
       {v.thumbnailUrl
-        ? <img src={v.thumbnailUrl} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+        // The 480 px copy where it is enough (small cards, phones at normal density, a browser saving data); the full one
+        // otherwise. The browser chooses from the sizes the card is shown at.
+        ? <img src={v.thumbnailSmallUrl ?? v.thumbnailUrl} srcSet={v.thumbnailSmallUrl ? `${v.thumbnailSmallUrl} 480w, ${v.thumbnailUrl} 1280w` : undefined} sizes={v.thumbnailSmallUrl ? sizes : undefined} alt="" loading="lazy" decoding="async" fetchPriority="low" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
         : <div className="grid h-full w-full place-items-center text-faint"><Icon.Videos size={36} strokeWidth={1.2} /></div>}
       {v.preview && <HoverPreview preview={v.preview} />}
       {v.durationSeconds > 0 && <span className="facet-sm absolute left-2.5 top-2.5 bg-[rgb(20_17_15/0.82)] px-2 py-0.5 text-[12px] font-semibold text-[#f4ede3] backdrop-blur">{duration(v.durationSeconds)}</span>}
@@ -61,7 +63,7 @@ export function VideoRow({ v, locale, large = false, progress, actions }: { v: V
   return (
     <article className="group flex gap-4">
       <Link href={`/watch?v=${v.id}`} className={large ? 'w-[42%] max-w-[340px] shrink-0' : 'w-[168px] shrink-0'} aria-label={v.title}>
-        <Thumbnail v={v} progress={progress} rounded={large ? 'facet' : 'facet-sm'} />
+        <Thumbnail v={v} progress={progress} rounded={large ? 'facet' : 'facet-sm'} sizes={large ? '(max-width: 640px) 42vw, 340px' : '168px'} />
       </Link>
       <div className="min-w-0 flex-1 py-0.5">
         <Link href={`/watch?v=${v.id}`}><h3 className={`line-clamp-2 font-display font-bold ${large ? 'text-[18px] leading-[24px]' : 'text-[14px] leading-5'}`}>{v.title}</h3></Link>
@@ -79,7 +81,7 @@ export function VideoRow({ v, locale, large = false, progress, actions }: { v: V
 export function MomentCard({ v, index = 0 }: { v: VideoCardData; index?: number }) {
   return (
     <Link href={`/moments#${v.id}`} className={`group relative block aspect-[3/5] w-[150px] shrink-0 overflow-hidden bg-surface facet transition-transform duration-200 hover:rotate-0 hover:scale-[1.03] sm:w-[170px] ${index % 2 ? 'translate-y-2 rotate-[1.5deg]' : '-rotate-[1.5deg]'}`}>
-      {v.thumbnailUrl && <img src={v.thumbnailUrl} alt="" loading="lazy" className="h-full w-full object-cover" />}
+      {v.thumbnailUrl && <img src={v.thumbnailSmallUrl ?? v.thumbnailUrl} alt="" loading="lazy" decoding="async" fetchPriority="low" className="h-full w-full object-cover" />}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[rgb(20_17_15/0.85)] to-transparent px-3 pb-3 pt-10">
         <p className="line-clamp-2 text-[13px] font-semibold leading-tight text-white">{v.title}</p>
       </div>

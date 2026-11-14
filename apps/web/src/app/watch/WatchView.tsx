@@ -162,7 +162,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
   // An early connection to the CDN (DNS, TLS) before the player asks for the first segment.
   const cdn = mediaOrigin(v.playbackUrl);
   const player = v.playbackUrl
-    ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} storyboard={v.storyboardUrl} captions={v.captions ?? []} markers={moments} withAds onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
+    ? <VideoPlayer key={v.id} src={v.playbackUrl} poster={v.thumbnailUrl} posterSmall={v.thumbnailSmallUrl} videoId={v.id} durationHint={v.durationSeconds} theater={theater} onTheater={toggleTheater} startAt={initialViewer.resumeAt} storyboard={v.storyboardUrl} captions={v.captions ?? []} markers={moments} withAds onProgress={progress} onEnded={ended} onPlayingChange={(p) => { setPlaying(p); if (p) setCountdown(null); }} />
     : <div className="grid aspect-video w-full place-items-center rounded-2xl bg-[#14110f] text-center text-[15px] text-[#b0a397]"><div><Icon.Spinner className="mx-auto mb-3 animate-spin" />{v.takenDownAt ? t('watch.removed') : v.processingStage ?? t('watch.processing')}</div></div>;
 
   const pill = 'flex h-11 shrink-0 items-center gap-2 rounded-full border border-[#22ada2]/70 px-5 text-[14px] font-semibold text-white shadow-[0_0_14px_rgb(34_173_162/0.16)] transition-colors hover:bg-[#22ada2]/12';
@@ -208,7 +208,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
                     <p className="text-[13px] font-semibold text-[#e8b04a]" aria-live="polite">Next in {countdown} s</p>
                     <Link href={`/watch?v=${next.id}`} className="mt-2 flex items-center gap-3">
                       <span className="relative block w-[42%] shrink-0 overflow-hidden rounded-xl">
-                        {next.thumbnailUrl ? <img src={next.thumbnailUrl} alt="" className="aspect-video w-full object-cover" /> : <span className="block aspect-video w-full bg-white/10" />}
+                        {next.thumbnailUrl ? <img src={next.thumbnailSmallUrl ?? next.thumbnailUrl} alt="" className="aspect-video w-full object-cover" /> : <span className="block aspect-video w-full bg-white/10" />}
                         <svg viewBox="0 0 36 36" className="absolute right-1.5 top-1.5 h-7 w-7 -rotate-90" aria-hidden><circle cx="18" cy="18" r="15" fill="rgb(0 0 0/0.5)" stroke="rgb(255 255 255/0.25)" strokeWidth="3" /><circle cx="18" cy="18" r="15" fill="none" stroke="#e8b04a" strokeWidth="3" strokeDasharray="94.2" strokeDashoffset={94.2 * (countdown / 8)} className="transition-[stroke-dashoffset] duration-1000 ease-linear" /></svg>
                       </span>
                       <span className="min-w-0"><span className="line-clamp-2 text-[15px] font-bold leading-tight sm:text-[17px]">{next.title}</span><span className="mt-1 block truncate text-[12px] text-[#b0a397]">{next.channel.name}</span></span>
@@ -275,7 +275,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
                   {more.slice(0, 10).map((x, i) => (
                     <Link key={x.id} href={`/watch?v=${x.id}`} className="group flex gap-3 rounded-lg p-2 hover:bg-white/[0.06]">
                       <span className="facet-sm relative block w-[148px] shrink-0 overflow-hidden">
-                        {x.thumbnailUrl ? <img src={x.thumbnailUrl} alt="" loading="lazy" className="aspect-video w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]" /> : <span className="block aspect-video w-full bg-white/10" />}
+                        {x.thumbnailUrl ? <img src={x.thumbnailSmallUrl ?? x.thumbnailUrl} alt="" loading="lazy" fetchPriority="low" className="aspect-video w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]" /> : <span className="block aspect-video w-full bg-white/10" />}
                         {x.durationSeconds ? <span className="absolute bottom-1.5 right-1.5 bg-[rgb(20_17_15/0.85)] px-1.5 text-[11px] font-bold text-[#f4ede3]">{duration(x.durationSeconds)}</span> : null}
                         {i === 0 && flow && <span className="absolute left-1 top-1 bg-[#e8b04a] px-1.5 text-[10px] font-bold uppercase tracking-wide text-[#2a1a00]">{t('watch.upFirst')}</span>}
                       </span>
@@ -353,7 +353,7 @@ export function WatchView({ v, more, viewer: initialViewer }: { v: WatchVideo; m
               {more.map((x, i) => (
                 <Link key={x.id} href={`/watch?v=${x.id}`} className="flex gap-3">
                   <span className="relative block w-[44%] max-w-[180px] shrink-0 overflow-hidden rounded-xl shadow-[0_0_0_1px_rgb(34_173_162/0.35)]">
-                    {x.thumbnailUrl ? <img src={x.thumbnailUrl} alt="" loading="lazy" className="aspect-video w-full object-cover" /> : <span className="block aspect-video w-full bg-white/10" />}
+                    {x.thumbnailUrl ? <img src={x.thumbnailSmallUrl ?? x.thumbnailUrl} alt="" loading="lazy" decoding="async" fetchPriority="low" className="aspect-video w-full object-cover" /> : <span className="block aspect-video w-full bg-white/10" />}
                     {x.durationSeconds ? <span className="absolute bottom-1.5 right-1.5 bg-[rgb(20_17_15/0.85)] px-1.5 text-[11px] font-bold text-[#f4ede3]">{duration(x.durationSeconds)}</span> : null}
                     {i === 0 && flow && <span className="absolute left-1.5 top-1.5 rounded-md bg-[#e8b04a] px-1.5 text-[10px] font-bold uppercase tracking-wide text-[#2a1a00]">{t('watch.upFirst')}</span>}
                   </span>

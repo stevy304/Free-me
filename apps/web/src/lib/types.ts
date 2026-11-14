@@ -25,7 +25,7 @@ export interface Payment {
   reference?: string | null; payerReference?: string | null;
 }
 export interface VideoCardData {
-  id: string; title: string; thumbnailUrl: string | null; durationSeconds: number; isShort: boolean; viewCount: string; publishedAt: string | null;
+  id: string; title: string; thumbnailUrl: string | null; /** 480 px copy for lists and weak connections */ thumbnailSmallUrl?: string | null; durationSeconds: number; isShort: boolean; viewCount: string; publishedAt: string | null;
   playbackUrl?: string | null; width?: number | null; height?: number | null;
   /** Seek-bar sprite sheet, for the hover preview on cards. */
   preview?: { url: string; count: number; cols: number; width: number; height: number } | null;

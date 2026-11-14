@@ -58,7 +58,7 @@ export class PlaybackController {
   }
 
   private async playlist(id: string, path: string, auth: AuthContext | null, res: Response) {
-    if (!/^(master(-full)?\.m3u8|((av1-)?\d{3,4}p|audio)\/index\.m3u8)$/.test(path)) throw new NotFoundException();
+    if (!/^(master(-full)?\.m3u8|((av1-)?\d{3,4}p|audio(-low)?)\/index\.m3u8)$/.test(path)) throw new NotFoundException();
     const v = await this.viewable(id, auth);
     // Every quality is for Premium members and the owner; everyone else gets the limited master playlist.
     if (path === 'master-full.m3u8' && v.channel.userId !== auth?.user.id && !(auth && await hasPlus(this.prisma, auth.user))) throw new NotFoundException();
