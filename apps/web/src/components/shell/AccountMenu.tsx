@@ -79,6 +79,7 @@ export function AccountMenu({ viewer }: { viewer: Viewer }) {
                     <img src="/free-me.svg" alt="" width={20} height={20} /><span className="flex-1">{t('account.install')}</span>
                   </button>
                 )}
+                <Link role="menuitem" href="/app" onClick={close} className={item}><Icon.Download size={20} /><span className="flex-1">{t('account.getApp')}</span></Link>
                 <Link role="menuitem" href="/settings" onClick={close} className={item}><Icon.Settings size={20} />{t('account.settings')}</Link>
                 <button role="menuitem" type="button" onClick={signOut} className={item}><Icon.SignOut size={20} />{t('account.signOut')}</button>
               </div>

@@ -171,6 +171,7 @@ export const Copy = icon('Copy', () => (<><rect x="8.5" y="8.5" width="11" heigh
 export const Camera = icon('Camera', (f) => (<><rect x="3" y="6.5" width="13" height="11" rx="2.5" fill={F(f)} /><path d="m16 10.5 5-3v9l-5-3" /></>));
 export const ScreenShare = icon('ScreenShare', () => (<><rect x="3" y="4.5" width="18" height="12" rx="2" /><path d="M9 20h6M12 16.5V20M12 13.5V8M9.5 10.3 12 7.8l2.5 2.5" /></>));
 export const Upload = icon('Upload', () => (<><path d="M12 15.5V4.5M7.5 9 12 4.5 16.5 9" /><path d="M4.5 14.5v3.5A2 2 0 0 0 6.5 20h11a2 2 0 0 0 2-2v-3.5" /></>));
+export const Download = icon('Download', () => (<><path d="M12 4.5v11M7.5 11 12 15.5 16.5 11" /><path d="M4.5 14.5v3.5A2 2 0 0 0 6.5 20h11a2 2 0 0 0 2-2v-3.5" /></>));
 export const Share = icon('Share', () => (<><path d="M14 4.5 20 10l-6 5.5v-3.2c-4.4 0-7.4 1.4-9.5 4.7.6-5 3.4-8.7 9.5-9.4z" /></>));
 export const Link = icon('Link', () => (<><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>));
 export const ExternalLink = icon('ExternalLink', () => (<><path d="M13.5 4.5h6v6M19.5 4.5l-8 8" /><path d="M17 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h4" /></>));

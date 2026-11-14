@@ -43,6 +43,7 @@ export const en = {
   'account.moderation': 'Moderation',
   'account.administration': 'Administration',
   'account.install': 'Install the app',
+  'account.getApp': 'Get the app (Android APK)',
   'account.settings': 'Settings',
   'account.signOut': 'Sign out',
   'account.appearance': 'Appearance',

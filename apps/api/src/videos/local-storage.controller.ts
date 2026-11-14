@@ -6,7 +6,7 @@ import { APP_CONFIG, type AppConfig } from '../config/config';
 import { STORAGE } from '../media/queue';
 import { LocalStorage, type Storage } from '../media/storage';
 
-const TYPES: Record<string, string> = { '.ts': 'video/mp2t', '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
+const TYPES: Record<string, string> = { '.ts': 'video/mp2t', '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.apk': 'application/vnd.android.package-archive' };
 
 /**
  * Development stand-in for object storage and the CDN (STORAGE_DRIVER=local only): receives upload parts at their
@@ -56,11 +56,12 @@ export class LocalStorageController {
     this.send(res, p.k, 'private, max-age=3600');
   }
 
-  /** Stand-in CDN for the pub/ prefix: videos, live streams, and profile and Space pictures. */
+  /** Stand-in CDN for the pub/ prefix: videos, live streams, profile and Space pictures, and the Android app. */
   @Get('pub/*key')
   pub(@Param('key') key: string | string[], @Res() res: Response) {
     const rel = Array.isArray(key) ? key.join('/') : key;
-    if (!/^((live|profiles|channels)\/)?[0-9a-f-]{36}\/[\w./-]+$/.test(rel) || rel.includes('..')) throw new NotFoundException();
+    const ok = /^((live|profiles|channels)\/)?[0-9a-f-]{36}\/[\w./-]+$/.test(rel) || /^app\/android\/free-me-[\d.]+-\d+\.apk$/.test(rel);
+    if (!ok || rel.includes('..')) throw new NotFoundException();
     // A live playlist changes every two seconds.
     this.send(res, `pub/${rel}`, rel.endsWith('.m3u8') ? (rel.startsWith('live/') ? 'no-cache, max-age=1' : 'public, max-age=30') : 'public, max-age=31536000, immutable');
   }

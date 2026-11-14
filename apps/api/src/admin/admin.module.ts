@@ -3,6 +3,7 @@ import { SecretsController } from './secrets.controller';
 import { AuthModule } from '../auth/auth.module';
 import { AdminController } from './admin.controller';
 import { SystemController } from './system.controller';
+import { AndroidAppController } from './android-app.controller';
 
-@Module({ imports: [AuthModule], controllers: [AdminController, SystemController, SecretsController] })
+@Module({ imports: [AuthModule], controllers: [AdminController, SystemController, SecretsController, AndroidAppController] })
 export class AdminModule {}

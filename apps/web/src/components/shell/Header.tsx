@@ -40,14 +40,18 @@ export function Header() {
       // Some keydown events (e.g. Chrome autofill) carry no key at all.
       if ((e.key ?? '').toLowerCase() === 'k' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); setFind(true); }
     };
+    // Pages without the bar (Moments on phones) open Find with their own button.
+    const onFind = () => setFind(true);
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('fm:find', onFind);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('fm:find', onFind); };
   }, []);
   useEffect(() => { setFind(false); }, [path]);
 
   return (
     <header className={`top-0 z-40 border-b border-transparent bg-bg/85 backdrop-blur-md supports-[backdrop-filter]:bg-bg/75 ${path === '/watch' ? 'relative sm:sticky' : 'sticky'}`}>
-      <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-3 px-4 sm:px-6">
+      {/* Moments on phones: no bar, the video takes the screen; the feed shows "Moments" and a search button instead. */}
+      <div className={`mx-auto flex h-16 max-w-[1600px] items-center gap-3 px-4 sm:px-6 ${path === '/moments' ? 'max-md:hidden' : ''}`}>
         <Logo />
         <nav aria-label={t('nav.main')} className="facet-sm mx-auto hidden gap-0.5 bg-surface p-1 md:flex">
           {TABS.map((tab) => {

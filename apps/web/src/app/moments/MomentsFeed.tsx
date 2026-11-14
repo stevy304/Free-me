@@ -91,7 +91,7 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
       <div className="relative h-full w-full overflow-hidden bg-black sm:aspect-[9/16] sm:w-auto sm:max-h-[calc(100dvh-6.5rem)] sm:facet-lg">
         <video ref={el} loop playsInline poster={v.thumbnailUrl ?? undefined} className="h-full w-full object-cover"
           onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} onPlay={() => setPaused(false)} onPause={() => { setPaused(true); void counts.current?.flush(); }} onTimeUpdate={onTime} />
-        <div className="absolute inset-x-0 top-0 flex justify-between p-3">
+        <div className="absolute inset-x-0 top-[calc(3.25rem+env(safe-area-inset-top))] flex justify-between p-3 md:top-0">
           <button type="button" onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} aria-label={paused ? 'Play' : 'Pause'} className="facet-sm grid h-9 w-9 place-items-center bg-[rgb(20_17_15/0.55)] text-white backdrop-blur">{paused ? <Icon.Play size={20} /> : <Icon.Pause size={20} />}</button>
           <button type="button" onClick={() => setMuted(!muted)} aria-label={muted ? 'Unmute' : 'Mute'} className="facet-sm grid h-9 w-9 place-items-center bg-[rgb(20_17_15/0.55)] text-white backdrop-blur">{muted ? <Icon.VolumeOff size={20} /> : <Icon.VolumeHigh size={20} />}</button>
         </div>
@@ -148,6 +148,7 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
 const AD_EVERY = 6;
 
 export function MomentsFeed({ first }: { first: VideoPage }) {
+  const { t } = useShell();
   const [items, setItems] = useState(first.videos);
   const [cursor, setCursor] = useState(first.nextCursor);
   const [active, setActive] = useState(0);
@@ -198,14 +199,19 @@ export function MomentsFeed({ first }: { first: VideoPage }) {
 
   return (
     <div className="relative">
-      <div ref={box} className="no-scrollbar mx-auto h-[calc(100dvh-4rem-6.5rem)] snap-y snap-mandatory overflow-y-auto md:h-[calc(100dvh-4rem-2.5rem)]">
+      <div ref={box} className="no-scrollbar mx-auto h-[calc(100dvh-6.5rem)] snap-y snap-mandatory overflow-y-auto md:h-[calc(100dvh-4rem-2.5rem)]">
         {list.map((x, i) => x.kind === 'moment'
           ? <div key={x.v.id} data-index={i} className="h-full"><Moment v={x.v} muted={muted} setMuted={setMuted} active={i === active} /></div>
           : <div key={`ad-${x.slot}`} data-index={i} className="h-full"><MomentAd ad={x.ad} after={x.after} muted={muted} setMuted={setMuted} active={i === active} /></div>)}
       </div>
+      {/* Phones: no app bar here, only the page's name and search, over the video. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/45 to-transparent px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] text-white md:hidden">
+        <h1 className="font-display text-[22px] font-extrabold [text-shadow:0_1px_6px_rgb(0_0_0/0.5)]">{t('nav.moments')}</h1>
+        <button type="button" onClick={() => window.dispatchEvent(new Event('fm:find'))} aria-label={t('header.find')} className="pointer-events-auto grid h-10 w-10 place-items-center rounded-full hover:bg-white/15"><Icon.Search size={24} /></button>
+      </div>
       <div className="absolute right-6 top-1/2 hidden -translate-y-1/2 flex-col gap-3 lg:flex">
-        <button type="button" onClick={() => go(-1)} disabled={active === 0} aria-label="Previous Moment" className="grid h-12 w-12 place-items-center rounded-2xl bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronUp size={24} /></button>
-        <button type="button" onClick={() => go(1)} disabled={active >= list.length - 1} aria-label="Next Moment" className="grid h-12 w-12 place-items-center rounded-2xl bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronDown size={24} /></button>
+        <button type="button" onClick={() => go(-1)} disabled={active === 0} aria-label="Previous Moment" className="facet-sm grid h-12 w-12 place-items-center bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronUp size={24} /></button>
+        <button type="button" onClick={() => go(1)} disabled={active >= list.length - 1} aria-label="Next Moment" className="facet-sm grid h-12 w-12 place-items-center bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronDown size={24} /></button>
       </div>
     </div>
   );

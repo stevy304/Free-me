@@ -43,6 +43,7 @@ export const rw: Partial<Record<Key, string>> = {
   'account.moderation': 'Igenzura',
   'account.administration': 'Ubuyobozi',
   'account.install': 'Shyira porogaramu kuri telefoni',
+  'account.getApp': 'Kuramo porogaramu (Android)',
   'account.settings': 'Igenamiterere',
   'account.signOut': 'Sohoka',
   'account.appearance': 'Imigaragarire',

@@ -15,6 +15,7 @@ export default async function You() {
         <h1 className="text-xl font-semibold">Enjoy your favourite videos</h1>
         <p className="mt-2 text-[15px] text-muted">Sign in to tune in to creators, keep videos for later and use your settings on every device.</p>
         <Link href="/login?returnTo=/you" className="mt-6 inline-flex h-10 items-center rounded-xl bg-brand px-5 text-[14px] font-semibold text-on-brand">Sign in</Link>
+        <Link href="/app" className="mt-3 flex items-center justify-center gap-2 text-[14px] font-semibold text-brand hover:underline"><Icon.Download size={18} />Get the app (Android and iPhone)</Link>
       </div>
     );
   }
@@ -33,11 +34,12 @@ export default async function You() {
         {viewer.channel && <Link href="/hub" className={row}><Icon.Hub size={22} /><span className="flex-1">Creator Hub</span><Icon.ChevronRight size={18} /></Link>}
         <Link href="/trail" className={row}><Icon.Trail size={22} /><span className="flex-1">Trail</span><Icon.ChevronRight size={18} /></Link>
         <Link href="/collections" className={row}><Icon.Collections size={22} /><span className="flex-1">Collections</span><Icon.ChevronRight size={18} /></Link>
-        <Link href="/collection/saved" className={row}><Icon.Bookmark size={22} /><span className="flex-1">Kept</span><Icon.ChevronRight size={18} /></Link>
+        <Link href="/collection/saved" className={row}><Icon.Bookmark size={22} /><span className="flex-1">Saved</span><Icon.ChevronRight size={18} /></Link>
         <Link href="/you/reports" className={row}><Icon.Flag size={22} /><span className="flex-1">Your reports</span><Icon.ChevronRight size={18} /></Link>
         <Link href="/settings" className={row}><Icon.Settings size={22} strokeWidth={1.6} /><span className="flex-1">Settings</span><Icon.ChevronRight size={18} /></Link>
         {viewer.user.roles.some((r) => r === 'ADMIN' || r === 'MODERATOR') && <Link href="/moderation" className={row}><Icon.Flag size={22} /><span className="flex-1">Moderation</span><Icon.ChevronRight size={18} /></Link>}
         {viewer.user.roles.includes('ADMIN') && <Link href="/admin" className={row}><Icon.Shield size={22} strokeWidth={1.6} /><span className="flex-1">Administration</span><Icon.ChevronRight size={18} /></Link>}
+        <Link href="/app" className={row}><Icon.Download size={22} /><span className="flex-1">Get the app<span className="block text-[13px] font-normal text-muted">Android app (APK) and iPhone</span></span><Icon.ChevronRight size={18} /></Link>
         <SignOutButton className={`${row} w-full text-left`} />
       </nav>
       <nav aria-label="Legal" className="mt-6 flex flex-wrap gap-x-4 gap-y-1 border-t border-line px-3 pt-4 text-[13px] text-muted">

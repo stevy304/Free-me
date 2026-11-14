@@ -1,0 +1,61 @@
+plugins {
+    id 'com.android.application'
+}
+
+/*
+ * Free Me for Android (ANDROID.md): a Trusted Web Activity that opens the Free Me site full screen from its own icon.
+ *
+ *   ./gradlew assembleRelease -PfreemeHost=freeme.rw -PversionName=1.0.0 -PversionCode=1
+ *
+ * Signing: the keystore in ANDROID_KEYSTORE_FILE (with ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and
+ * ANDROID_KEY_PASSWORD). Keep that key: every update must be signed with it, or phones refuse to install it over the
+ * old app. Without it the build is signed with the debug key (for testing only).
+ */
+def host = (project.findProperty('freemeHost') ?: System.getenv('FREEME_HOST') ?: 'localhost').toString().trim()
+def appVersionName = (project.findProperty('versionName') ?: '1.0.0').toString()
+def appVersionCode = (project.findProperty('versionCode') ?: '1').toString().toInteger()
+def keystore = System.getenv('ANDROID_KEYSTORE_FILE')
+def assetStatements = '[{ \\"relation\\": [\\"delegate_permission/common.handle_all_urls\\"], \\"target\\": { \\"namespace\\": \\"web\\", \\"site\\": \\"https://' + host + '\\" } }]'
+
+android {
+    namespace 'rw.freeme.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'rw.freeme.app'
+        minSdk 21
+        targetSdk 35
+        versionCode appVersionCode
+        versionName appVersionName
+        manifestPlaceholders = [hostName: host]
+        resValue 'string', 'launch_url', "https://${host}/?source=android"
+        resValue 'string', 'asset_statements', assetStatements
+    }
+
+    signingConfigs {
+        if (keystore) {
+            release {
+                storeFile file(keystore)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig keystore ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}

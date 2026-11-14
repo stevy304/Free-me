@@ -39,6 +39,7 @@ export const fr: Partial<Record<Key, string>> = {
   'account.moderation': 'Modération',
   'account.administration': 'Administration',
   'account.install': 'Installer l’application',
+  'account.getApp': 'Télécharger l’application (Android)',
   'account.settings': 'Paramètres',
   'account.signOut': 'Se déconnecter',
   'account.appearance': 'Apparence',
