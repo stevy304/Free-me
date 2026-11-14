@@ -14,7 +14,11 @@ iPhones cannot install APK files: they add Free Me to the home screen from Safar
    - by hand: Actions → Android app → Run workflow, with a version such as 1.0.0.
 
    Download its result **free-me-apk** (a zip holding `free-me-<version>.apk`).
-2. **Publish it.** Administration → **Android app**: choose the APK, type its version, Upload.
+2. **Publish it.** Automatic: on `main` (with `FREEME_HOST` set) the workflow publishes the APK as the GitHub
+   release **android-latest** (`…/releases/download/android-latest/free-me.apk`), and Free Me's Download button
+   offers it (the API checks it exists, every 10 minutes). To offer a different APK instead, upload it in
+   Administration → **Android app** (an upload always wins). `ANDROID_APK_URL` on the API points the button at
+   another address, or `off` turns the published build off.
 3. **People download it** from:
    - the account menu ("Get the app");
    - the You page;

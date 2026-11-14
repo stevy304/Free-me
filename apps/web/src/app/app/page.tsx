@@ -26,7 +26,7 @@ export default async function AppPage() {
               <a href={android.downloadUrl} download className="facet-sm mt-4 flex h-12 items-center justify-center gap-2 bg-brand px-5 text-[15px] font-semibold text-on-brand hover:bg-brand-strong">
                 <Icon.Download size={20} />Download the app (APK)
               </a>
-              <p className="mt-2 text-center text-[12px] text-muted">Version {android.version}{android.sizeBytes ? ` · ${(android.sizeBytes / 1024 / 1024).toFixed(1)} MB` : ''}</p>
+              <p className="mt-2 text-center text-[12px] text-muted">{android.version === 'latest' ? 'Latest version' : `Version ${android.version}`}{android.sizeBytes ? ` · ${(android.sizeBytes / 1024 / 1024).toFixed(1)} MB` : ''}</p>
               <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-[14px]">
                 <li>Tap <b>Download</b>, then open the file when it finishes.</li>
                 <li>If Android asks, allow your browser to <b>install unknown apps</b>.</li>
