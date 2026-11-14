@@ -92,8 +92,8 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
         <video ref={el} loop playsInline poster={v.thumbnailUrl ?? undefined} className="h-full w-full object-cover"
           onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} onPlay={() => setPaused(false)} onPause={() => { setPaused(true); void counts.current?.flush(); }} onTimeUpdate={onTime} />
         <div className="absolute inset-x-0 top-[calc(3.25rem+env(safe-area-inset-top))] flex justify-between p-3 md:top-0">
-          <button type="button" onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} aria-label={paused ? 'Play' : 'Pause'} className="facet-sm grid h-9 w-9 place-items-center bg-[rgb(20_17_15/0.55)] text-white backdrop-blur">{paused ? <Icon.Play size={20} /> : <Icon.Pause size={20} />}</button>
-          <button type="button" onClick={() => setMuted(!muted)} aria-label={muted ? 'Unmute' : 'Mute'} className="facet-sm grid h-9 w-9 place-items-center bg-[rgb(20_17_15/0.55)] text-white backdrop-blur">{muted ? <Icon.VolumeOff size={20} /> : <Icon.VolumeHigh size={20} />}</button>
+          <button type="button" onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} aria-label={paused ? 'Play' : 'Pause'} className="grid h-9 w-9 place-items-center text-white [filter:drop-shadow(0_1px_2px_rgb(0_0_0/0.6))] sm:facet-sm sm:bg-[rgb(20_17_15/0.55)] sm:backdrop-blur sm:[filter:none]">{paused ? <Icon.Play size={20} /> : <Icon.Pause size={20} />}</button>
+          <button type="button" onClick={() => setMuted(!muted)} aria-label={muted ? 'Unmute' : 'Mute'} className="grid h-9 w-9 place-items-center text-white [filter:drop-shadow(0_1px_2px_rgb(0_0_0/0.6))] sm:facet-sm sm:bg-[rgb(20_17_15/0.55)] sm:backdrop-blur sm:[filter:none]">{muted ? <Icon.VolumeOff size={20} /> : <Icon.VolumeHigh size={20} />}</button>
         </div>
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-4 pr-[84px] pt-20 text-white sm:pr-4">
           <div className="flex items-center gap-2">
@@ -104,13 +104,10 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
         </div>
         <div className="absolute inset-x-4 bottom-2 h-1 overflow-hidden bg-white/25"><div className="h-full bg-[#f4ede3]" style={{ width: `${progress * 100}%` }} /></div>
       </div>
-      {/* Actions: one cut-corner panel on the right (over the video on phones, beside it on wide screens), each with
-          its name or count under it. The creator's picture sits on top and opens their Space. */}
+      {/* Actions on the right, each with its name or count under it, and the creator's picture under them (it opens
+          their Space). Phones: floating over the video, no panel behind. Wide screens: a cut-corner panel beside it. */}
       <div className="absolute bottom-24 right-2 flex flex-col items-center gap-2.5 text-white sm:static sm:self-end sm:pb-6 sm:text-ink">
-        <Link href={`/@${v.channel.handle}`} aria-label={`${v.channel.name}'s Space`} title={v.channel.name} className="relative rounded-full ring-2 ring-[#f4ede3] shadow-[0_4px_14px_rgb(0_0_0/0.35)] transition-transform hover:scale-105 sm:ring-clay">
-          <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={42} />
-        </Link>
-        <div className="facet flex w-[64px] flex-col items-center gap-3 bg-[rgb(20_17_15/0.66)] py-3 text-[11px] font-semibold backdrop-blur-md sm:bg-elevated">
+        <div className="flex w-[64px] flex-col items-center gap-4 text-[11px] font-semibold [filter:drop-shadow(0_1px_2px_rgb(0_0_0/0.6))] sm:facet sm:gap-3 sm:bg-elevated sm:py-3 sm:[filter:none]">
           <button type="button" onClick={() => vote('like')} aria-pressed={votes?.mine === 'like'} aria-label={`Like (${votes?.likes ?? 0})`} className={action}>
             <Icon.Like size={26} filled={votes?.mine === 'like'} className={votes?.mine === 'like' ? 'text-[#e8b04a]' : undefined} />
             <span suppressHydrationWarning>{votes && votes.likes > 0 ? compactNumber(votes.likes, locale) : 'Like'}</span>
@@ -128,6 +125,9 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
             <button type="button" onClick={message} aria-label={`Message @${v.channel.handle}`} className={action}><Icon.Message size={26} /><span>Message</span></button>
           )}
         </div>
+        <Link href={`/@${v.channel.handle}`} aria-label={`${v.channel.name}'s Space`} title={v.channel.name} className="relative mt-1 rounded-full ring-2 ring-[#f4ede3] shadow-[0_4px_14px_rgb(0_0_0/0.35)] transition-transform hover:scale-105 sm:ring-clay">
+          <Avatar name={v.channel.name} src={v.channel.avatarUrl} size={42} />
+        </Link>
       </div>
       {talk && (
         <>
