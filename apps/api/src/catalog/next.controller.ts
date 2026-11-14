@@ -20,9 +20,14 @@ const DAY = 86_400_000;
  */
 export function scoreNext(c: Candidate, ctx: { current: Video; tagIds: Set<string>; interests: Set<string>; finished: Set<string>; started: Set<string>; now: number; coWatch?: Map<string, number> }) {
   let s = 0;
-  // Watched by at least 3 of the same people: 3 → +2, 7 → +3, 15 or more → +4.
+  // Watched by at least 3 of the same people: 3 → +2, 7 → +3, 15 or more → +4; plus up to +3 for the share of this
+  // video's audience that did (the latest 500 signed-in viewers are compared): when most viewers go on to it, that says
+  // more than a shared Space or topic does.
   const together = ctx.coWatch?.get(c.id) ?? 0;
-  if (together) s += Math.min(4, Math.log2(together + 1));
+  if (together) {
+    const audience = Math.max(together, Math.min(500, Number(ctx.current.viewCount)));
+    s += Math.min(4, Math.log2(together + 1)) + 3 * Math.min(1, together / audience);
+  }
   if (c.channelId === ctx.current.channelId) s += 3;
   const shared = c.tags.filter((t) => ctx.tagIds.has(t.tagId)).length;
   s += Math.min(3, shared) * 2;

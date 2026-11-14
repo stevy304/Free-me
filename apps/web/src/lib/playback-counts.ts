@@ -20,13 +20,21 @@ export class PlaybackCounts {
     this.position = position; this.sampledAt = now;
     if (!playing || !Number.isFinite(duration) || duration <= 0) return;
     if (!this.ticket) this.ticket = fetch(`/api/videos/${this.id}/play`, { method: 'POST', credentials: 'same-origin' })
-      .then((r) => r.ok ? r.json() : null).then((d) => d?.ticket ?? null).catch(() => null);
+      .then((r) => r.ok ? r.json() : null).then((d) => { if (d?.viewed) this.alreadyViewed(); return d?.ticket ?? null; }).catch(() => null);
     if (delta > 0 && elapsed > 0 && delta <= elapsed * Math.min(2, rate) + 0.5) {
       this.watched += delta;
       if (this.accepted) this.pending += delta;
     }
     if (!this.accepted && !this.busy && now >= this.retryAt && this.watched >= Math.min(30, duration / 2)) void this.view();
     if (this.accepted && now - this.lastBeat >= 30_000) void this.flush();
+  }
+
+  /** The server already counted this viewer's view (a return within 6 hours): watch time counts from the start. */
+  private alreadyViewed() {
+    if (this.accepted) return;
+    this.accepted = true;
+    this.pending += this.watched;
+    this.lastBeat = performance.now();
   }
 
   private async view() {

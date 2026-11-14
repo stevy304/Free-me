@@ -122,7 +122,9 @@ export class PlaybackController {
     // Generous per address: many people in Rwanda share one address through their mobile operator.
     await this.limits.consume(`play:${clientIp(req) ?? 'unknown'}`, 3000, 3600);
     await hotViewable(this.prisma, id, auth);
-    return { ticket: playTicket(this.config.sessionSecret, id, ticketHolder(auth?.user.id ?? null, userAgent(req) ?? null)) };
+    // `viewed`: this viewer's view was already counted (6 hours): a player coming back (resuming, rewatching the end)
+    // reports watch time from the first second instead of waiting 30 seconds for a view that will not count again.
+    return { ticket: playTicket(this.config.sessionSecret, id, ticketHolder(auth?.user.id ?? null, userAgent(req) ?? null)), viewed: await this.views.hasView(id, viewerKey(auth, req)) };
   }
 
   @Post(':id/views')

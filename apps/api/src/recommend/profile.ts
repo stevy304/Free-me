@@ -70,7 +70,8 @@ export async function buildTaste(prisma: PrismaClient, redis: Redis | null, user
     const weight = watched * Math.exp(-(now - w.lastWatchedAt.getTime()) / (30 * DAY));
     add(topics, w.video.categoryId, weight); add(channels, w.video.channelId, weight);
     for (const t of w.video.tags) add(tags, t.tagId, weight * 0.5);
-    (w.completed ? taste.finished : taste.started).push(w.videoId);
+    // Watched to 60% or more: done for "For you" (it is not offered again; "Continue watching" still has it).
+    (w.completed || watched >= 0.6 ? taste.finished : taste.started).push(w.videoId);
     if (watched >= 0.3 && taste.seeds.length < 10) taste.seeds.push(w.videoId);
   }
   const avoidChannels = new Map<string, number>(); const avoidTopics = new Map<string, number>();
