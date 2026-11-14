@@ -86,39 +86,41 @@ their uploader does not earn. The creators' share of those ads goes to the right
 
 ## How the ad money is shared
 
-Each day, the money earned from ads that day is split **60 / 30 / 10**. For campaigns priced per 1,000 views that is the views delivered that day (at $1 per 1,000 by default); budget a campaign could not deliver by the end of its make-good period is counted on that last day, because it was paid for. (Older campaigns priced per day count what they paid for the hours they ran.)
+From the UTC earning day **2026-11-14**, long-video ad revenue is divided **70 / 20 / 10**:
 
-- **60% to creators**, shared between monetised creators in proportion to the ads shown on their videos that day;
-- **30% runs Free Me** (servers, video delivery, payments, support, moderation);
-- **10% reserve** (refunds, chargebacks, growth).
+- **70% creator pool**, allocated separately for each paid campaign to eligible hosts by delivered ad impressions;
+- **20% platform operations**;
+- **10% reinvestment/reserve**, inside Free Me's retained 30%, not an additional creator deduction.
 
-**Ads between Moments** are paid differently, as YouTube pays for Shorts:
-- The day's ad money is first divided between videos and Moments, by how many ads were shown in each place.
-- The Moments part goes into a pool, and **45% of it goes to creators**. It is shared among monetised Premium creators
-  by their Moments views that day, whichever Moment an ad happened to follow.
-- Free Me keeps the other 55%.
-- In a creator's earnings this shows as "Moments ad earnings", separate from ad earnings on videos.
+Moments receives **60% of earned Moments advertising revenue**, allocated to eligible creators by their Moments views. Free Me retains 40%. For each campaign, its earned revenue is divided between placements by that campaign's delivered impressions. Free house ads cannot dilute either paid pool. Revenue is capped at the campaign's funded budget.
 
-The split is recorded with every entry in the creator's ledger. Earnings for a day are added the next morning; creators can request a Rwanda MTN MoMo withdrawal after account review and the configured minimum. A signed preview records the outgoing RWF rate, fee and amount to receive. The amount is reserved when requested. An administrator records the reference after sending it, or returns the balance once if it is rejected. Administration → Money contains the account review queue and a separate Flutterwave test-transfer panel.
+Earning days before 2026-11-14 retain 60/30/10 for long videos and 45% for Moments; the split is recorded with every ledger entry. Already settled days are not rewritten. The dated policy is in `packages/shared/src/ad-economics.ts`.
 
-## What creators can expect
+For CPM campaigns, only delivered impressions generate revenue. Undelivered prepaid funds remain unspent liabilities even after the delivery window ends; refund or make-good arrangements currently require operator review. There is no automated refund feature in this change. Older per-day campaigns keep their time-based accounting.
 
-When campaigns deliver all their views, the creator pool is `campaigns running × $3 × 60%` a day; with fewer views, it is `views delivered ÷ 1,000 × $1 × 60%`. A creator's share is their part of all ads shown.
+The denominator is earned media revenue in USD cents, not the whole advertiser deposit. Free Me bears provider collection costs from its retained share. Statutory taxes and payout charges depend on the configured payment/payout terms; do not advertise a tax treatment or fee waiver that is not implemented. Rounding uses integer minor units and may leave small remainders.
 
-| Ads running each day | Creator pool per day | per month (30 days) | A creator with 1% of ads shown, per month | with 5% |
-| ---: | ---: | ---: | ---: | ---: |
-| 20 | $36 | $1,080 | $10.80 | $54 |
-| 100 | $180 | $5,400 | $54 | $270 |
-| 500 | $900 | $27,000 | $270 | $1,350 |
-| 2,000 | $3,600 | $108,000 | $1,080 | $5,400 |
+## Launch pricing and profitability
+
+Default starting budget: **$2 total**, no daily minimum. Default CPM: **$1 per 1,000 ad impressions**, including impressions subsequently skipped. These are pilot hypotheses, not independently verified Rwanda market prices. Existing saved admin settings and environment values take precedence. The UI uses the configured payment conversion rate for local-currency estimates; it does not invent a live exchange rate.
+
+`AD_COST_PER_1000_USD_CENTS` must include delivery of all viewing (including unfilled viewing), storage, encoding, payout costs, moderation, support and allocated fixed costs **per 1,000 paid ad impressions**. Do not enter only the cost of serving the ad file. Unset costs display `UNVERIFIED_COSTS` in Administration → Money.
+
+New-campaign effective CPM is the greater of the configured price and:
+
+`ceil(total allocated cost per 1,000 / (30% retained - collection fee rate - target remainder rate))`.
+
+The default 6% collection allowance is an assumption, not a provider quotation. The default 10% target remainder includes reserves; it is not a guaranteed distributable profit. With 14 cents allocated cost, 6% collection fees and a 10% target remainder, the floor is $1. With 50 cents cost, it becomes $3.58. Existing prepaid campaigns keep their rate. Top-ups and unpaid drafts at a rate below the current price must be replaced with a new campaign; old rates cannot be extended indefinitely.
+
+The admin cost model reports unknown costs honestly and shows a floor once costs are supplied. It cannot prove profit without accurate cost attribution, actual fill, payment fees and refund/tax accounting. See [the market analysis and launch plan](docs/ADVERTISING_LAUNCH.md).
 
 **Prices per country.** $10 a month is a lot in many countries. `PREMIUM_PRICE_BY_COUNTRY` (or Administration → Money → Prices) sets a lower price where the viewer's profile country is listed, e.g. `RW=300` for $3 in Rwanda. A profile country can be changed, so keep regional prices modest. Paying by MoMo in RWF needs a Rwandan number, which limits misuse.
 
 Premium is the steadier income: 1,000 members bring $10,000 a month. That pays for servers and video delivery long before ads reach volume. It also makes monetisation self-selecting: a creator who earns more than $10 a month from ads gains from joining.
 
-**Are $3 a day and $1 per 1,000 views right?** Treat both as pilot hypotheses. Measure valid impressions and advertiser outcomes before changing them. A paid day buys *up to* its views (3,000 by default); it does not guarantee them unless the campaign terms explicitly say so. As the audience grows, raise the price per 1,000 views towards market rates: delivery costs money for every view, and a flat daily price with unlimited views would sell ads for less than they cost to show.
+**Are legacy $3-a-day campaigns and $1 CPM right?** Treat both as pilot hypotheses. Measure valid impressions and advertiser outcomes before changing them. A paid day buys *up to* its views (3,000 by default); it does not guarantee them unless the campaign terms explicitly say so. As the audience grows, raise the price per 1,000 views towards market rates: delivery costs money for every view, and a flat daily price with unlimited views would sell ads for less than they cost to show.
 
-The Monetisation tab in Creator Hub has a calculator with the same formula.
+The Monetisation tab in Creator Hub discloses the current creator percentages and shows estimated and settled earnings.
 
 
 ## Payout pilot setup
@@ -136,7 +138,7 @@ Live automated transfers, additional countries, tips, memberships and brand comm
 
 A creator with a reviewed Rwanda payout account can opt in on their Space or in Creator Hub → Money. Support is separate from advertising eligibility and does not require Premium. Editing payout details suspends new contributions until review; existing paid funds remain in the ledger.
 
-Viewers sign in and choose $1, $3, $5, $10 or $20, with the actual collection currency shown before payment. Checkout uses the existing configured MTN MoMo, Flutterwave or manual collection method. The pilot takes zero platform commission: the operator absorbs collection costs and must confirm this is affordable before enabling the pilot. This is a pilot policy, not a permanent pricing promise. The 60% advertising split is unchanged. Free Sparks never create money.
+Viewers sign in and choose $1, $3, $5, $10 or $20, with the actual collection currency shown before payment. Checkout uses the existing configured MTN MoMo, Flutterwave or manual collection method. The pilot takes zero platform commission: the operator absorbs collection costs and must confirm this is affordable before enabling the pilot. This is a pilot policy, not a permanent pricing promise. Advertising follows the dated creator-first policy above. Free Sparks never create money.
 
 Payment verification adds the contribution to **Pending settlement**, once. Administration → Money → Audience support lists received payments. An administrator checks the provider settlement and disputes before selecting **Settlement checked · clear funds**. Clearance moves the same money to **Available**, once, without increasing lifetime earnings again. Withdrawal uses the existing reviewed account and signed RWF preview.
 

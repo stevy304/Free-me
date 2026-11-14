@@ -56,7 +56,7 @@ async function creator(email: string, handle: string) {
 
 test('Premium by MTN MoMo: $10 a month charged in RWF, verified badge while it lasts, paid once even if checked twice', async () => {
   const plans = (await request(ctx.http).get('/api/billing/plans').expect(200)).body;
-  expect(plans).toMatchObject({ premium: { usdCents: 1000, months: [1, 3, 6, 12] }, ads: { usdCentsPer1000Views: 100, minBudgetUsdCents: 700, maxAdsPerVideo: 2 } });
+  expect(plans).toMatchObject({ premium: { usdCents: 1000, months: [1, 3, 6, 12] }, ads: { usdCentsPer1000Views: 100, minBudgetUsdCents: 200, maxAdsPerVideo: 2 } });
   expect(plans.methods).toEqual([{ name: 'mtn_momo', currency: 'RWF', perUsd: 1450 }, { name: 'flutterwave', currency: 'USD', perUsd: 1 }]);
 
   const a = await creator('maker@example.com', 'maker');
@@ -144,7 +144,7 @@ test('ads: a business pays $3 a day, an administrator approves, monetised Premiu
   const camp = (await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...form, videoId: adVideo.id, targetVideoIds: [short.id] }).expect(201)).body.campaign;
   // $3 a day at $1 per 1,000 views: up to 3,000 views a day, 21,000 in all.
   expect(camp).toMatchObject({ status: 'DRAFT', days: 7, dailyRateCents: 300, totalCents: 2100, cpmCents: 100, viewsBought: 21000, viewsPerDay: 3000, spentCents: 0 });
-  expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.ads).toMatchObject({ usdCentsPer1000Views: 100, minBudgetUsdCents: 700 });
+  expect((await request(ctx.http).get('/api/billing/plans').expect(200)).body.ads).toMatchObject({ usdCentsPer1000Views: 100, minBudgetUsdCents: 200 });
 
   // Paid by MoMo (21 USD → RWF 30,450, rounded to the nearest 100: 30,500), then waits for review.
   const pay = (await biz.post(`/api/ads/campaigns/${camp.id}/pay`).set('Origin', WEB).send({ method: 'mtn_momo', phone: '0788000111' }).expect(201)).body.payment;
@@ -262,7 +262,7 @@ test('ads priced per 1,000 views: a daily view cap, a budget that is never excee
   expect((await maker.get('/api/hub/monetisation').expect(200)).body.balance).toMatchObject({ availableCents: 360, lifetimeCents: 360 });
 });
 
-test('ads priced per 1,000 views: budget not delivered by the end of the make-good period is counted on its last day', async () => {
+test('ads priced per 1,000 views: undelivered budget remains a liability after the make-good period', async () => {
   const DAY = 86_400_000;
   const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
   const user = await ctx.prisma.user.create({ data: { email: 'left@example.com' } });
@@ -273,7 +273,7 @@ test('ads priced per 1,000 views: budget not delivered by the end of the make-go
   const billing = new Billing(ctx.prisma as never, ctx.config);
   expect(await billing.settleAds()).toBe(3);
   const days = await ctx.prisma.adDaySettlement.findMany({ orderBy: { day: 'asc' } });
-  expect(days.map((d) => Number(d.grossCents))).toEqual([0, 0, 300]);
+  expect(days.map((d) => Number(d.grossCents))).toEqual([0, 0, 0]);
 });
 
 test('payment settings in the app: manual payments confirmed by an administrator; secrets stored encrypted; administrators have every Premium feature', async () => {
@@ -458,17 +458,17 @@ test('Creator pass: free uploads, then the pass (paid, given or with Premium); v
   expect((await request(ctx.http).get('/api/channels/passmaker').expect(200)).body.channel.badge).toBe('verified');
 });
 
-test('ad funds start at $7; a business is checked, then pays for the Verified badge, which protects its name for a year', async () => {
+test('ad funds start at $2; a business is checked, then pays for the Verified badge, which protects its name for a year', async () => {
   const biz = await creator('bank@example.com', 'bankrw');
   const ch = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'bankrw' } });
   const adVideo = await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Ad', durationSeconds: 15, status: 'READY', visibility: 'UNLISTED', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', isAd: true } });
   const ad = { businessName: 'Bank RW', country: 'RW', headline: 'Open an account', destinationUrl: 'https://bank.example.com', videoId: adVideo.id };
   ctx.app.get(BillingService).invalidate();
-  expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...ad, budgetUsdCents: 600 }).expect(400)).body.message).toBe('Add at least $7 of funds.');
+  expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...ad, budgetUsdCents: 199 }).expect(400)).body.message).toBe('Add at least $2 of funds.');
   expect((await biz.post('/api/ads/campaigns').set('Origin', WEB).send({ ...ad, budgetUsdCents: 700 }).expect(201)).body.campaign).toMatchObject({ totalCents: 700, viewsBought: 7000, days: 7, viewsPerDay: 1000 });
 
-  // Creator earnings do not show how revenue is divided.
-  expect((await biz.get('/api/hub/monetisation').expect(200)).body.programme).not.toHaveProperty('creatorShareBps');
+  // Creators see the current revenue policy before joining.
+  expect((await biz.get('/api/hub/monetisation').expect(200)).body.programme).toMatchObject({ creatorShareBps: 7000, momentsCreatorShareBps: 6000 });
 
   // Verification: request (free), review, then pay.
   expect((await biz.get('/api/ads/verification').expect(200)).body).toMatchObject({ priceUsdCents: 1000, request: null });
@@ -520,7 +520,7 @@ test('Add funds to a paid ad: more views at the same pace, over more days; a fin
   await admin.post(`/api/admin/billing/campaigns/${created.id}/review`).set("Origin", WEB).send({ approve: true }).expect(200);
   const before = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: created.id } });
 
-  expect((await biz.post(`/api/ads/campaigns/${created.id}/funds`).set('Origin', WEB).send({ ...pay, usdCents: 500 }).expect(400)).body.message).toBe('Add at least $7.');
+  expect((await biz.post(`/api/ads/campaigns/${created.id}/funds`).set('Origin', WEB).send({ ...pay, usdCents: 199 }).expect(400)).body.message).toBe('Add at least $2.');
   const more = (await biz.post(`/api/ads/campaigns/${created.id}/funds`).set('Origin', WEB).send({ ...pay, usdCents: 1400 }).expect(200)).body.payment;
   expect(more).toMatchObject({ purpose: 'AD_CAMPAIGN', usdCents: 1400 });
   // Nothing changes until the payment succeeds.

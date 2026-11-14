@@ -114,7 +114,7 @@ export function AdminMoney() {
         <h2 className="text-[18px] font-semibold">Ad revenue by day</h2>
         <div className="mt-2 overflow-x-auto rounded-2xl border border-line">
           <table className="w-full min-w-[560px] text-left text-[14px]">
-            <thead className="bg-surface text-[12px] uppercase tracking-wide text-muted"><tr><th className="px-4 py-2">Day</th><th className="px-4 py-2">Ads sold</th><th className="px-4 py-2">Creators’ 60%</th><th className="px-4 py-2">Paid to creators</th><th className="px-4 py-2">Ads shown</th><th className="px-4 py-2">Creators</th></tr></thead>
+            <thead className="bg-surface text-[12px] uppercase tracking-wide text-muted"><tr><th className="px-4 py-2">Day</th><th className="px-4 py-2">Ads sold</th><th className="px-4 py-2">Long-video creator pool</th><th className="px-4 py-2">Paid to creators</th><th className="px-4 py-2">Ads shown</th><th className="px-4 py-2">Creators</th></tr></thead>
             <tbody className="divide-y divide-line">{s.settlements.map((d) => <tr key={d.day} className="tabular-nums"><td className="px-4 py-2">{d.day}</td><td className="px-4 py-2">{usd(d.grossCents, locale)}</td><td className="px-4 py-2">{usd(d.creatorPoolCents, locale)}</td><td className="px-4 py-2">{usd(d.paidToCreatorsCents, locale)}</td><td className="px-4 py-2">{d.impressions}</td><td className="px-4 py-2">{d.channels}</td></tr>)}</tbody>
           </table>
           {!s.settlements.length && <p className="px-4 py-6 text-center text-[14px] text-muted">No ad days settled yet.</p>}

@@ -1,3 +1,4 @@
+import { adRevenuePolicy } from '@free-me/shared';
 import request from 'supertest';
 import { makeApp, resetDb, signIn, WEB } from './helpers';
 import { Billing } from '../src/billing/billing';
@@ -45,7 +46,7 @@ test('joining needs the followers and either the watch hours (12 months) or the 
   await other.agent.post('/api/hub/monetisation/join').set('Origin', WEB).send({}).expect(403);
 });
 
-test('ads between Moments: served and counted on any public Moment; the day\'s Moments money (45%) goes to monetised Premium creators by Moments views', async () => {
+test('ads between Moments: served and counted on any public Moment; the day\'s Moments pool goes to monetised Premium creators by Moments views', async () => {
   const rich = await space('rich@example.com', 'rich');          // monetised, Premium: paid
   const lapsed = await space('lapsed@example.com', 'lapsed', false); // monetised, no Premium: not paid
   const fresh = await space('fresh@example.com', 'fresh');       // Premium, not monetised: not paid
@@ -82,8 +83,9 @@ test('ads between Moments: served and counted on any public Moment; the day\'s M
   expect(pre).toBeTruthy();
   expect(await ctx.prisma.adImpression.count({ where: { placement: 'MOMENTS' } })).toBe(3);
 
-  // Settle yesterday: both campaigns ran all day ($3 each: 600 cents). 3 of the 4 ads shown were between Moments:
-  // 450 cents, 45% = 202 to the Moments pool; the other 150 cents follow the usual 60% (90) to the long video's creator.
+  // Both legacy campaigns earn $3 for their day, but only the first delivered ads: 3 Moments, 1 long.
+  // Its 300 cents splits 225 Moments / 75 long. The other campaign's creator pool remains unallocated;
+  // its funds must not inflate earnings of creators who never hosted that campaign.
   const noon = new Date(today().getTime() - DAY / 2);
   await ctx.prisma.adImpression.updateMany({ data: { createdAt: noon } });
   const yesterday = new Date(today().getTime() - DAY);
@@ -95,9 +97,13 @@ test('ads between Moments: served and counted on any public Moment; the day\'s M
   const billing = new Billing(ctx.prisma as never, ctx.config);
   await billing.settleAds();
   const day = await ctx.prisma.adDaySettlement.findUniqueOrThrow({ where: { day: yesterday } });
-  expect(day).toMatchObject({ grossCents: 600n, momentsGrossCents: 450n, momentsPoolCents: 202n, momentsAllocatedCents: 202n, creatorPoolCents: 90n });
+  const policy = adRevenuePolicy(yesterday);
+  const momentsPool = 225n * BigInt(policy.momentsCreatorBps) / 10000n;
+  const longPaid = 75n * BigInt(policy.split.creatorPoolBps) / 10000n;
+  const longUnallocated = 300n * BigInt(policy.split.creatorPoolBps) / 10000n;
+  expect(day).toMatchObject({ grossCents: 600n, momentsGrossCents: 225n, momentsPoolCents: momentsPool, momentsAllocatedCents: momentsPool, creatorPoolCents: longPaid + longUnallocated, allocatedCents: longPaid });
   const ledger = await ctx.prisma.revenueLedger.findMany({ where: { channelId: rich.channelId }, orderBy: { sourceType: 'asc' } });
-  expect(ledger.map((l) => [l.sourceType, Number(l.creatorShareCents)])).toEqual([['AD_SHARE_MOMENTS', 202], ['AD_SHARE_PRE_ROLL', 90]]);
+  expect(ledger.map((l) => [l.sourceType, Number(l.creatorShareCents)])).toEqual([['AD_SHARE_MOMENTS', Number(momentsPool)], ['AD_SHARE_PRE_ROLL', Number(longPaid)]]);
   expect(ledger[0].description).toBe(`Moments ad earnings for ${yesterday.toISOString().slice(0, 10)} (300 Moments views)`);
   expect(await ctx.prisma.revenueLedger.count({ where: { channelId: { in: [lapsed.channelId, fresh.channelId] } } })).toBe(0);
 });

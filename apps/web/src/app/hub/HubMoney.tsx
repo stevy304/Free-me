@@ -17,7 +17,7 @@ interface Money {
   audience?: Audience;
   earnings: Array<{ id: string; kind: string; amountCents: number; day: string | null; description: string; at: string }>;
   payouts: Withdrawal[];
-  programme: { maxAdsPerVideo: number; payoutMinimumUsdCents: number; premiumUsdCents: number };
+  programme: { creatorShareBps?: number; momentsCreatorShareBps?: number; maxAdsPerVideo: number; payoutMinimumUsdCents: number; premiumUsdCents: number };
 }
 interface Earn {
   day: string;
@@ -77,6 +77,14 @@ export function HubMoney() {
     <div className="mt-6 space-y-6">
       {error && <p role="alert" className="rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
       <p className="rounded-2xl border border-line bg-elevated p-4 text-sm text-muted">{t('money.pilot1')} <Link href="/earn/availability" className="font-semibold text-brand underline">{t('money.pilotLink')}</Link> {t('money.pilot2')}</p>
+      <section aria-label="Advertising revenue share" className="rounded-2xl border border-line bg-elevated p-5">
+        <h2 className="font-display text-lg font-bold">Your share of advertising revenue</h2>
+        <dl className="mt-3 grid grid-cols-2 gap-3">
+          <div><dt className="text-sm text-muted">Long-video creator pool</dt><dd className="text-2xl font-bold text-brand">{(p.creatorShareBps ?? 7000) / 100}%</dd></div>
+          <div><dt className="text-sm text-muted">Moments creator pool</dt><dd className="text-2xl font-bold text-brand">{(p.momentsCreatorShareBps ?? 6000) / 100}%</dd></div>
+        </dl>
+        <p className="mt-3 text-sm text-muted">Shares apply to earned advertising revenue. Long-video allocations follow eligible ad delivery; the Moments pool follows eligible Moments views. Free promotions and undelivered ad funds do not generate earnings. A larger percentage does not guarantee higher income.</p>
+      </section>
       {!m.premium.active ? (
         <section className="flex flex-col gap-4 rounded-3xl bg-[#071312] p-6 text-white sm:flex-row sm:items-center">
           <VerifiedBadge size={52} kind="premium" />

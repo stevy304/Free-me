@@ -1,3 +1,4 @@
+import { adRevenuePolicy } from '@free-me/shared';
 import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
@@ -92,7 +93,7 @@ export class MonetisationController {
       audience: await this.audience(ch),
       earnings: ledger.map((l) => ({ id: l.id, kind: l.sourceType, amountCents: Number(l.creatorShareCents), day: l.referenceId, description: l.description, at: l.createdAt })),
       payouts: payouts.map(payoutView),
-      programme: { maxAdsPerVideo: MAX_ADS_PER_VIDEO, payoutMinimumUsdCents: b.payoutMinUsdCents, premiumUsdCents: premiumPriceFor(b, (await this.prisma.profile.findUnique({ where: { userId: u.id }, select: { country: true } }))?.country) },
+      programme: { creatorShareBps: adRevenuePolicy().split.creatorPoolBps, momentsCreatorShareBps: adRevenuePolicy().momentsCreatorBps, maxAdsPerVideo: MAX_ADS_PER_VIDEO, payoutMinimumUsdCents: b.payoutMinUsdCents, premiumUsdCents: premiumPriceFor(b, (await this.prisma.profile.findUnique({ where: { userId: u.id }, select: { country: true } }))?.country) },
     };
   }
 

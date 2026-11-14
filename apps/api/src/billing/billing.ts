@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { authChanged } from '../auth/session-cache';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type Campaign, type Payment, type PrismaClient, type User } from '@prisma/client';
-import { PROPOSED_SPLIT, allocatePool, splitRevenue } from '@free-me/shared';
+import { adRevenuePolicy, allocatePool, splitRevenue } from '@free-me/shared';
 import type { AppConfig, BillingConfig } from '../config/config';
 import { createProviders, currencyDigits, ProviderError, type PaymentProvider, type ProviderName } from './providers';
 import { type MailService, noticeMail } from '../mail/mail.service';
@@ -29,9 +29,6 @@ export function msisdn(raw: string, currency: string): string | null {
   else if (d.startsWith('0') && currency === 'RWF') d = `250${d.slice(1)}`;
   return /^[1-9]\d{8,14}$/.test(d) ? d : null;
 }
-
-/** Creators' part of the money from ads between Moments (YouTube gives 45% of Shorts ad money). */
-export const MOMENTS_CREATOR_SHARE_BPS = 4500;
 
 export const isPremium = (u: Pick<User, 'premiumUntil'>, now = new Date()) => !!u.premiumUntil && u.premiumUntil > now;
 /** Premium features (Live Studio, monetisation): members, and administrators, who can use everything. */
@@ -437,9 +434,9 @@ export class Billing {
 
   /**
    * Worker: shares each finished UTC day's ad revenue. Campaigns priced per 1,000 views count the views they got that
-   * day, and on the day their delivery period ends, any budget they could not deliver. Older campaigns priced per
+   * day. Undelivered funds remain a liability. Older campaigns priced per
    * day count what they paid for the hours they ran. Unpaid campaigns (approved without payment) count nothing.
-   * The creator pool (60%) goes to monetised channels in proportion to the ads shown on their videos that day.
+   * The creator pool (70% from 2026-11-14; 60% before that) goes to monetised channels in proportion to the ads shown on their videos that day.
    */
   async settleAds(now = new Date()) {
     // From the first day with ad or subscription money (Plus and Family share theirs with creators too).
@@ -461,6 +458,7 @@ export class Billing {
   }
 
   async adDayShares(day: Date) {
+    const policy = adRevenuePolicy(day);
     const end = new Date(day.getTime() + DAY);
     const campaigns = await this.prisma.campaign.findMany({ where: { reviewedAt: { not: null }, status: { in: ['ACTIVE', 'COMPLETED', 'PAUSED'] }, startDate: { lt: end }, OR: [{ endDate: { gt: day } }, { deliverUntil: { gte: day } }] } });
     const perView = campaigns.filter((c) => c.cpmRateCents > 0 && c.dailyRateCents > 0);
@@ -470,39 +468,68 @@ export class Billing {
       FROM "AdImpression" WHERE "campaignId" IN (${Prisma.join(perView.map((c) => c.id))}) AND "createdAt" < ${end.toISOString()}::timestamp
       GROUP BY "campaignId"` : []).map((r) => [r.campaignId, r]));
     let gross = 0n;
+    const campaignGross = new Map<string, bigint>();
     for (const c of campaigns) {
       if (!c.dailyRateCents) continue;
       if (c.cpmRateCents > 0) {
         const n = counts.get(c.id) ?? { before: 0n, today: 0n };
         const upTo = cpmRevenue(n.before + n.today, c.cpmRateCents);
-        gross += upTo - cpmRevenue(n.before, c.cpmRateCents);
-        // Budget the campaign could not deliver is counted when its delivery period ends (it was paid for).
-        const last = c.deliverUntil ?? c.endDate;
-        if (last >= day && last < end && c.budgetAmountCents > upTo) gross += c.budgetAmountCents - upTo;
+        const before = cpmRevenue(n.before, c.cpmRateCents);
+        const earned = (upTo < c.budgetAmountCents ? upTo : c.budgetAmountCents) - (before < c.budgetAmountCents ? before : c.budgetAmountCents);
+        gross += earned;
+        campaignGross.set(c.id, earned);
+        // Undelivered prepaid funds remain a liability, available for a reviewed refund/make-good.
+        // They are never ad revenue or a creator pool, even when the delivery window expires.
         continue;
       }
       if (c.endDate <= day) continue;
       const ran = Math.min(end.getTime(), c.endDate.getTime()) - Math.max(day.getTime(), c.startDate.getTime());
-      if (ran > 0) gross += (BigInt(c.dailyRateCents) * BigInt(ran)) / BigInt(DAY);
+      if (ran > 0) {
+        const earned = (BigInt(c.dailyRateCents) * BigInt(ran)) / BigInt(DAY);
+        gross += earned;
+        campaignGross.set(c.id, earned);
+      }
     }
-    // The day's money is divided between the two places ads play, by how many were shown in each.
-    const [placed] = await this.prisma.$queryRaw<Array<{ all: bigint; moments: bigint }>>`
-      SELECT count(*)::bigint AS all, count(*) FILTER (WHERE "placement" = 'MOMENTS')::bigint AS moments FROM "AdImpression"
-      WHERE "createdAt" >= ${day.toISOString()}::timestamp AND "createdAt" < ${end.toISOString()}::timestamp`;
-    const momentsGross = placed && placed.all > 0n ? (gross * placed.moments) / placed.all : 0n;
-    // Before and during videos: 60% to the creators whose videos the ads played with, by ads shown.
-    const split = splitRevenue(gross - momentsGross, PROPOSED_SPLIT);
-    // A copy a rights holder claimed to earn from (Content ID) pays its share to the owner instead of the uploader.
-    const rows = await this.prisma.$queryRaw<Array<{ channelId: string; n: bigint }>>`
-      SELECT COALESCE(cl."ownerChannelId", v."channelId") AS "channelId", count(*)::bigint AS n FROM "AdImpression" i JOIN "Video" v ON v.id = i."videoId"
+    // Count placements per PAID campaign. Free house ads cannot divert paid creator earnings,
+    // and a low-priced campaign cannot dilute another campaign's creator allocation.
+    const paidIds = [...campaignGross.keys()];
+    const placements = paidIds.length ? await this.prisma.$queryRaw<Array<{ campaignId: string; all: bigint; moments: bigint }>>`
+      SELECT "campaignId", count(*)::bigint AS all, count(*) FILTER (WHERE "placement" = 'MOMENTS')::bigint AS moments FROM "AdImpression"
+      WHERE "campaignId" IN (${Prisma.join(paidIds)}) AND "createdAt" >= ${day.toISOString()}::timestamp AND "createdAt" < ${end.toISOString()}::timestamp
+      GROUP BY "campaignId"` : [];
+    // A monetized rights claim pays the owner rather than the uploader.
+    const deliveries = paidIds.length ? await this.prisma.$queryRaw<Array<{ campaignId: string; channelId: string; n: bigint }>>`
+      SELECT i."campaignId", COALESCE(cl."ownerChannelId", v."channelId") AS "channelId", count(*)::bigint AS n FROM "AdImpression" i JOIN "Video" v ON v.id = i."videoId"
       LEFT JOIN LATERAL (SELECT c."ownerChannelId" FROM "ContentClaim" c WHERE c."videoId" = v.id AND c."policy" = 'MONETIZE' AND c."status" = 'ACTIVE' ORDER BY c."createdAt" LIMIT 1) cl ON true
       LEFT JOIN "CreatorEligibility" e ON e."channelId" = v."channelId" AND e."isEligible"
-      WHERE i."placement" = 'PRE_ROLL' AND (cl."ownerChannelId" IS NOT NULL OR e."channelId" IS NOT NULL)
-        AND i."createdAt" >= ${day.toISOString()}::timestamp AND i."createdAt" < ${end.toISOString()}::timestamp GROUP BY 1`;
-    const shares = allocatePool(rows.length ? split.creatorPool : 0n, Object.fromEntries(rows.map((r) => [r.channelId, r.n])));
-    // Between Moments (like Shorts on YouTube): MOMENTS_CREATOR_SHARE (45%) is shared by the monetised creators'
-    // Moments views that day, whoever's Moment the ad followed.
-    const momentsPool = (momentsGross * BigInt(MOMENTS_CREATOR_SHARE_BPS)) / 10_000n;
+      WHERE i."campaignId" IN (${Prisma.join(paidIds)}) AND i."placement" = 'PRE_ROLL' AND (cl."ownerChannelId" IS NOT NULL OR e."channelId" IS NOT NULL)
+        AND i."createdAt" >= ${day.toISOString()}::timestamp AND i."createdAt" < ${end.toISOString()}::timestamp GROUP BY 1, 2` : [];
+    const placementByCampaign = new Map(placements.map((p) => [p.campaignId, p]));
+    const hostsByCampaign = new Map<string, typeof deliveries>();
+    for (const delivery of deliveries) {
+      const hosts = hostsByCampaign.get(delivery.campaignId) ?? [];
+      hosts.push(delivery); hostsByCampaign.set(delivery.campaignId, hosts);
+    }
+    let momentsGross = 0n;
+    const split = { gross: 0n, creatorPool: 0n, platform: 0n, reinvestment: 0n };
+    const shares: Record<string, bigint> = {};
+    const rowCounts = new Map<string, bigint>();
+    for (const [campaignId, earned] of campaignGross) {
+      const placed = placementByCampaign.get(campaignId);
+      const momentAmount = placed && placed.all > 0n ? earned * placed.moments / placed.all : 0n;
+      momentsGross += momentAmount;
+      const part = splitRevenue(earned - momentAmount, policy.split);
+      split.gross += part.gross; split.creatorPool += part.creatorPool;
+      split.platform += part.platform; split.reinvestment += part.reinvestment;
+      const hosts = hostsByCampaign.get(campaignId) ?? [];
+      const allocated = allocatePool(part.creatorPool, Object.fromEntries(hosts.map((r) => [r.channelId, r.n])));
+      for (const host of hosts) {
+        rowCounts.set(host.channelId, (rowCounts.get(host.channelId) ?? 0n) + host.n);
+        shares[host.channelId] = (shares[host.channelId] ?? 0n) + (allocated[host.channelId] ?? 0n);
+      }
+    }
+    const rows = [...rowCounts].map(([channelId, n]) => ({ channelId, n }));
+    const momentsPool = momentsGross * BigInt(policy.momentsCreatorBps) / 10_000n;
     const momentRows = momentsGross > 0n ? await this.prisma.$queryRaw<Array<{ channelId: string; views: bigint }>>`
       SELECT v."channelId", sum(s."views")::bigint AS views FROM "VideoDailyStat" s JOIN "Video" v ON v.id = s."videoId"
       JOIN "CreatorEligibility" e ON e."channelId" = v."channelId" AND e."isEligible"
@@ -563,7 +590,7 @@ export class Billing {
         });
         await tx.revenueLedger.create({ data: {
           channelId: r.channelId, sourceType: 'AD_SHARE_MOMENTS', referenceId: label, currency: EARNINGS_CURRENCY, grossAmountCents: amount, creatorShareCents: amount,
-          platformShareCents: 0n, reinvestShareCents: 0n, splitBps: `${MOMENTS_CREATOR_SHARE_BPS}/${10_000 - MOMENTS_CREATOR_SHARE_BPS}/0`,
+          platformShareCents: 0n, reinvestShareCents: 0n, splitBps: `${adRevenuePolicy(day).momentsCreatorBps}/${10_000 - adRevenuePolicy(day).momentsCreatorBps}/0`,
           balanceAfterCents: bal.confirmedBalanceCents, description: `Moments ad earnings for ${label} (${r.views} Moments ${r.views === 1n ? 'view' : 'views'})`,
         } });
       }
@@ -590,7 +617,7 @@ export class Billing {
         });
         await tx.revenueLedger.create({ data: {
           channelId: r.channelId, sourceType: 'AD_SHARE_PRE_ROLL', referenceId: label, currency: EARNINGS_CURRENCY, grossAmountCents: amount, creatorShareCents: amount,
-          platformShareCents: 0n, reinvestShareCents: 0n, splitBps: `${PROPOSED_SPLIT.creatorPoolBps}/${PROPOSED_SPLIT.platformBps}/${PROPOSED_SPLIT.reinvestmentBps}`,
+          platformShareCents: 0n, reinvestShareCents: 0n, splitBps: `${adRevenuePolicy(day).split.creatorPoolBps}/${adRevenuePolicy(day).split.platformBps}/${adRevenuePolicy(day).split.reinvestmentBps}`,
           balanceAfterCents: bal.confirmedBalanceCents, description: `Ad earnings for ${label} (${r.n} ${r.n === 1n ? 'ad' : 'ads'} shown)`,
         } });
       }

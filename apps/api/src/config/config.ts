@@ -1,4 +1,4 @@
-import { normalizeEmail } from '@free-me/shared';
+import { normalizeEmail, adEconomics } from '@free-me/shared';
 import { validEncoderUrl } from '../live/encoder';
 
 /**
@@ -59,6 +59,8 @@ export interface BillingConfig {
   adCpmUsdCents: number;
   /** Smallest amount of funds a campaign can start with. */
   adMinBudgetUsdCents: number;
+  /** Cost assumptions used for the price floor; unknown costs never imply profitability. */
+  adEconomics?: import("@free-me/shared").AdCostModel;
   /** Verified business badge, per year (paid after an administrator checked the business). */
   verificationUsdCents: number;
   /** Smallest balance a creator can withdraw. */
@@ -325,7 +327,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (airtelSet.length === 2 && airtelCurrency !== 'USD' && !(airtelPerUsd > 0)) problems.push(`AIRTEL_RATE_PER_USD (or MOMO_RATE_PER_USD) is required: how many ${airtelCurrency} make one US dollar.`);
   const shareBps = Math.round(Number(env.SUBSCRIPTION_CREATOR_SHARE_PERCENT ?? 50) * 100);
   if (!(shareBps >= 0 && shareBps <= 10_000)) problems.push('SUBSCRIPTION_CREATOR_SHARE_PERCENT must be from 0 to 100.');
+  const adCost = env.AD_COST_PER_1000_USD_CENTS?.trim() ? count('AD_COST_PER_1000_USD_CENTS', 0) : null;
+  const adFeeBps = count('AD_PAYMENT_FEE_BPS', 600);
+  const adMarginBps = count('AD_TARGET_MARGIN_BPS', 1000);
+  if (adCost !== null && adCost > 10_000_000) problems.push('AD_COST_PER_1000_USD_CENTS must not exceed 10000000.');
+  if (adFeeBps + adMarginBps >= 3000) problems.push('AD_PAYMENT_FEE_BPS + AD_TARGET_MARGIN_BPS must be below 3000 (Free Me retains 30%).');
   const billing: BillingConfig = {
+    adEconomics: { costPer1000UsdCents: adCost, paymentFeeBps: adFeeBps, targetMarginBps: adMarginBps },
     premiumByCountry,
     creatorPassUsdCents: cents('CREATOR_PASS_PRICE_USD_CENTS', 200), creatorFreeVideos: count('CREATOR_FREE_VIDEOS', 3),
     creatorPassVideosPerYear: count('CREATOR_PASS_VIDEOS_PER_YEAR', 50),
@@ -337,7 +345,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       baseUrl: (env.AIRTEL_BASE_URL?.trim() || 'https://openapiuat.airtel.africa').replace(/\/+$/, ''), clientId: env.AIRTEL_CLIENT_ID!.trim(), clientSecret: env.AIRTEL_CLIENT_SECRET!.trim(),
       country: (env.AIRTEL_COUNTRY?.trim() || 'RW').toUpperCase(), currency: airtelCurrency, perUsd: airtelCurrency === 'USD' ? 1 : airtelPerUsd,
     } : null,
-    premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), adCpmUsdCents: cents('AD_CPM_USD_CENTS', 100), adMinBudgetUsdCents: cents('AD_MIN_BUDGET_USD_CENTS', 700), verificationUsdCents: cents('VERIFICATION_PRICE_USD_CENTS', 1000), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
+    premiumUsdCents: cents('PREMIUM_PRICE_USD_CENTS', 1000), adDayUsdCents: cents('AD_PRICE_PER_DAY_USD_CENTS', 300), adCpmUsdCents: cents('AD_CPM_USD_CENTS', 100), adMinBudgetUsdCents: cents('AD_MIN_BUDGET_USD_CENTS', 200), verificationUsdCents: cents('VERIFICATION_PRICE_USD_CENTS', 1000), payoutMinUsdCents: cents('PAYOUT_MINIMUM_USD_CENTS', 1000),
     payouts: payoutRate > 0 ? { rwfPerUsd: payoutRate, feeRwf: payoutFee } : null,
     payoutSandbox: payoutTestKey ? { secretKey: payoutTestKey } : null,
     momo: momoSet.length === momoKeys.length ? {
@@ -361,6 +369,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const turn = turnUrls.length ? { urls: turnUrls, secret: turnSecret } : null;
   const live: LiveConfig = { turn, browserLimit, rtmpUrl, rtmpSecret, rtmpHlsDir: env.LIVE_RTMP_HLS_DIR?.trim() || null };
 
+  try { adEconomics(billing.adCpmUsdCents, billing.adEconomics); }
+  catch (e) { problems.push(`Advertising cost model: ${(e as Error).message}`); }
   if (problems.length) throw new ConfigError(`Free Me API configuration:\n- ${problems.join('\n- ')}`);
   return {
     nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,

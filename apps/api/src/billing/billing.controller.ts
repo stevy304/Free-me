@@ -1,3 +1,4 @@
+import { adRevenuePolicy } from '@free-me/shared';
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, Inject, Injectable, NotFoundException, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
 import { authChanged } from '../auth/session-cache';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
@@ -71,7 +72,7 @@ export class BillingController {
       /** Largest file a creator can upload, on every plan. */
       uploadMaxBytes: this.billing.cfg.media.maxUploadBytes,
       // Ads: the business adds funds (at least minBudgetUsdCents), spent at usdCentsPer1000Views as the ad is shown.
-      ads: { usdCentsPer1000Views: b.adCpmUsdCents, minBudgetUsdCents: b.adMinBudgetUsdCents, maxAdsPerVideo: 2 },
+      ads: { usdCentsPer1000Views: b.adCpmUsdCents, minBudgetUsdCents: b.adMinBudgetUsdCents, maxAdsPerVideo: 2, billingUnit: 'IMPRESSION', creatorShareBps: adRevenuePolicy().split.creatorPoolBps, momentsCreatorShareBps: adRevenuePolicy().momentsCreatorBps },
       payoutMinimumUsdCents: b.payoutMinUsdCents,
       methods: (await this.billing.methods()).map((m) => ({
         ...m, perUsd: m.name === 'mtn_momo' ? b.momo!.perUsd : m.name === 'airtel_money' ? b.airtel!.perUsd : m.name === 'manual' ? b.manual!.perUsd : 1,

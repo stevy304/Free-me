@@ -8,7 +8,7 @@ import { CountrySelect, inputClass } from '@/components/Pickers';
 import { PayPanel, usePaymentWatch } from '@/components/billing/PayPanel';
 import { api } from '@/lib/client-api';
 import { duration } from '@/lib/format';
-import { usd } from '@/lib/money';
+import { charge, money, usd } from '@/lib/money';
 import { VideoUpload, type UploadSnapshot } from '@/lib/uploader';
 import type { HubVideo } from '@/components/hub/types';
 import type { Payment, Plans, Viewer } from '@/lib/types';
@@ -19,7 +19,7 @@ interface Campaign {
   id: string; status: 'DRAFT' | 'PENDING_REVIEW' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'REJECTED'; businessName: string; headline: string; destinationUrl: string; days: number;
   dailyRateCents: number; totalCents: number; targetCountries: string[]; startDate: string | null; endDate: string | null; reviewNote: string | null;
   impressions: number; clicks: number; video: { id: string; title: string; durationSeconds: number } | null; createdAt: string;
-  /** Priced per 1,000 views (null: an older campaign priced per day). */
+  /** Priced per 1,000 impressions (null: an older campaign priced per day). */
   cpmCents?: number | null; viewsBought?: number | null; viewsPerDay?: number | null; spentCents?: number; deliverUntil?: string | null;
 }
 const STATUS: Record<Campaign['status'], [string, string]> = {
@@ -124,18 +124,22 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
 
   if (!plans || !list) return error ? <p role="alert" className="mx-auto mt-10 max-w-xl rounded-xl bg-danger/10 px-4 py-3 text-danger">{error}</p> : <Icon.Spinner className="mx-auto mt-16 animate-spin text-muted" />;
   const cpm = plans.ads.usdCentsPer1000Views ?? 100;
-  const minimum = plans.ads.minBudgetUsdCents ?? 700;
+  const minimum = plans.ads.minBudgetUsdCents ?? 200;
   const fundsCents = Math.round(Number(form.funds || 0) * 100);
+  const localMethod = plans.methods.find((m) => m.currency !== 'USD');
+  const localPrice = (cents: number) => localMethod ? money(charge(cents, localMethod), localMethod.currency, locale) : null;
+  const presets = [...new Set([minimum, Math.max(minimum, 500), Math.max(minimum, 1000)])];
   const readyAds = adVideos.filter(usableVideo);
   const running = list.campaigns.filter((c) => c.status === 'ACTIVE').length;
   const shown = list.campaigns.reduce((n, c) => n + c.impressions, 0);
   const visits = list.campaigns.reduce((n, c) => n + c.clicks, 0);
-  // Funds: what was paid in, what views have used, and what is left to spend (paid ads only).
+  // Funds: what was paid in, what impressions have used, and what is left to spend (paid ads only).
   const paidAds = list.campaigns.filter((c) => c.status !== 'DRAFT' && c.status !== 'REJECTED');
-  const fundable = paidAds.filter((c) => c.cpmCents);
+  const fundable = paidAds.filter((c) => c.cpmCents && c.cpmCents >= cpm);
   const added = paidAds.reduce((n, c) => n + c.totalCents, 0);
   const spent = paidAds.reduce((n, c) => n + (c.spentCents ?? 0), 0);
   const left = Math.max(0, added - spent);
+  const remainingImpressions = paidAds.reduce((n, c) => n + (c.cpmCents ? Math.floor(Math.max(0, c.totalCents - (c.spentCents ?? 0)) * 1000 / c.cpmCents) : 0), 0);
   const topUpAd = topUp ? list.campaigns.find((c) => c.id === topUp.id) ?? null : null;
   const topUpCents = Math.round(Number(topUp?.amount || 0) * 100);
   const openTopUp = (c?: Campaign) => {
@@ -147,15 +151,30 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
 
   return (
     <div className="mx-auto max-w-5xl px-4 pb-16 pt-6 sm:px-6">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex-1">
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <div className="min-w-0 sm:flex-1">
           <h1 className="flex items-center gap-2 font-display text-[28px] font-extrabold"><Icon.Megaphone size={28} />Ad Studio</h1>
-          <p className="mt-1 max-w-2xl text-[15px] text-muted">Upload a short video ad, add funds (from <b className="text-ink">{usd(minimum, locale)}</b>) and pay only for views: <b className="text-ink">{usd(cpm, locale)} per 1,000 views</b>. Never more than {plans.ads.maxAdsPerVideo} ads on a video, and viewers can skip after 5 seconds.</p>
+          <p className="mt-1 max-w-2xl text-[15px] text-muted">Upload a short video ad, add funds (from <b className="text-ink">{usd(minimum, locale)}</b>) and pay for ad impressions: <b className="text-ink">{usd(cpm, locale)} per 1,000 ad impressions</b>. Never more than {plans.ads.maxAdsPerVideo} ads on a video, and viewers can skip after 5 seconds.</p>
         </div>
-        {viewer.channel && <button type="button" onClick={() => fileInput.current?.click()} className="flex h-11 items-center gap-2 rounded-2xl bg-surface px-4 text-[14px] font-bold hover:bg-surface-hover"><Icon.Upload size={20} />Upload ad video</button>}
+        {viewer.channel && <button type="button" onClick={() => fileInput.current?.click()} className="flex h-11 self-start items-center gap-2 rounded-2xl bg-surface px-4 text-[14px] font-bold hover:bg-surface-hover"><Icon.Upload size={20} />Upload ad video</button>}
         {viewer.channel && !creating && <button type="button" onClick={() => setCreating(true)} className="flex h-11 items-center gap-2 rounded-2xl bg-brand px-4 text-[14px] font-bold text-on-brand hover:bg-brand-strong"><Icon.Plus size={20} />New ad</button>}
         <input ref={fileInput} type="file" accept="video/*" multiple hidden onChange={(e) => { pick(e.target.files); e.target.value = ''; }} />
       </div>
+      <section aria-label="Starter advertising budgets" className="mt-6 rounded-3xl border border-line bg-elevated p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div><h2 className="font-display text-xl font-bold">Start small. Set your total budget.</h2><p className="mt-1 text-sm text-muted">No daily minimum. Choose a country and an eligible video or channel audience.</p></div>
+          <p className="rounded-xl bg-brand-soft px-3 py-2 text-sm font-semibold text-brand">{(plans.ads.creatorShareBps ?? 7000) / 100}% to the long-video creator pool</p>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          {presets.map((amount, i) => <button key={amount} type="button" onClick={() => { setForm((f) => ({ ...f, funds: String(amount / 100), target: f.target ?? viewer.profile?.country ?? null })); setCreating(true); setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); }} className="rounded-2xl border border-line p-4 text-left hover:border-brand hover:bg-brand-soft">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">{['Try it', 'Build awareness', 'Reach more'][i]}</span>
+            <strong className="mt-1 block font-display text-2xl">{localPrice(amount) ?? usd(amount, locale)}</strong>
+            {localMethod && <span className="text-xs text-muted">{usd(amount, locale)} media budget · converted at checkout</span>}
+            <span className="mt-2 block text-sm">Up to {Math.floor(amount * 1000 / cpm).toLocaleString(locale)} ad impressions</span>
+          </button>)}
+        </div>
+        <p className="mt-3 text-xs text-muted">An impression is an ad shown, including a subsequently skipped ad. It is not a completed view or a unique customer. Delivery depends on matching viewers; sales are not guaranteed.</p>
+      </section>
       {notice && <p role="status" className="mt-4 rounded-2xl bg-brand-soft px-4 py-3 text-[14px] font-semibold text-brand">{notice}</p>}
       {error && <p role="alert" className="mt-4 rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
 
@@ -167,11 +186,11 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
       ) : (
         <>
           <section aria-labelledby="funds-heading" className="mt-6 overflow-hidden rounded-3xl border border-line bg-elevated">
-            <div className="flex flex-wrap items-center gap-4 p-5 sm:p-6">
+            <div className="flex flex-col items-stretch gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
               <div className="min-w-0 flex-1">
                 <h2 id="funds-heading" className="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.08em] text-muted"><Icon.Wallet size={16} />Ad funds</h2>
                 <p className="mt-1 font-display text-[34px] font-extrabold leading-none tabular-nums">{usd(left, locale)}</p>
-                <p className="mt-1.5 text-[14px] text-muted">left to spend · about <b className="text-ink">{Math.floor((left * 1000) / cpm).toLocaleString(locale)} more views</b> at {usd(cpm, locale)} per 1,000</p>
+                <p className="mt-1.5 text-[14px] text-muted">left to spend · about <b className="text-ink">{remainingImpressions.toLocaleString(locale)} more impressions</b> across campaigns at their booked rates</p>
               </div>
               <button type="button" onClick={() => openTopUp()} className="flex h-12 items-center gap-2 rounded-2xl bg-brand px-5 text-[15px] font-bold text-on-brand hover:bg-brand-strong"><Icon.Plus size={20} />Add funds</button>
             </div>
@@ -181,13 +200,13 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
               ))}
             </dl>
             {added > 0 && <div className="h-1.5 bg-surface" title={`${Math.round((spent / added) * 100)}% spent`}><div className="h-full bg-brand transition-[width]" style={{ width: `${Math.min(100, (spent / added) * 100)}%` }} /></div>}
-            <p className="border-t border-line bg-surface px-5 py-2.5 text-[13px] text-muted sm:px-6">{running ? `${running} ${running === 1 ? 'ad is' : 'ads are'} running now.` : 'No ad is running right now.'} You pay only for views; funds not used keep running your ad until they are spent.</p>
+            <p className="border-t border-line bg-surface px-5 py-2.5 text-[13px] text-muted sm:px-6">{running ? `${running} ${running === 1 ? 'ad is' : 'ads are'} running now.` : 'No ad is running right now.'} You pay for delivered ad impressions. Undelivered funds stay unspent; contact support if the delivery window has ended.</p>
           </section>
 
           {topUp && topUpAd && (
             <section ref={topUpRef} aria-labelledby="topup-heading" className="mt-6 scroll-mt-24 rounded-3xl border-2 border-brand bg-elevated p-5 sm:p-6">
               <div className="flex items-start gap-3">
-                <div className="flex-1"><h2 id="topup-heading" className="font-display text-[20px] font-bold">Add funds</h2><p className="text-[14px] text-muted">More views for an ad you already run, at the same daily pace. A finished ad starts again.</p></div>
+                <div className="flex-1"><h2 id="topup-heading" className="font-display text-[20px] font-bold">Add funds</h2><p className="text-[14px] text-muted">More impressions for an ad you already run, at the same daily pace. A finished ad starts again.</p></div>
                 <button type="button" onClick={() => setTopUp(null)} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-xl hover:bg-surface"><Icon.Close size={20} /></button>
               </div>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -197,7 +216,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                   </select>
                 </label>
                 <label className="block"><span className="text-[13px] font-semibold">Amount (US dollars, from {usd(minimum, locale)})</span>
-                  <input type="number" min={minimum / 100} step={1} inputMode="decimal" className={`mt-1 ${inputClass}`} value={topUp.amount} onChange={(e) => setTopUp({ ...topUp, amount: e.target.value })} />
+                  <input type="number" min={minimum / 100} step={0.01} inputMode="decimal" className={`mt-1 ${inputClass}`} value={topUp.amount} onChange={(e) => setTopUp({ ...topUp, amount: e.target.value })} />
                 </label>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -205,7 +224,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                   <button key={d} type="button" onClick={() => setTopUp({ ...topUp, amount: String(d) })} className={`h-9 rounded-full border px-4 text-[13px] font-semibold ${Number(topUp.amount) === d ? 'border-brand bg-brand-soft text-brand' : 'border-line hover:bg-surface'}`}>{usd(d * 100, locale)}</button>
                 ))}
               </div>
-              <p className="mt-3 text-[15px]"><b className="font-display text-[20px]">{usd(topUpCents, locale)}</b> = about <b>{Math.floor((topUpCents * 1000) / (topUpAd.cpmCents ?? cpm)).toLocaleString(locale)} more views</b> for “{topUpAd.headline}”</p>
+              <p className="mt-3 text-[15px]"><b className="font-display text-[20px]">{usd(topUpCents, locale)}</b> = about <b>{Math.floor((topUpCents * 1000) / (topUpAd.cpmCents ?? cpm)).toLocaleString(locale)} more impressions</b> for “{topUpAd.headline}”</p>
               {topUpCents >= minimum
                 ? <div className="mt-4 max-w-lg"><PayPanel key={topUp.id} usdCents={topUpCents} plans={plans} label="Add funds" onPaid={() => { setTopUp(null); setNotice(`Funds added to “${topUpAd.headline}”.`); void load(); }} start={async (method, phone) => (await api<{ payment: Payment }>(`/ads/campaigns/${topUp.id}/funds`, { body: { method, phone, usdCents: topUpCents } })).payment} /></div>
                 : <p className="mt-3 text-[13px] text-danger">Add at least {usd(minimum, locale)}.</p>}
@@ -213,7 +232,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
           )}
 
           <section className="mt-8" aria-labelledby="ad-videos">
-            <div className="flex items-baseline gap-2"><h2 id="ad-videos" className="font-display text-[20px] font-bold">Ad videos</h2><span className="text-[13px] text-muted">{MIN_SECONDS}–{MAX_SECONDS} seconds · only played as ads, never in feeds</span></div>
+            <div className="flex flex-wrap items-baseline gap-2"><h2 id="ad-videos" className="font-display text-[20px] font-bold">Ad videos</h2><span className="text-[13px] text-muted">{MIN_SECONDS}–{MAX_SECONDS} seconds · only played as ads, never in feeds</span></div>
             <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {uploads.map(({ key, upload, snap }) => (
                 <article key={key} className="rounded-2xl border border-line p-3">
@@ -277,17 +296,17 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                 <p className="text-sm text-muted sm:col-span-2">Separate placements with commas. Ads can appear on any selected video or channel, subject to the country filter. Leave both blank to reach all eligible content.</p>
                 <label className="block"><span className="text-[13px] font-semibold">Show it in</span><span className="mt-1 block"><CountrySelect value={form.target} onChange={(target) => setForm({ ...form, target })} emptyLabel="Every country" /></span></label>
                 <label className="block"><span className="text-[13px] font-semibold">Funds (US dollars, at least {usd(minimum, locale)})</span>
-                  <input type="number" min={minimum / 100} step={1} inputMode="decimal" className={`mt-1 ${inputClass}`} value={form.funds} onChange={(e) => setForm({ ...form, funds: e.target.value })} placeholder={String(minimum / 100)} />
+                  <input type="number" min={minimum / 100} step={0.01} inputMode="decimal" className={`mt-1 ${inputClass}`} value={form.funds} onChange={(e) => setForm({ ...form, funds: e.target.value })} placeholder={String(minimum / 100)} />
                 </label>
                 <label className="block"><span className="text-[13px] font-semibold">Spread over {form.days} {form.days === 1 ? 'day' : 'days'}</span>
                   <input type="range" min={1} max={90} value={form.days} onChange={(e) => setForm({ ...form, days: Number(e.target.value) })} className="mt-3 w-full accent-[var(--brand)]" />
                 </label>
                 <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-surface px-4 py-3 sm:col-span-2">
-                  <span className="text-[15px]"><b className="font-display text-[20px]">{usd(fundsCents, locale)}</b> = about <b>{Math.floor((fundsCents * 1000) / cpm).toLocaleString(locale)} views</b>
-                    <span className="block text-[13px] text-muted">About {Math.floor((fundsCents * 1000) / cpm / form.days).toLocaleString(locale)} views a day for {form.days} {form.days === 1 ? 'day' : 'days'}; funds not spent by then keep running until they are.</span></span>
+                  <span className="text-[15px]"><b className="font-display text-[20px]">{usd(fundsCents, locale)}</b> = up to <b>{Math.floor((fundsCents * 1000) / cpm).toLocaleString(locale)} ad impressions</b>
+                    <span className="block text-[13px] text-muted">About {Math.floor((fundsCents * 1000) / cpm / form.days).toLocaleString(locale)} impressions a day for {form.days} {form.days === 1 ? 'day' : 'days'}; delivery may continue during the campaign’s make-good window. Any undelivered funds remain unspent; contact support for a reviewed refund or delivery arrangement.</span></span>
                   <span className="ml-auto flex gap-2">
                     <button type="button" onClick={() => setCreating(false)} className="h-11 rounded-2xl px-4 text-[14px] font-semibold text-muted hover:bg-surface-hover">Cancel</button>
-                    <button type="button" disabled={busy || !form.videoId || !form.country || form.headline.trim().length < 3 || form.businessName.trim().length < 2 || fundsCents < minimum} onClick={() => void create()} className="h-11 rounded-2xl bg-brand px-5 text-[14px] font-bold text-on-brand disabled:opacity-50">Continue to payment</button>
+                    <button type="button" disabled={busy || !form.videoId || !form.country || form.headline.trim().length < 3 || form.businessName.trim().length < 2 || (!Number.isSafeInteger(fundsCents) || fundsCents < minimum)} onClick={() => void create()} className="h-11 rounded-2xl bg-brand px-5 text-[14px] font-bold text-on-brand disabled:opacity-50">Continue to payment</button>
                   </span>
                 </div>
               </div>
@@ -315,7 +334,7 @@ export function AdStudio({ viewer }: { viewer: Viewer }) {
                         <p className="flex flex-wrap items-center gap-2"><span className="font-display text-[18px] font-bold">{c.headline}</span><span className={`rounded-full px-2.5 py-0.5 text-[12px] font-semibold ${cls}`}>{label}</span></p>
                         <p className="mt-0.5 truncate text-[13px] text-muted">{c.businessName} · {c.video?.title ?? 'video removed'} · {c.targetCountries.length ? c.targetCountries.join(', ') : 'every country'} · {usd(c.totalCents, locale)} of funds{c.spentCents !== undefined ? `, ${usd(c.spentCents, locale)} spent` : ''}</p>
                         {c.startDate && c.endDate && <p className="text-[13px] text-muted">{new Date(c.startDate).toLocaleDateString(locale)} – {new Date(c.endDate).toLocaleDateString(locale)}</p>}
-                        {c.viewsBought && <p className="text-[13px] text-muted">{c.impressions.toLocaleString(locale)} of {c.viewsBought.toLocaleString(locale)} views delivered (up to {c.viewsPerDay?.toLocaleString(locale)} a day){c.deliverUntil && c.impressions < c.viewsBought ? `; the rest by ${new Date(c.deliverUntil).toLocaleDateString(locale)}` : ''}</p>}
+                        {c.viewsBought && <p className="text-[13px] text-muted">{c.impressions.toLocaleString(locale)} of {c.viewsBought.toLocaleString(locale)} impressions delivered (up to {c.viewsPerDay?.toLocaleString(locale)} a day){c.deliverUntil && c.impressions < c.viewsBought ? `; the rest by ${new Date(c.deliverUntil).toLocaleDateString(locale)}` : ''}</p>}
                         {c.reviewNote && <p className={`mt-1 text-[13px] ${c.status === 'REJECTED' ? 'text-danger' : 'text-muted'}`}>Review note: {c.reviewNote}</p>}
                       </div>
                       <dl className="grid grid-cols-3 gap-4 text-center">
