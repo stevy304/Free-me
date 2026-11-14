@@ -249,7 +249,7 @@ export class VideoProcessor {
   private async safetyGate(video: Video, source: string, info: ProbeResult, work: string, signal?: AbortSignal): Promise<boolean> {
     if (video.safetyCheckedAt) return true;
     if (video.screeningClearedAt) { await this.prisma.video.update({ where: { id: video.id }, data: { safetyCheckedAt: new Date() } }); return true; }
-    const verdict = await checkVideo(this.prisma, this.config, video, () => frames(this.config.media.ffmpegPath, source, info, join(work, 'safety')), signal, { madeBy: info.madeBy });
+    const verdict = await checkVideo(this.prisma, this.config, video, () => frames(this.config.media.ffmpegPath, source, info, join(work, 'safety'), { everySeconds: this.config.safety.frameEverySeconds, max: this.config.safety.maxFrames }), signal, { madeBy: info.madeBy });
     signal?.throwIfAborted();
     this.log.log({ event: 'video_safety_checked', videoId: video.id, action: verdict.action, model: verdict.model, category: verdict.category, scanned: verdict.scanned, unscanned: verdict.unscanned, scores: verdict.scores });
     // The reason is written for the creator when a machine decided alone (the AI, or the file's own marks).

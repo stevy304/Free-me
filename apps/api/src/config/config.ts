@@ -30,6 +30,10 @@ export interface SafetyConfig {
   anthropicUrl: string | null;
   /** Comments the AI moderator checks per day at most (0: no limit); over it, low-risk comments get the word rules only. */
   aiCommentsPerDay: number;
+  /** The safety check looks at one picture every this many seconds of a video (SAFETY_FRAME_EVERY_SECONDS), so a short clip in a long video is not missed. */
+  frameEverySeconds: number;
+  /** ...and at most this many pictures per video (SAFETY_MAX_FRAMES). */
+  maxFrames: number;
 }
 
 /** Prices and payment providers (see ENVIRONMENT.md → Payments). Money is in US cents unless named otherwise. */
@@ -404,6 +408,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       reportHoldThreshold: count('REPORT_HOLD_THRESHOLD', 5),
       engine: (['openai', 'http'].includes(env.SAFETY_ENGINE?.trim() ?? '') ? env.SAFETY_ENGINE!.trim() : env.SAFETY_SCAN_URL?.trim() ? 'http' : 'none') as SafetyConfig['engine'],
       openaiKey: env.SAFETY_OPENAI_KEY?.trim() || null, anthropicUrl: env.SAFETY_ANTHROPIC_URL?.trim() || null, aiCommentsPerDay: Math.max(0, Number(env.SAFETY_AI_COMMENTS_PER_DAY) || 0), openaiUrl: env.SAFETY_OPENAI_URL?.trim() || null,
+      frameEverySeconds: Math.max(1, Number(env.SAFETY_FRAME_EVERY_SECONDS) || 10), maxFrames: Math.min(90, Math.max(1, Number(env.SAFETY_MAX_FRAMES) || 48)),
       unscannedReview: (['new', 'all', 'none'].includes(env.SAFETY_UNSCANNED_REVIEW?.trim() ?? '') ? env.SAFETY_UNSCANNED_REVIEW!.trim() : nodeEnv === 'test' ? 'none' : 'new') as SafetyConfig['unscannedReview'],
     },
   };

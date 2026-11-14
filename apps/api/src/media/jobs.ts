@@ -341,7 +341,7 @@ export class MediaJobs {
     if (v.sourceFileS3Key) {
       const file = join(work, `source${extname(v.sourceFileS3Key) || '.bin'}`);
       await this.storage.download(v.sourceFileS3Key, file, signal);
-      try { return await frames(this.config.media.ffmpegPath, file, await probe(this.config.media.ffprobePath, file), join(work, 'frames')); }
+      try { return await frames(this.config.media.ffmpegPath, file, await probe(this.config.media.ffprobePath, file), join(work, 'frames'), { everySeconds: this.config.safety.frameEverySeconds, max: this.config.safety.maxFrames }); }
       catch (e) { if (e instanceof AudioOnly) return []; throw e; }
     }
     const out: string[] = [];

@@ -78,6 +78,8 @@ Values for local development are in [.env.example](.env.example). In production 
 | `SAFETY_ENGINE` | | `none` (`http` when `SAFETY_SCAN_URL` is set) | What looks at pictures (and text) beyond the built-in rules: `openai`, `http` or `none`. See TRUST_AND_SAFETY.md |
 | `SAFETY_OPENAI_KEY` | with `SAFETY_ENGINE=openai` | | OpenAI API key for its moderation model (free to use). Frames and text are sent to OpenAI |
 | `SAFETY_UNSCANNED_REVIEW` | | `new` | Without a picture engine, which uploads a person checks before they are shown: `new` (Spaces under a week old or with fewer than 3 published videos), `all`, or `none` |
+| `SAFETY_FRAME_EVERY_SECONDS` | | `10` | The safety check looks at one picture every this many seconds of a video (short videos always get at least as many as before), so a short clip inside a long video is not stepped over |
+| `SAFETY_MAX_FRAMES` | | `48` (at most 90) | The most pictures taken from one video for the safety check. More pictures catch shorter clips and cost a little more to check |
 | `SAFETY_SCAN_TOKEN` | | | Sent as `Authorization: Bearer …` to the scanner |
 | `SAFETY_SCAN_TIMEOUT_MS` | | `60000` | How long to wait for the scanner |
 | `SAFETY_SCAN_FAIL_CLOSED` | | `false` | `true`: hold uploads when the scanner cannot be reached, instead of letting them through |

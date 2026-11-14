@@ -17,19 +17,33 @@ export function fingerprint(path: string): Promise<{ sha256: string; md5: string
   });
 }
 
-/** Up to 8 frames across the video, 640 px wide, for an outside matching service (perceptual hashes need pictures). */
-export async function frames(ffmpeg: string, source: string, info: ProbeResult, dir: string): Promise<string[]> {
+/** How many pictures to take: one every `everySeconds`, at least what short videos always got, never more than `max`. */
+export function frameCount(durationSeconds: number, everySeconds = 10, max = 48): number {
+  const base = Math.max(1, Math.min(8, Math.floor(durationSeconds / 2)));
+  return Math.max(base, Math.min(Math.max(1, max), Math.ceil(durationSeconds / Math.max(1, everySeconds))));
+}
+
+/**
+ * Frames across the video, 640 px wide, for the safety check (the AI moderator, a picture classifier, an outside
+ * matching service). Dense enough that a short explicit clip inside a long video is not stepped over: one every
+ * `everySeconds` (default 10), at most `max` (default 48), taken 4 at a time so a long video is still checked in about a minute.
+ */
+export async function frames(ffmpeg: string, source: string, info: ProbeResult, dir: string, opts: { everySeconds?: number; max?: number } = {}): Promise<string[]> {
   await mkdir(dir, { recursive: true });
-  const n = Math.max(1, Math.min(8, Math.floor(info.durationSeconds / 2)));
-  const out: string[] = [];
-  for (let i = 0; i < n; i++) {
-    const file = join(dir, `${i}.jpg`);
-    try {
-      await run(ffmpeg, ['-hide_banner', '-y', '-ss', ((info.durationSeconds * (i + 0.5)) / n).toFixed(2), '-i', source, '-frames:v', '1', '-vf', 'scale=640:-2,format=yuvj420p', '-q:v', '4', file]);
-      out.push((await readFile(file)).toString('base64'));
-    } catch { /* a frame that cannot be read is skipped */ }
-  }
-  return out;
+  const n = frameCount(info.durationSeconds, opts.everySeconds, opts.max);
+  const out: Array<string | null> = new Array(n).fill(null);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < n; i = next++) {
+      const file = join(dir, `${i}.jpg`);
+      try {
+        await run(ffmpeg, ['-hide_banner', '-y', '-ss', ((info.durationSeconds * (i + 0.5)) / n).toFixed(2), '-i', source, '-frames:v', '1', '-vf', 'scale=640:-2,format=yuvj420p', '-q:v', '4', file]);
+        out[i] = (await readFile(file)).toString('base64');
+      } catch { /* a frame that cannot be read is skipped */ }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, n) }, worker));
+  return out.filter((f): f is string => f !== null);
 }
 
 /**
