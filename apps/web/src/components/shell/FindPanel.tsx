@@ -70,7 +70,7 @@ export function FindPanel({ open, onClose }: { open: boolean; onClose: () => voi
   const row = (on: boolean) => `flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left ${on ? 'bg-surface' : 'hover:bg-surface'}`;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-[rgb(10_17_16/0.45)] p-0 backdrop-blur-sm sm:p-6 sm:pt-[10vh]" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} role="dialog" aria-modal="true" aria-label="Find">
+    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-[rgb(20_17_15/0.45)] p-0 backdrop-blur-sm sm:p-6 sm:pt-[10vh]" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} role="dialog" aria-modal="true" aria-label="Find">
       <div className="flex h-full w-full flex-col overflow-hidden bg-elevated shadow-[var(--shadow)] sm:h-auto sm:max-h-[78vh] sm:max-w-[720px] sm:rounded-3xl">
         <div className="flex items-center gap-3 border-b border-line px-5 py-4">
           <Icon.Search size={24} className="shrink-0 text-brand" />

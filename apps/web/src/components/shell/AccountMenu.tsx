@@ -36,14 +36,14 @@ export function AccountMenu({ viewer }: { viewer: Viewer }) {
   return (
     <div ref={box} className="relative">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} aria-label={t('account.menu')} className="rounded-xl p-0.5">
-        <Avatar name={name} src={viewer.profile?.avatarUrl} size={38} />
+        <Avatar name={name} src={viewer.profile?.avatarUrl ?? viewer.channel?.avatarUrl} size={38} />
       </button>
       {open && (
         <div role="menu" className="absolute right-0 top-12 z-50 max-h-[calc(100dvh-5rem)] w-[300px] overflow-y-auto rounded-2xl border border-line bg-elevated px-1.5 py-2 shadow-[var(--shadow)]">
           {view === 'main' ? (
             <>
               <div className="flex gap-3 px-4 pb-3 pt-2">
-                <Avatar name={name} src={viewer.profile?.avatarUrl} size={44} />
+                <Avatar name={name} src={viewer.profile?.avatarUrl ?? viewer.channel?.avatarUrl} size={44} />
                 <div className="min-w-0">
                   <p className="truncate font-display text-[16px] font-bold">{name}</p>
                   <p className="truncate text-[13px] text-muted">{viewer.channel ? `@${viewer.channel.handle}` : viewer.user.email}</p>

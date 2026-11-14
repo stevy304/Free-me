@@ -67,6 +67,7 @@ export const rw: Partial<Record<Key, string>> = {
   'find.twoLetters': 'Andika nibura inyuguti ebyiri.',
 
   'home.title': 'Ibigezweho',
+  'home.welcome': 'Murakaza neza, {name}',
   'home.subtitle': 'Komeza inkuru. Shaka ikurikira.',
   'home.continue': 'Komeza kureba',
   'home.yourTrail': 'Amateka yawe',
@@ -200,6 +201,8 @@ export const rw: Partial<Record<Key, string>> = {
   'watch.removed': 'Iyi videwo yakuweho. Reba Creator Hub umenye impamvu.',
   'watch.processing': 'Iyi videwo iracyategurwa.',
   'watch.spark': 'Spark',
+  'watch.save': 'Bika',
+  'watch.saved': 'Byabitswe',
   'watch.passAlong': 'Sangiza',
   'watch.copied': 'Byakoporowe',
   'watch.conversation': 'Ibitekerezo',

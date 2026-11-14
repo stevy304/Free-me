@@ -4,12 +4,12 @@
  */
 export const en = {
   // Navigation and header
-  'nav.current': 'Current',
+  'nav.current': 'Home',
   'nav.following': 'Following',
   'nav.moments': 'Moments',
   'nav.explore': 'Explore',
   'nav.main': 'Main',
-  'nav.me': 'Me',
+  'nav.me': 'You',
   'header.find': 'Find',
   'header.findShortcut': 'Find (press /)',
   'header.create': 'Create',
@@ -68,7 +68,8 @@ export const en = {
   'find.twoLetters': 'Type at least two letters.',
 
   // Home (Current)
-  'home.title': 'Current',
+  'home.title': 'Home',
+  'home.welcome': 'Welcome back, {name}',
   'home.subtitle': 'Pick up a story. Find your next one.',
   'home.continue': 'Continue watching',
   'home.yourTrail': 'Your Trail',
@@ -208,7 +209,9 @@ export const en = {
   'watch.removed': 'This video was removed. See Creator Hub for details.',
   'watch.processing': 'This video is still being processed.',
   'watch.spark': 'Spark',
-  'watch.passAlong': 'Pass along',
+  'watch.save': 'Save',
+  'watch.saved': 'Saved',
+  'watch.passAlong': 'Share',
   'watch.copied': 'Copied',
   'watch.conversation': 'Conversation',
   'watch.comments': 'Comments',

@@ -44,6 +44,32 @@ test('profile picture, Space picture and banner: images only, served publicly, r
   await viewer.put('/api/channels/mine/banner').set('Origin', WEB).set('Content-Type', 'image/png').send(PNG).expect(404);
 });
 
+test('one picture follows a person: a Space without its own picture shows the profile picture, in its videos and comments too', async () => {
+  const me = await creator('face@example.com', 'face');
+  const space = async () => (await request(ctx.http).get('/api/channels/face').expect(200)).body.channel;
+  expect((await space()).avatarUrl).toBeNull();
+  // The profile picture becomes the Space's picture...
+  const profile = (await me.put('/api/me/avatar').set('Origin', WEB).set('Content-Type', 'image/png').send(PNG).expect(200)).body.avatarUrl;
+  expect(await space()).toMatchObject({ avatarUrl: profile, avatarFromProfile: true });
+  // ...so it is next to the creator's videos and comments.
+  const ch = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'face' } });
+  const video = await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Hello', durationSeconds: 60, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date(), safetyCheckedAt: new Date() } });
+  expect((await request(ctx.http).get(`/api/videos/${video.id}`).expect(200)).body.video.channel.avatarUrl).toBe(profile);
+  await me.post(`/api/videos/${video.id}/comments`).set('Origin', WEB).send({ content: 'Thanks for watching!' }).expect(201);
+  expect((await request(ctx.http).get(`/api/videos/${video.id}/comments`).expect(200)).body.comments[0].author.avatarUrl).toBe(profile);
+  // A picture of the Space's own wins, and stays when the profile picture changes.
+  const own = (await me.put('/api/channels/mine/avatar').set('Origin', WEB).set('Content-Type', 'image/png').send(PNG).expect(200)).body.avatarUrl;
+  expect(await space()).toMatchObject({ avatarUrl: own, avatarFromProfile: false });
+  await new Promise((r) => setTimeout(r, 5));
+  const newer = (await me.put('/api/me/avatar').set('Origin', WEB).set('Content-Type', 'image/png').send(PNG).expect(200)).body.avatarUrl;
+  expect((await space()).avatarUrl).toBe(own);
+  // Removing the Space's own picture brings the profile picture back; removing that leaves the first letter.
+  expect((await me.delete('/api/channels/mine/avatar').set('Origin', WEB).expect(200)).body.avatarUrl).toBe(newer);
+  expect(await space()).toMatchObject({ avatarUrl: newer, avatarFromProfile: true });
+  await me.delete('/api/me/avatar').set('Origin', WEB).expect(200);
+  expect(await space()).toMatchObject({ avatarUrl: null, avatarFromProfile: false });
+});
+
 const redisTest = process.env.REDIS_URL ? test : test.skip;
 redisTest('watch time: heartbeats after the view count real time only, at most 2x speed and the length of the video', async () => {
   await creator('watched@example.com', 'watched');

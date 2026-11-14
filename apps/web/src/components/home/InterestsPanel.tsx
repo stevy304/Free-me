@@ -35,10 +35,11 @@ export function InterestsPanel({ interests }: { interests: HomeFeed['interests']
   };
 
   return (
-    <aside className="flex flex-col rounded-[20px] border border-line bg-elevated p-5">
+    <aside className="facet flex flex-col bg-elevated p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-[17px] font-bold">{t('interests.title')}</h2>
+          <h2 className="text-[18px] font-bold">{t('interests.title')}</h2>
+          <div aria-hidden="true" className="zigzag mt-1 w-14" />
           <p className="mt-1 text-[13px] leading-5 text-muted">{t('interests.text')}</p>
         </div>
         {viewer && !editing && <button type="button" onClick={() => setEditing(true)} className="shrink-0 rounded-lg px-2 py-1 text-[13px] font-semibold text-brand hover:bg-brand-soft">{t('interests.edit')}</button>}
@@ -46,12 +47,12 @@ export function InterestsPanel({ interests }: { interests: HomeFeed['interests']
       <div className="mt-3.5 flex flex-wrap gap-2">
         {shown.map((i) => {
           const on = picked.has(i.slug);
-          const cls = `rounded-[10px] px-3 py-1.5 text-[13px] font-medium ${on ? 'bg-brand-soft font-semibold text-brand' : 'bg-surface hover:bg-surface-hover'}`;
+          const cls = `facet-sm px-3 py-1.5 text-[13px] font-medium ${on ? 'bg-strong font-semibold text-on-strong' : 'bg-surface hover:bg-surface-hover'}`;
           return editing
             ? <button key={i.slug} type="button" aria-pressed={on} onClick={() => toggle(i.slug)} className={cls}>{on && <Icon.Check size={13} strokeWidth={3} className="-ml-0.5 mr-1 inline" />}{topicName(t, i.slug, i.name)}</button>
             : <Link key={i.slug} href={`/explore?topic=${i.slug}`} className={cls}>{topicName(t, i.slug, i.name)}</Link>;
         })}
-        {!viewer && <Link href="/login?returnTo=/" className="rounded-[10px] bg-surface px-3 py-1.5 text-[13px] font-semibold text-brand hover:bg-surface-hover">+ {t('interests.pick')}</Link>}
+        {!viewer && <Link href="/login?returnTo=/" className="facet-sm bg-surface px-3 py-1.5 text-[13px] font-semibold text-brand hover:bg-surface-hover">+ {t('interests.pick')}</Link>}
       </div>
       {editing && (
         <div className="mt-3 flex items-center gap-2">

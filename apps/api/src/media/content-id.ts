@@ -323,9 +323,10 @@ export async function findMatches(prisma: PrismaClient, fp: Fingerprint, minSeco
         const part = comparePicture(look.picture.frames, target.frames, Number(d));
         // A still or nearly still picture (a slide, a plain talking head) proves little by itself: the matched stretch
         // must keep changing. Such videos are matched by their sound.
-        // An edited view (mirrored, sped up…) must beat the plain one clearly, so a plain copy is not labelled edited.
+        // An edited view (mirrored, sped up…) must beat the plain one clearly (15% per edit), so a plain copy is not
+        // labelled edited: a sped-up view of a short clip has more samples, so it can line up a second or two more.
         const edits = [...new Set([...look.edits, ...extra])];
-        const score = part.seconds - (edits.length ? 2 : 0);
+        const score = part.seconds * (1 - 0.15 * edits.length);
         if (part.seconds >= minSeconds && (part.distinct ?? 0) >= Math.ceil(minSeconds / 2) && (!m.picture || score > (m.pictureScore ?? 0))) {
           m.picture = { ...part, distinct: undefined }; m.pictureEdits = edits; m.pictureScore = score;
         }

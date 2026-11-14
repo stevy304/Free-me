@@ -48,7 +48,7 @@ export const defaultGraphics = (): Graphics => ({
   lower: { show: false, name: '', title: '', style: 'brand', autoHideSec: 0, anim: 'slide' },
   ticker: { show: false, label: 'LIVE', text: '', speed: 1, anim: 'slide' },
   clock: { show: false, anim: 'fade' },
-  brand: { primary: BRAND_PRIMARY, accent: '#f5b95c' },
+  brand: { primary: BRAND_PRIMARY, accent: '#e8b04a' },
 });
 
 const scene = (id: string, name: string, p: Partial<SceneDef>): SceneDef => ({

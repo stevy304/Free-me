@@ -40,7 +40,7 @@ export default async function Current() {
   return (
     <div className="mx-auto max-w-[1600px] px-4 pt-3 sm:px-6">
       <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div><h1 className="font-display text-[32px] font-extrabold">{t('home.title')}</h1><p className="text-sm text-muted">{t('home.subtitle')}</p></div>
+        <div><h1 className="font-display text-[30px] font-extrabold sm:text-[34px]">{viewer ? t('home.welcome', { name: (viewer.profile?.displayName ?? viewer.channel?.name ?? '').split(' ')[0] || viewer.user.email.split('@')[0] }) : t('home.title')}</h1><p className="text-sm text-muted">{t('home.subtitle')}</p></div>
       </header>
       <LiveStrip streams={liveNow} label={t('home.liveNow')} />
       {unfinished.length > 0 && (
@@ -61,18 +61,20 @@ export default async function Current() {
       )}
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
         {s ? (
-          <Link href={`/watch?v=${s.id}`} className="group relative block min-h-[300px] overflow-hidden rounded-[24px] bg-surface sm:min-h-[380px]">
+          <Link href={`/watch?v=${s.id}`} className="facet-lg group relative block min-h-[300px] overflow-hidden bg-surface sm:min-h-[380px]">
             {s.thumbnailUrl && <img src={s.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.02]" />}
-            <div className="absolute inset-0 bg-gradient-to-t from-[rgb(5_15_14/0.9)] via-[rgb(5_15_14/0.35)] to-transparent" />
-            <span className="absolute left-4 top-4 rounded-full bg-white/90 px-2.5 py-0.5 text-[12px] font-semibold text-[#10201f]">{duration(s.durationSeconds)}</span>
-            <div className="absolute inset-x-0 bottom-0 p-5 sm:p-7">
-              <p className="text-[12px] font-semibold uppercase tracking-[0.1em] text-[#f5c46b]">{t('home.spotlight')}{s.category ? ` · ${topicName(t, s.category.slug, s.category.name)}` : ''}</p>
+            <div className="absolute inset-0 bg-gradient-to-t from-[rgb(20_17_15/0.9)] via-[rgb(20_17_15/0.35)] to-transparent" />
+            <span className="facet-sm absolute left-4 top-4 bg-[rgb(20_17_15/0.82)] px-2.5 py-0.5 text-[12px] font-semibold text-[#f4ede3]">{duration(s.durationSeconds)}</span>
+            <div className="absolute inset-x-0 bottom-[10px] p-5 sm:p-7">
+              <p className="text-[12px] font-semibold uppercase tracking-[0.1em] text-[#e8b04a]">{t('home.spotlight')}{s.category ? ` · ${topicName(t, s.category.slug, s.category.name)}` : ''}</p>
               <h2 className="mt-2 max-w-[680px] text-[26px] font-extrabold leading-[1.1] text-white sm:text-[34px]">{s.title}</h2>
               <div className="mt-4 flex flex-wrap items-center gap-3">
-                <span className="inline-flex h-10 items-center gap-2 rounded-xl bg-accent px-4 text-[14px] font-semibold text-[#10201f]"><Icon.Play size={18} />{t('home.watchNow')}</span>
+                <span className="facet-sm inline-flex h-10 items-center gap-2 bg-accent px-4 text-[14px] font-semibold text-[#14110f]"><Icon.Play size={18} />{t('home.watchNow')}</span>
                 <span className="flex items-center gap-2 text-[14px] text-white/90"><Avatar name={s.channel.name} src={s.channel.avatarUrl} size={30} />{s.channel.name} · <span suppressHydrationWarning>{followersLabel(s.channelFollowers, locale)}</span></span>
               </div>
             </div>
+            {/* The Imigongo band: Free Me's signature along the Spotlight. */}
+            <div aria-hidden="true" className="imigongo-band absolute inset-x-0 bottom-0" />
           </Link>
         ) : <div />}
         {/* On phones the panel comes after Trending, so the first screens are videos. */}
@@ -135,7 +137,7 @@ function SectionHead({ id, title, note, href, link }: { id?: string; title: stri
   return (
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0 sm:flex sm:items-baseline sm:gap-2.5">
-        <h2 id={id} className="text-[22px] font-bold leading-tight">{title}</h2>
+        <div><h2 id={id} className="text-[22px] font-bold leading-tight">{title}</h2><div aria-hidden="true" className="zigzag mt-1 w-14" /></div>
         <p className="text-[13px] font-medium text-muted">{note}</p>
       </div>
       <Link href={href} className="mt-1 flex shrink-0 items-center gap-0.5 text-[13px] font-semibold text-brand hover:underline">{link}<Icon.ChevronRight size={15} /></Link>

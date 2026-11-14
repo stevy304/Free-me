@@ -217,12 +217,12 @@ export function StudioLive({ basic = false }: { basic?: boolean }) {
   if (!basic && !st.premium) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-        <section className="flex flex-col items-center gap-4 rounded-[28px] bg-[#071312] px-6 py-10 text-center text-white">
+        <section className="flex flex-col items-center gap-4 rounded-2xl bg-[#071312] px-6 py-10 text-center text-white">
           <span className="grid h-16 w-16 place-items-center rounded-full bg-[#e5484d]"><Icon.Live size={34} /></span>
           <h1 className="font-display text-[30px] font-extrabold">Signal Room is part of Premium</h1>
           <p className="max-w-md text-[15px] text-[#c9d6d4]">Go live from your browser, or from OBS, a TV encoder or a camera. Your followers are told, viewers chat, and the recording is kept as a video.</p>
           <Link href="/go-live" className="font-semibold text-white underline">Go live from your browser for free</Link>
-          <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#f5b95c] to-[#e39a2a] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />Upgrade</Link>
+          <Link href="/premium" className="flex h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#e8b04a] to-[#d9962e] px-5 text-[14px] font-bold text-[#2a1a02]"><Icon.PremiumStar size={18} filled />Upgrade</Link>
         </section>
       </div>
     );

@@ -2,7 +2,7 @@
 export type Role = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'MODERATOR' | 'ADMIN';
 
 export interface ChannelInfo {
-  id: string; handle: string; name: string; description: string | null; avatarUrl: string | null; bannerUrl: string | null;
+  id: string; handle: string; name: string; description: string | null; avatarUrl: string | null; /** The Space shows its owner's profile picture (it has none of its own). */ avatarFromProfile?: boolean; bannerUrl: string | null;
   country: string | null; defaultLanguage: string | null; isVerified: boolean; badge?: 'verified' | 'premium' | null; followerCount: number; totalViews: string; createdAt: string;
 }
 export interface Profile { displayName: string; avatarUrl: string | null; bio: string | null; country: string | null; city: string | null; preferredLanguage: string; timezone: string | null; personalizedRecommendations?: boolean }

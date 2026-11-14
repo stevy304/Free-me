@@ -31,7 +31,7 @@ test('like, save, comment, history, report; a moderator removes the video; the c
   const title = `Lake at dawn ${run}`;
   const dir = mkdtempSync(join(tmpdir(), 'fm-e2e-'));
   const clip = join(dir, `${title}.mp4`);
-  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25:duration=5', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=5', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-shortest', '-metadata', `comment=e2e ${run}`, clip]);
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'life=size=640x360:rate=25:mold=10:ratio=0.3:seed=11', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=5', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-shortest', '-metadata', `comment=e2e ${run}`, clip]);
 
   // Creator publishes a video.
   const creator = await signedIn(browser, `lake.${run}@example.com`, '/channel/create');
@@ -61,7 +61,7 @@ test('like, save, comment, history, report; a moderator removes the video; the c
   await viewer.getByRole('button', { name: /^Spark/ }).click();
   await expect(viewer.getByRole('button', { name: 'Spark (1)' })).toHaveAttribute('aria-pressed', 'true');
 
-  await viewer.getByRole('button', { name: 'Keep', exact: true }).click();
+  await viewer.getByRole('button', { name: 'Save', exact: true }).click();
   const save = viewer.getByRole('dialog', { name: 'Keep in…' });
   await save.getByRole('checkbox', { name: /Kept/ }).click();
   await expect(save.getByRole('checkbox', { name: /Kept/ })).toHaveAttribute('aria-checked', 'true');
@@ -70,7 +70,7 @@ test('like, save, comment, history, report; a moderator removes the video; the c
   await save.getByRole('button', { name: 'Create' }).click();
   await expect(save.getByRole('checkbox', { name: /Calm mornings/ })).toHaveAttribute('aria-checked', 'true');
   await save.getByRole('button', { name: 'Close' }).click();
-  await expect(viewer.getByRole('button', { name: 'Kept', exact: true })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Saved', exact: true })).toBeVisible();
 
   await viewer.getByLabel('Join the conversation…').fill('What a peaceful place.');
   await viewer.getByRole('button', { name: 'Post', exact: true }).click();

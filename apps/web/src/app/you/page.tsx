@@ -23,7 +23,7 @@ export default async function You() {
   return (
     <div className="mx-auto max-w-xl px-4 py-6">
       <div className="flex items-center gap-4">
-        <Avatar name={name} src={viewer.profile?.avatarUrl} size={72} />
+        <Avatar name={name} src={viewer.profile?.avatarUrl ?? viewer.channel?.avatarUrl} size={72} />
         <div className="min-w-0"><h1 className="truncate text-[24px] font-semibold">{name}</h1><p className="truncate text-[14px] text-muted">{viewer.channel ? `@${viewer.channel.handle}` : viewer.user.email}</p></div>
       </div>
       <nav className="mt-6">

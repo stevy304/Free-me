@@ -2,7 +2,7 @@ import type { Key } from './en';
 
 /** French. Product names stay as they are (Moments, Creator Hub, Signal Room, Ad Studio, Premium). */
 export const fr: Partial<Record<Key, string>> = {
-  'nav.current': 'À la une',
+  'nav.current': 'Accueil',
   'nav.following': 'Abonnements',
   'nav.moments': 'Moments',
   'nav.explore': 'Explorer',
@@ -62,7 +62,8 @@ export const fr: Partial<Record<Key, string>> = {
   'find.recent': 'Récents',
   'find.twoLetters': 'Saisissez au moins deux lettres.',
 
-  'home.title': 'À la une',
+  'home.title': 'Accueil',
+  'home.welcome': 'Bon retour, {name}',
   'home.subtitle': 'Reprenez une histoire. Trouvez la suivante.',
   'home.continue': 'Reprendre la lecture',
   'home.yourTrail': 'Votre historique',
@@ -196,6 +197,8 @@ export const fr: Partial<Record<Key, string>> = {
   'watch.removed': 'Cette vidéo a été retirée. Voir Creator Hub pour les détails.',
   'watch.processing': 'Cette vidéo est encore en cours de traitement.',
   'watch.spark': 'Spark',
+  'watch.save': 'Enregistrer',
+  'watch.saved': 'Enregistrée',
   'watch.passAlong': 'Partager',
   'watch.copied': 'Copié',
   'watch.conversation': 'Discussion',

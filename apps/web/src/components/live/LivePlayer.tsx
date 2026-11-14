@@ -155,10 +155,10 @@ export function LivePlayer({ src, latency = 'normal', className = '', overlay, m
                 {level === -1 ? `Auto${current ? ` · ${current}p` : ''}` : `${qualities[level]}p`}
               </button>
               {menu && (
-                <div role="menu" className="absolute bottom-10 right-0 w-36 overflow-hidden rounded-xl bg-[#0b1413]/95 py-1 text-[13px] text-white shadow-xl">
+                <div role="menu" className="absolute bottom-10 right-0 w-36 overflow-hidden rounded-xl bg-[#14110f]/95 py-1 text-[13px] text-white shadow-xl">
                   {[-1, ...qualities.map((_, i) => i).reverse()].map((i) => (
                     <button key={i} type="button" role="menuitemradio" aria-checked={level === i} onClick={() => { if (hls.current) hls.current.currentLevel = i; setLevel(i); setMenu(false); }}
-                      className={`flex w-full items-center justify-between px-3 py-2 text-left hover:bg-white/10 ${level === i ? 'font-bold text-[#2bb5ab]' : ''}`}>
+                      className={`flex w-full items-center justify-between px-3 py-2 text-left hover:bg-white/10 ${level === i ? 'font-bold text-[#22ada2]' : ''}`}>
                       {i === -1 ? 'Auto' : `${qualities[i]}p`}{level === i && <Icon.Check size={16} />}
                     </button>
                   ))}

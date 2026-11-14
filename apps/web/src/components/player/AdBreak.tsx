@@ -76,11 +76,11 @@ export function AdBreak({ slot, videoId, muted, onDone }: { slot: AdSlot; videoI
 
       {/* Bottom-left: who is advertising, and where "Visit" goes. */}
       <div className="absolute bottom-4 left-3 flex max-w-[calc(100%-6.5rem)] items-center gap-2 rounded-xl bg-black/60 p-1.5 pr-2 sm:max-w-sm sm:gap-2.5 sm:p-2 sm:pr-2.5 backdrop-blur-sm sm:bottom-5 sm:left-4">
-        <span aria-hidden className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#f5b95c] font-display text-[16px] font-extrabold text-[#2a1a02]">{slot.ad.businessName.trim().charAt(0).toUpperCase() || 'A'}</span>
+        <span aria-hidden className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#e8b04a] font-display text-[16px] font-extrabold text-[#2a1a02]">{slot.ad.businessName.trim().charAt(0).toUpperCase() || 'A'}</span>
         <span className="min-w-0 flex-1 leading-tight">
           <span className="block truncate text-[13px] font-bold">{slot.ad.headline}</span>
           <span className="flex items-center gap-1.5 text-[11.5px] text-white/75">
-            <span className="rounded bg-[#f5b95c] px-1 text-[10px] font-extrabold uppercase tracking-wide text-[#2a1a02]">Sponsored</span>
+            <span className="rounded bg-[#e8b04a] px-1 text-[10px] font-extrabold uppercase tracking-wide text-[#2a1a02]">Sponsored</span>
             <span className="hidden truncate sm:inline">{site}</span>
             <span className="tabular-nums"><span className="hidden sm:inline">· </span>{clock(remaining)}</span>
           </span>
@@ -97,7 +97,7 @@ export function AdBreak({ slot, videoId, muted, onDone }: { slot: AdSlot; videoI
       </div>
 
       {/* A thin yellow bar shows how much of the ad is left. */}
-      <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20" aria-hidden><div className="h-full bg-[#f5b95c] transition-[width] duration-200 ease-linear" style={{ width: `${progress}%` }} /></div>
+      <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20" aria-hidden><div className="h-full bg-[#e8b04a] transition-[width] duration-200 ease-linear" style={{ width: `${progress}%` }} /></div>
     </div>
   );
 }

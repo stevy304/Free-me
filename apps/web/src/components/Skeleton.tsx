@@ -14,7 +14,7 @@ export function Bone({ className = '' }: { className?: string }) {
 export function CardBone() {
   return (
     <div>
-      <Bone className="aspect-[16/10] rounded-[20px]" />
+      <Bone className="aspect-[16/10] rounded-2xl" />
       <div className="mt-2.5 flex items-center gap-2"><Bone className="h-[22px] w-[22px] rounded-full" /><Bone className="h-3.5 w-2/3" /></div>
     </div>
   );
@@ -50,8 +50,8 @@ export function FeedSkeleton({ spotlight = true }: { spotlight?: boolean }) {
       <Bone className="mt-2 h-4 w-64" />
       {spotlight && (
         <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_340px]">
-          <Bone className="min-h-[300px] rounded-[24px] sm:min-h-[380px]" />
-          <Bone className="hidden rounded-[24px] lg:block" />
+          <Bone className="min-h-[300px] rounded-2xl sm:min-h-[380px]" />
+          <Bone className="hidden rounded-2xl lg:block" />
         </div>
       )}
       <ShelfBone />
@@ -64,15 +64,15 @@ export function FeedSkeleton({ spotlight = true }: { spotlight?: boolean }) {
 export function WatchSkeleton() {
   return (
     <Loading label="Loading video">
-      <div className="bg-[#050a0a] sm:px-6 sm:py-6">
+      <div className="bg-[#0b0908] sm:px-6 sm:py-6">
         <div className="mx-auto grid max-w-[1760px] gap-6 lg:grid-cols-[360px_1fr]">
-          <div className="order-2 hidden space-y-4 rounded-[24px] bg-white/5 p-5 lg:order-1 lg:block">
+          <div className="order-2 hidden space-y-4 rounded-2xl bg-white/5 p-5 lg:order-1 lg:block">
             {Array.from({ length: 5 }, (_, i) => (
               <div key={i} className="flex gap-3"><div className="aspect-[16/10] w-[150px] shrink-0 rounded-xl bg-white/10 motion-safe:animate-pulse" /><div className="flex-1 space-y-2 pt-1"><div className="h-3.5 rounded bg-white/10" /><div className="h-3 w-2/3 rounded bg-white/10" /></div></div>
             ))}
           </div>
           <div className="order-1 lg:order-2">
-            <div className="aspect-video w-full bg-white/[0.06] motion-safe:animate-pulse sm:rounded-[24px]" />
+            <div className="aspect-video w-full bg-white/[0.06] motion-safe:animate-pulse sm:rounded-2xl" />
             <div className="space-y-3 px-4 py-4 sm:px-0">
               <div className="h-7 w-3/4 rounded-lg bg-white/10" />
               <div className="flex gap-3"><div className="h-4 w-40 rounded bg-white/10" /></div>
@@ -91,7 +91,7 @@ export function ChannelSkeleton() {
     <Loading label="Loading Space" className="mx-auto max-w-[1284px] px-4 pb-10 sm:px-6">
       <Bone className="mt-2 aspect-[6/1] w-full rounded-2xl" />
       <div className="mt-5 flex items-center gap-5">
-        <Bone className="h-20 w-20 shrink-0 rounded-[28px] sm:h-40 sm:w-40" />
+        <Bone className="h-20 w-20 shrink-0 rounded-2xl sm:h-40 sm:w-40" />
         <div className="flex-1 space-y-3"><Bone className="h-8 w-56" /><Bone className="h-4 w-72 max-w-full" /><Bone className="h-10 w-28" /></div>
       </div>
       <div className="mt-6 flex gap-6 border-b border-line pb-3"><Bone className="h-5 w-16" /><Bone className="h-5 w-16" /></div>
@@ -108,7 +108,7 @@ export function ResultsSkeleton() {
       <Bone className="mt-2 h-4 w-32" />
       <div className="mt-8 space-y-5">
         {Array.from({ length: 5 }, (_, i) => (
-          <div key={i} className="flex gap-4"><Bone className="aspect-[16/10] w-[42%] max-w-[340px] shrink-0 rounded-[20px]" /><div className="flex-1 space-y-2.5 pt-1"><Bone className="h-5 w-4/5" /><Bone className="h-4 w-40" /><Bone className="h-3.5 w-32" /></div></div>
+          <div key={i} className="flex gap-4"><Bone className="aspect-[16/10] w-[42%] max-w-[340px] shrink-0 rounded-2xl" /><div className="flex-1 space-y-2.5 pt-1"><Bone className="h-5 w-4/5" /><Bone className="h-4 w-40" /><Bone className="h-3.5 w-32" /></div></div>
         ))}
       </div>
     </Loading>

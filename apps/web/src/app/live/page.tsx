@@ -22,7 +22,7 @@ export default async function LiveNow() {
           {streams.map((s) => (
             <li key={s.id}>
               <Link href={`/live/${s.id}`} className="group block overflow-hidden rounded-3xl border border-line bg-elevated hover:border-[#e5484d]">
-                <div className="relative grid aspect-video place-items-center bg-[radial-gradient(circle_at_30%_30%,#123b38,#050a0a)]">
+                <div className="relative grid aspect-video place-items-center bg-[radial-gradient(circle_at_30%_30%,#123b38,#0b0908)]">
                   <Avatar name={s.channel.name} src={s.channel.avatarUrl} size={72} />
                   <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-md bg-[#e5484d] px-2 py-0.5 text-[12px] font-extrabold uppercase text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />{t('live.badge')}</span>
                   <span className="absolute bottom-3 right-3 flex items-center gap-1 rounded-md bg-black/70 px-2 py-0.5 text-[12px] font-semibold text-white"><Icon.Eye size={14} />{s.viewers}</span>

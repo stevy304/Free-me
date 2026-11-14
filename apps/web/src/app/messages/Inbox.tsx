@@ -79,7 +79,7 @@ export function Inbox({ initialId, to }: { initialId: string | null; to: string 
   return (
     <div className="mx-auto flex h-[calc(100dvh-4.5rem)] max-w-[1200px] gap-5 px-0 py-0 sm:h-[calc(100dvh-5.5rem)] sm:px-6 sm:py-4">
       {/* Conversations */}
-      <aside className={`min-h-0 w-full flex-col rounded-none border-line bg-elevated sm:rounded-[24px] sm:border lg:flex lg:w-[340px] lg:shrink-0 ${active ? 'hidden' : 'flex'}`}>
+      <aside className={`min-h-0 w-full flex-col rounded-none border-line bg-elevated sm:rounded-2xl sm:border lg:flex lg:w-[340px] lg:shrink-0 ${active ? 'hidden' : 'flex'}`}>
         <div className="px-5 pb-2 pt-5">
           <h1 className="flex items-center gap-2 text-[22px] font-extrabold uppercase tracking-wide text-brand">Messages<span className="grid h-6 w-6 place-items-center rounded-md bg-brand text-on-brand"><Icon.Message size={15} /></span></h1>
           <div className="imigongo mt-3" aria-hidden />
@@ -106,7 +106,7 @@ export function Inbox({ initialId, to }: { initialId: string | null; to: string 
       </aside>
 
       {/* The open conversation */}
-      <section className={`min-h-0 flex-1 flex-col rounded-none border-line bg-elevated sm:rounded-[24px] sm:border lg:flex ${active ? 'flex' : 'hidden'}`} aria-label={other ? `Conversation with ${other.name}` : 'Conversation'}>
+      <section className={`min-h-0 flex-1 flex-col rounded-none border-line bg-elevated sm:rounded-2xl sm:border lg:flex ${active ? 'flex' : 'hidden'}`} aria-label={other ? `Conversation with ${other.name}` : 'Conversation'}>
         {!active ? (
           <div className="grid flex-1 place-items-center p-8 text-center text-muted">
             <div><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-brand-soft text-brand"><Icon.Message size={30} /></span><p className="mt-4 text-[15px]">Choose a conversation.</p></div>
@@ -138,7 +138,7 @@ export function Inbox({ initialId, to }: { initialId: string | null; to: string 
                   const gap = !prev || prev.mine !== m.mine;
                   return (
                     <div key={m.id} className={`flex ${m.mine ? 'justify-end' : 'justify-start'} ${gap ? 'mt-2' : ''}`}>
-                      <p title={new Date(m.at).toLocaleString(locale)} className={`max-w-[78%] whitespace-pre-wrap break-words rounded-[20px] px-4 py-2.5 text-[15px] leading-snug ${m.mine ? 'rounded-br-md bg-brand text-on-brand' : 'rounded-bl-md bg-surface text-ink'}`}>{m.body}</p>
+                      <p title={new Date(m.at).toLocaleString(locale)} className={`max-w-[78%] whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-[15px] leading-snug ${m.mine ? 'rounded-br-md bg-brand text-on-brand' : 'rounded-bl-md bg-surface text-ink'}`}>{m.body}</p>
                     </div>
                   );
                 })}
@@ -153,8 +153,8 @@ export function Inbox({ initialId, to }: { initialId: string | null; to: string 
                 <label htmlFor="dm-draft" className="sr-only">Message</label>
                 <textarea id="dm-draft" rows={1} value={draft} maxLength={2000} onChange={(e) => setDraft(e.target.value)} placeholder="Write a message…"
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }}
-                  className="max-h-40 min-h-[46px] flex-1 resize-none rounded-[16px] border border-line bg-surface px-4 py-3 text-[15px] outline-none focus:border-brand" />
-                <button type="submit" disabled={!draft.trim() || sending} aria-label="Send" className="grid h-[46px] w-[46px] shrink-0 place-items-center rounded-[16px] bg-brand text-on-brand disabled:opacity-50">
+                  className="max-h-40 min-h-[46px] flex-1 resize-none rounded-xl border border-line bg-surface px-4 py-3 text-[15px] outline-none focus:border-brand" />
+                <button type="submit" disabled={!draft.trim() || sending} aria-label="Send" className="grid h-[46px] w-[46px] shrink-0 place-items-center rounded-xl bg-brand text-on-brand disabled:opacity-50">
                   {sending ? <Icon.Spinner size={18} className="animate-spin" /> : <Icon.Message size={22} filled />}
                 </button>
               </form>

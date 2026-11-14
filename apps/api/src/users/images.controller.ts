@@ -8,6 +8,7 @@ import { APP_CONFIG, type AppConfig } from '../config/config';
 import { STORAGE } from '../media/queue';
 import type { Storage } from '../media/storage';
 import { feedsChanged } from '../catalog/feed-cache';
+import { syncSpacePicture } from './pictures';
 
 const IMAGE: Array<[string, number[], string]> = [['image/jpeg', [0xff, 0xd8, 0xff], '.jpg'], ['image/png', [0x89, 0x50, 0x4e, 0x47], '.png'], ['image/webp', [0x52, 0x49, 0x46, 0x46], '.webp']];
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -66,6 +67,7 @@ export class ImagesController {
     const url = await this.store('profile-avatar', auth.user.id, req);
     await this.prisma.profile.upsert({ where: { userId: auth.user.id }, create: { userId: auth.user.id, displayName: auth.user.email.split('@')[0], avatarUrl: url }, update: { avatarUrl: url } });
     await this.audit.record({ userId: auth.user.id, action: 'PROFILE_UPDATED', entityType: 'User', entityId: auth.user.id, req, details: { fields: ['avatarUrl'] } });
+    if (await syncSpacePicture(this.prisma, auth.user.id)) await feedsChanged();
     return { avatarUrl: url };
   }
 
@@ -75,6 +77,7 @@ export class ImagesController {
   async removeProfileAvatar(@CurrentAuth() auth: AuthContext) {
     await this.clear('profile-avatar', auth.user.id);
     await this.prisma.profile.updateMany({ where: { userId: auth.user.id }, data: { avatarUrl: null } });
+    if (await syncSpacePicture(this.prisma, auth.user.id)) await feedsChanged();
     return { avatarUrl: null };
   }
 
@@ -84,7 +87,7 @@ export class ImagesController {
   async channelAvatar(@CurrentAuth() auth: AuthContext, @Req() req: AppRequest) {
     const ch = await this.myChannel(auth);
     const url = await this.store('channel-avatar', ch.id, req);
-    await this.prisma.channel.update({ where: { id: ch.id }, data: { avatarUrl: url } });
+    await this.prisma.channel.update({ where: { id: ch.id }, data: { avatarUrl: url, avatarFromProfile: false } });
     await this.audit.record({ userId: auth.user.id, action: 'CHANNEL_UPDATED', entityType: 'Channel', entityId: ch.id, req, details: { fields: ['avatarUrl'] } });
     await feedsChanged();
     return { avatarUrl: url };
@@ -92,13 +95,16 @@ export class ImagesController {
 
   @Delete('channels/mine/avatar')
   @HttpCode(200)
-  @ApiOperation({ summary: "Remove the Space's picture (its first letter shows instead)" })
+  @ApiOperation({ summary: "Remove the Space's picture (the owner's profile picture, or the Space's first letter, shows instead)" })
   async removeChannelAvatar(@CurrentAuth() auth: AuthContext) {
     const ch = await this.myChannel(auth);
     await this.clear('channel-avatar', ch.id);
-    await this.prisma.channel.update({ where: { id: ch.id }, data: { avatarUrl: null } });
+    await this.prisma.channel.update({ where: { id: ch.id }, data: { avatarUrl: null, avatarFromProfile: false } });
+    // Without its own picture, the Space shows the owner's profile picture again.
+    await syncSpacePicture(this.prisma, auth.user.id);
     await feedsChanged();
-    return { avatarUrl: null };
+    const now = await this.prisma.channel.findUnique({ where: { id: ch.id }, select: { avatarUrl: true } });
+    return { avatarUrl: now?.avatarUrl ?? null };
   }
 
   @Put('channels/mine/banner')

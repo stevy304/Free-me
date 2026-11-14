@@ -228,6 +228,8 @@ model Channel {
   name                  String
   description           String?
   avatarUrl             String?
+  /// The Space has no picture of its own and shows its owner's profile picture (kept in step: users/pictures.ts)
+  avatarFromProfile     Boolean           @default(false)
   bannerUrl             String?
   country               String?           // ISO 3166-1 alpha-2
   defaultLanguage       String?           // BCP 47

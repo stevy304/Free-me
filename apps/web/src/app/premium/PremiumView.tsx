@@ -90,7 +90,7 @@ export function PremiumView({ viewer }: { viewer: Viewer }) {
       {error && <p role="alert" className="mb-4 rounded-2xl bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p>}
       {watching?.status === 'PENDING' && <p role="status" className="mb-4 flex items-center gap-2 rounded-2xl bg-surface px-4 py-3 text-[14px]"><Icon.Spinner size={18} className="animate-spin" />{t('plans.confirming')}</p>}
 
-      <section className="relative overflow-hidden rounded-[28px] bg-[#071312] px-6 py-8 text-white sm:px-10 sm:py-10">
+      <section className="relative overflow-hidden rounded-2xl bg-[#071312] px-6 py-8 text-white sm:px-10 sm:py-10">
         <div aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-[radial-gradient(circle,#2bc4b8_0%,transparent_65%)] opacity-40" />
         <div aria-hidden className="pointer-events-none absolute -bottom-28 left-10 h-72 w-72 rounded-full bg-[radial-gradient(circle,#f2a93b_0%,transparent_65%)] opacity-25" />
         <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center">

@@ -14,8 +14,8 @@ export function GET() {
     display: 'standalone',
     display_override: ['standalone', 'minimal-ui'],
     orientation: 'any',
-    background_color: '#f7f5ef',
-    theme_color: '#0c827e',
+    background_color: '#14110f',
+    theme_color: '#14110f',
     categories: ['entertainment', 'video', 'social'],
     icons: [
       { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
