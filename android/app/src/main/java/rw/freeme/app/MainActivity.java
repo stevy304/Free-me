@@ -137,10 +137,13 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 Uri u = req.getUrl();
-                // Free Me, and GitHub's sign-in for a private Codespace, stay in the app; other sites open outside.
-                if (home != null && sameSite(u, Uri.parse(home))) return false;
-                String host = u.getHost() == null ? "" : u.getHost();
-                if (host.equals("github.com") || host.endsWith(".github.dev") || host.endsWith(".githubusercontent.com")) return false;
+                String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase();
+                // mailto:, tel:, whatsapp:, intent: … belong to other apps.
+                if (!scheme.equals("http") && !scheme.equals("https")) { outside(u); return true; }
+                // Everything stays inside the app: Free Me, its redirects and sign-ins (GitHub for a Codespace).
+                // Only a link the person taps to another website opens in the phone's browser.
+                boolean tapped = Build.VERSION.SDK_INT < 24 || (req.hasGesture() && !req.isRedirect());
+                if (!tapped || (home != null && sameSite(u, Uri.parse(home))) || internal(u)) return false;
                 outside(u);
                 return true;
             }
@@ -271,6 +274,12 @@ public class MainActivity extends Activity {
         root.addView(box);
     }
 
+    /** GitHub (a Codespace and its sign-in) stays in the app. */
+    private static boolean internal(Uri u) {
+        String host = u.getHost() == null ? "" : u.getHost().toLowerCase();
+        return host.equals("github.com") || host.endsWith(".github.com") || host.endsWith(".github.dev") || host.endsWith(".githubusercontent.com");
+    }
+
     private static boolean sameSite(Uri a, Uri b) {
         return a.getHost() != null && a.getHost().equalsIgnoreCase(b.getHost()) && a.getPort() == b.getPort();
     }
@@ -372,6 +381,11 @@ public class MainActivity extends Activity {
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 34);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         box.addView(title);
+        TextView version = new TextView(this);
+        version.setText("Free Me app " + BuildConfig.VERSION_NAME);
+        version.setTextColor(Color.parseColor("#85786D"));
+        version.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        box.addView(version);
         return box;
     }
 
