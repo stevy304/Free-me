@@ -1,10 +1,17 @@
 # Free Me for Android
 
-`android/` is the Android app: a **Trusted Web Activity**, the standard way to put a website in an Android app. It
-opens the Free Me site full screen from its own icon. The app is the site, so every change to Free Me reaches the
-app at once, with no new APK. A new APK is only needed for a new icon, name or address.
+`android/` is the Android app: Free Me in the app's own full-screen window (Android's WebView), like the desktop
+app. There is no browser address bar and it uses the phone layout. The back button goes back, videos go full
+screen, uploads work, and the camera and microphone work for going live. Links to other sites open in the phone's
+browser. The app shows the live site, so every change to Free Me reaches it at once without a new APK. A new APK
+is only needed for a new icon, name or address.
 
-Phones whose browser cannot open it that way (no recent Chrome, for example) open Free Me in a built-in web view.
+**Which site it opens:**
+- A build made for a site (`FREEME_HOST`, or the address given when the workflow is run by hand) opens it directly.
+- A build made without one asks for the address the first time it opens and remembers it. This is for testing, such
+  as a GitHub Codespace (its port must be Public). If the site cannot be reached, it offers "Try again" and "Change
+  the address".
+
 iPhones cannot install APK files: they add Free Me to the home screen from Safari (the `/app` page explains how).
 
 ## Getting the APK to people
@@ -47,9 +54,9 @@ In the GitHub repository: Settings → Secrets and variables → Actions.
 
   Keep `free-me.jks` and its passwords somewhere safe outside GitHub too. A lost key means people must uninstall the
   app to get a new one.
-- **Full screen.** Administration → Android app → Full screen: the package name (`rw.freeme.app`) and the key's
-  SHA-256 fingerprint. The workflow's summary shows it. Free Me then serves `/.well-known/assetlinks.json`, and Android
-  hides the browser address bar.
+- **Links into the app (optional).** Administration → Android app → Full screen: the package name (`rw.freeme.app`)
+  and the key's SHA-256 fingerprint (the workflow's summary shows it). Free Me then serves
+  `/.well-known/assetlinks.json`, so Android can open Free Me links straight in the app.
 
 ## Google Play later
 

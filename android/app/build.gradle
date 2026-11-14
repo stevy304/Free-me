@@ -3,7 +3,8 @@ plugins {
 }
 
 /*
- * Free Me for Android (ANDROID.md): a Trusted Web Activity that opens the Free Me site full screen from its own icon.
+ * Free Me for Android (ANDROID.md): the Free Me site in the app's own full-screen window (a WebView), opened from
+ * its own icon. Without a site address the app asks for it the first time (testing, such as a Codespace).
  *
  *   ./gradlew assembleRelease -PfreemeHost=freeme.rw -PversionName=1.0.0 -PversionCode=1
  *
@@ -16,7 +17,6 @@ def host = (project.findProperty('freemeHost') ?: System.getenv('FREEME_HOST') ?
 def appVersionName = (project.findProperty('versionName') ?: '1.0.0').toString()
 def appVersionCode = (project.findProperty('versionCode') ?: '1').toString().toInteger()
 def keystore = System.getenv('ANDROID_KEYSTORE_FILE')
-def assetStatements = host ? '[{ \\"relation\\": [\\"delegate_permission/common.handle_all_urls\\"], \\"target\\": { \\"namespace\\": \\"web\\", \\"site\\": \\"https://' + host + '\\" } }]' : '[]'
 
 android {
     namespace 'rw.freeme.app'
@@ -30,7 +30,6 @@ android {
         versionName appVersionName
         manifestPlaceholders = [hostName: host ?: 'freeme.invalid']
         resValue 'string', 'launch_url', host ? "https://${host}/?source=android" : ''
-        resValue 'string', 'asset_statements', assetStatements
     }
 
     signingConfigs {
@@ -51,6 +50,10 @@ android {
         }
     }
 
+    buildFeatures {
+        buildConfig true
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -58,5 +61,5 @@ android {
 }
 
 dependencies {
-    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+    // None: the app uses Android's own WebView.
 }
