@@ -92,6 +92,11 @@ export interface AppConfig {
   logFormat: 'json' | 'text';
   /** Public origin of the web app (https://freeme.example). Cookies, redirects and the CSRF check use it. */
   appUrl: string;
+  /**
+   * Where the Android app (APK) is downloaded when no administrator uploaded one (ANDROID.md): the "Android app"
+   * workflow publishes each build there. ANDROID_APK_URL, else the project's GitHub release; "off" turns it off.
+   */
+  androidApkUrl: string | null;
   /** Extra origins allowed to send state-changing requests (comma-separated), e.g. a staging web app. */
   extraOrigins: string[];
   databaseUrl: string;
@@ -372,7 +377,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   try { adEconomics(billing.adCpmUsdCents, billing.adEconomics); }
   catch (e) { problems.push(`Advertising cost model: ${(e as Error).message}`); }
   if (problems.length) throw new ConfigError(`Free Me API configuration:\n- ${problems.join('\n- ')}`);
+  const apk = env.ANDROID_APK_URL?.trim();
+  const androidApkUrl = apk === 'off' ? null : apk || (nodeEnv === 'test' ? null : 'https://github.com/stevy304/Free-me/releases/download/android-latest/free-me.apk');
   return {
+    androidApkUrl,
     nodeEnv, port: Number(env.PORT || 4000), logFormat: env.LOG_FORMAT === 'json' || (prod && env.LOG_FORMAT !== 'text') ? 'json' : 'text', appUrl, extraOrigins, databaseUrl, redisUrl: env.REDIS_URL?.trim() || null, sessionSecret,
     sessionTtlDays: Math.min(90, Math.max(1, Number(env.SESSION_TTL_DAYS || 30))),
     geoCountryHeader: env.GEO_COUNTRY_HEADER === 'none' ? null : (env.GEO_COUNTRY_HEADER?.trim().toLowerCase() || 'cf-ipcountry'),

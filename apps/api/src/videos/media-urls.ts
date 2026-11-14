@@ -19,6 +19,10 @@ export class MediaUrls {
   publicThumb(v: Pick<Video, 'id' | 'thumbnailKey' | 'mediaLocation'>): string | null {
     return v.thumbnailKey && v.mediaLocation === 'PUBLIC' ? this.publicUrl(v.id, v.thumbnailKey) : null;
   }
+  /** The 480-pixel copy for lists (null when there is none: the full thumbnail is used). */
+  publicThumbSmall(v: Pick<Video, 'id' | 'thumbnailSmallKey' | 'mediaLocation'>): string | null {
+    return v.thumbnailSmallKey && v.mediaLocation === 'PUBLIC' ? this.publicUrl(v.id, v.thumbnailSmallKey) : null;
+  }
 
   async thumb(v: Pick<Video, 'id' | 'thumbnailKey' | 'mediaLocation'>): Promise<string | null> {
     return v.thumbnailKey ? this.file(v, v.thumbnailKey) : null;

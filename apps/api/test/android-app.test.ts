@@ -54,3 +54,24 @@ test('Digital Asset Links: the package and signing fingerprints an administrator
     target: { namespace: 'android_app', package_name: 'rw.freeme.app', sha256_cert_fingerprints: [print.toUpperCase()] },
   }]);
 });
+
+test('without an upload, the latest published build (the GitHub release) is offered, once it exists', async () => {
+  const http = await import('node:http');
+  let exists = true;
+  const server = http.createServer((req, res) => { if (!exists) { res.statusCode = 404; res.end(); return; } res.setHeader('Content-Length', '407078'); res.setHeader('Last-Modified', 'Sat, 14 Nov 2026 07:12:00 GMT'); res.end(req.method === 'HEAD' ? undefined : 'apk'); });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/free-me.apk`;
+  const app = await makeApp({ env: { ANDROID_APK_URL: url } });
+  try {
+    await app.prisma.appSetting.deleteMany({ where: { key: 'androidApp' } });
+    expect((await request(app.http).get('/api/app/android').expect(200)).body).toEqual({ available: true, version: 'latest', sizeBytes: 407078, updatedAt: '2026-11-14T07:12:00.000Z', downloadUrl: '/api/app/android/download' });
+    expect((await request(app.http).get('/api/app/android/download').expect(302)).headers.location).toBe(url);
+  } finally {
+    await app.app.close();
+    server.close();
+  }
+  // Nothing published (yet): no download offered.
+  exists = false;
+  const none = await makeApp({ env: { ANDROID_APK_URL: url } });
+  try { expect((await request(none.http).get('/api/app/android').expect(200)).body).toEqual({ available: false }); } finally { await none.app.close(); }
+});

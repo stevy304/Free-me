@@ -81,6 +81,12 @@ export class ViewCounter {
    * adds at most the video's length (plus a minute) per video every 6 hours, so time cannot be inflated by sending
    * reports faster or replaying. Returns the seconds counted.
    */
+  /** Whether this viewer's view of the video was already counted (in the last 6 hours): their watching now adds watch time from the first second. */
+  async hasView(videoId: string, viewerKey: string): Promise<boolean> {
+    if (!this.redis) { const e = this.local.get(beatKey(videoId, viewerKey)); return !!e && e.expires > Date.now(); }
+    return (await this.redis.exists(beatKey(videoId, viewerKey))) === 1;
+  }
+
   async addWatch(videoId: string, viewerKey: string, watchedSeconds: number, durationSeconds: number, plus = false): Promise<number> {
     const claimed = Math.max(0, Math.min(MAX_BEAT_SECONDS, (Number.isFinite(watchedSeconds) ? Math.round(watchedSeconds) : 0)));
     if (!claimed) return 0;

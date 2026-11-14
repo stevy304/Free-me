@@ -71,6 +71,25 @@ test('one picture follows a person: a Space without its own picture shows the pr
 });
 
 const redisTest = process.env.REDIS_URL ? test : test.skip;
+redisTest('a viewer coming back within 6 hours is told at once, so the player counts their watch time from the first second', async () => {
+  await creator('back@example.com', 'back');
+  const ch = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'back' } });
+  const video = await ctx.prisma.video.create({ data: { channelId: ch.id, title: 'Come back', durationSeconds: 600, status: 'READY', visibility: 'PUBLIC', mediaLocation: 'PUBLIC', hlsMasterKey: 'hls/master.m3u8', publishedAt: new Date(), safetyCheckedAt: new Date() } });
+  const viewer = await signIn(ctx.http, ctx.mail, 'returning@example.com');
+  const me = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'returning@example.com' } });
+  const redis = new Redis(process.env.REDIS_URL!);
+  try {
+    await redis.del(`fm:beat:${video.id}:u:${me.id}`, `fm:view:${video.id}:u:${me.id}`);
+    expect((await viewer.agent.post(`/api/videos/${video.id}/play`).set('Origin', WEB).expect(200)).body).toMatchObject({ viewed: false });
+    // Their view is counted…
+    expect(await new ViewCounter(ctx.prisma as never, redis).record(video.id, `u:${me.id}`, 40)).toBe(true);
+    // …so when they come back (resume, rewatch the end) the player is told, and short watching still adds time.
+    expect((await viewer.agent.post(`/api/videos/${video.id}/play`).set('Origin', WEB).expect(200)).body).toMatchObject({ viewed: true });
+    await redis.hset(`fm:beat:${video.id}:u:${me.id}`, 'at', Date.now() - 20_000);
+    expect((await viewer.agent.post(`/api/videos/${video.id}/watch`).set('Origin', WEB).send({ watchedSeconds: 14 }).expect(200)).body.seconds).toBe(14);
+  } finally { await redis.quit(); }
+});
+
 redisTest('watch time: heartbeats after the view count real time only, at most 2x speed and the length of the video', async () => {
   await creator('watched@example.com', 'watched');
   const ch = await ctx.prisma.channel.findUniqueOrThrow({ where: { handle: 'watched' } });

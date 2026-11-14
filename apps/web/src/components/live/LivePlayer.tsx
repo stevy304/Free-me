@@ -3,6 +3,7 @@
 import type Hls from 'hls.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Icon from '@/components/icons';
+import { hlsSettings } from '@/lib/network';
 
 /** How close to the newest piece the player stays, and how far behind still counts as "live". */
 const LATENCY = {
@@ -53,7 +54,7 @@ export function LivePlayer({ src, latency = 'normal', className = '', overlay, m
       if (off) return;
       if (!H.isSupported()) { setErr('This browser cannot play live video.'); return; }
       // No liveMaxLatency: someone who rewinds stays where they are until they choose "Go to live".
-      const x = new H({ liveSyncDurationCount: cfg.syncCount, maxLiveSyncPlaybackRate: latency === 'low' ? 1.1 : 1, maxBufferLength: 20, startLevel: -1, backBufferLength: 90 });
+      const x = new H({ liveSyncDurationCount: cfg.syncCount, maxLiveSyncPlaybackRate: latency === 'low' ? 1.1 : 1, maxBufferLength: 20, startLevel: -1, backBufferLength: 90, ...hlsSettings('live') });
       hls.current = x;
       x.on(H.Events.MANIFEST_PARSED, (_, data) => { setQualities(data.levels.map((l) => l.height)); play(); });
       x.on(H.Events.LEVEL_SWITCHED, (_, data) => setCurrent(x.levels[data.level]?.height ?? null));

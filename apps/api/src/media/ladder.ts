@@ -7,6 +7,13 @@ export interface Rung { name: string; short: number; kbps: number }
 
 /** The shared audio rendition: AAC-LC stereo 48 kHz. */
 export const AUDIO = { kbps: 128, codecs: 'mp4a.40.2', group: 'aud', playlist: 'audio/index.m3u8' } as const;
+/**
+ * Lighter audio for weak connections: AAC-LC stereo 64 kb/s, used by the smallest rungs (up to LOW_AUDIO_MAX_SHORT).
+ * At 144p the full audio would take nearly half of what is sent; this keeps 144p at about 220 kb/s in all, so it
+ * plays on a weak 3G or EDGE-plus signal. Older videos without it keep one audio rendition for every rung.
+ */
+export const AUDIO_LOW = { kbps: 64, group: 'aud-low', playlist: 'audio-low/index.m3u8' } as const;
+export const LOW_AUDIO_MAX_SHORT = 240;
 
 export const LADDER: Rung[] = [
   { name: '144p', short: 144, kbps: 160 },
@@ -60,14 +67,18 @@ export interface MasterEntry { name: string; width: number; height: number; band
  * renditions are video only and all point to the one audio rendition (EXT-X-MEDIA); bandwidth then includes it.
  * Without it (videos processed before shared audio), each rendition carries its own audio.
  */
-export function masterPlaylist(entries: MasterEntry[], audio = false): string {
+export function masterPlaylist(entries: MasterEntry[], audio = false, lowAudio = false): string {
   const lines = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-INDEPENDENT-SEGMENTS'];
+  const low = audio && lowAudio && entries.some((e) => Math.min(e.width, e.height) <= LOW_AUDIO_MAX_SHORT);
   if (audio) lines.push(`#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="${AUDIO.group}",NAME="Original",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="2",URI="${AUDIO.playlist}"`);
+  if (low) lines.push(`#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="${AUDIO_LOW.group}",NAME="Original",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="2",URI="${AUDIO_LOW.playlist}"`);
   for (const e of [...entries].sort((a, b) => a.bandwidth - b.bandwidth)) {
-    const bandwidth = e.bandwidth + (audio ? AUDIO.kbps * 1000 : 0);
-    const average = e.averageBandwidth !== undefined ? e.averageBandwidth + (audio ? AUDIO.kbps * 1000 : 0) : Math.round(bandwidth * 0.75);
+    // The smallest rungs take the lighter audio when there is one.
+    const a = !audio ? null : low && Math.min(e.width, e.height) <= LOW_AUDIO_MAX_SHORT ? AUDIO_LOW : AUDIO;
+    const bandwidth = e.bandwidth + (a ? a.kbps * 1000 : 0);
+    const average = e.averageBandwidth !== undefined ? e.averageBandwidth + (a ? a.kbps * 1000 : 0) : Math.round(bandwidth * 0.75);
     const codecs = audio ? [...new Set([...e.codecs.split(','), AUDIO.codecs])].join(',') : e.codecs;
-    lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},AVERAGE-BANDWIDTH=${average},RESOLUTION=${e.width}x${e.height},CODECS="${codecs}",FRAME-RATE=${e.frameRate.toFixed(3)},NAME="${e.name}"${audio ? `,AUDIO="${AUDIO.group}"` : ''}`);
+    lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},AVERAGE-BANDWIDTH=${average},RESOLUTION=${e.width}x${e.height},CODECS="${codecs}",FRAME-RATE=${e.frameRate.toFixed(3)},NAME="${e.name}"${audio ? `,AUDIO="${a!.group}"` : ''}`);
     lines.push(e.playlist);
   }
   return `${lines.join('\n')}\n`;

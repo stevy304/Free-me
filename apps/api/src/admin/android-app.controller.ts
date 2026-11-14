@@ -51,22 +51,40 @@ export class AndroidAppController {
     await this.prisma.appSetting.upsert({ where: { key: KEY }, create: { key: KEY, value: value as object, updatedBy: by }, update: { value: value as object, updatedBy: by } });
   }
 
+  /**
+   * The published build (config androidApkUrl, normally the GitHub release the workflow updates), when there is no
+   * upload: checked to exist, remembered for 10 minutes so the page never waits on GitHub.
+   */
+  private published: { at: number; ok: boolean; sizeBytes: number | null; updatedAt: string | null } | null = null;
+  private async publishedBuild() {
+    const url = this.config.androidApkUrl;
+    if (!url) return null;
+    if (!this.published || Date.now() - this.published.at > 10 * 60_000) {
+      try {
+        const r = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(5000) });
+        this.published = { at: Date.now(), ok: r.ok, sizeBytes: Number(r.headers.get('content-length')) || null, updatedAt: r.headers.get('last-modified') ? new Date(r.headers.get('last-modified')!).toISOString() : null };
+      } catch { this.published = { at: Date.now(), ok: false, sizeBytes: null, updatedAt: null }; }
+    }
+    return this.published.ok ? { url, ...this.published } : null;
+  }
+
   @Get('app/android')
-  @ApiOperation({ summary: 'The Android app, if one was uploaded: its version and size, and the download link' })
+  @ApiOperation({ summary: 'The Android app: an uploaded APK, else the latest published build; its size and the download link' })
   async info() {
     const a = await this.load();
-    return a.file
-      ? { available: true, version: a.file.version, sizeBytes: a.file.sizeBytes, updatedAt: a.file.uploadedAt, downloadUrl: '/api/app/android/download' }
-      : { available: false };
+    if (a.file) return { available: true, version: a.file.version, sizeBytes: a.file.sizeBytes, updatedAt: a.file.uploadedAt, downloadUrl: '/api/app/android/download' };
+    const p = await this.publishedBuild();
+    return p ? { available: true, version: 'latest', sizeBytes: p.sizeBytes, updatedAt: p.updatedAt, downloadUrl: '/api/app/android/download' } : { available: false };
   }
 
   @Get('app/android/download')
-  @ApiOperation({ summary: 'Download the Android app (APK): a stable link that always points at the latest upload' })
+  @ApiOperation({ summary: 'Download the Android app (APK): a stable link to the uploaded APK, else the latest published build' })
   async download(@Res() res: Response) {
     const a = await this.load();
-    if (!a.file) throw new NotFoundException('The Android app is not available yet.');
+    const url = a.file?.url ?? (await this.publishedBuild())?.url;
+    if (!url) throw new NotFoundException('The Android app is not available yet.');
     res.setHeader('Cache-Control', 'no-store');
-    res.redirect(302, a.file.url);
+    res.redirect(302, url);
   }
 
   @Get('app/android/assetlinks')

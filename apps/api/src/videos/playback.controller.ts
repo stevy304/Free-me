@@ -58,7 +58,7 @@ export class PlaybackController {
   }
 
   private async playlist(id: string, path: string, auth: AuthContext | null, res: Response) {
-    if (!/^(master(-full)?\.m3u8|((av1-)?\d{3,4}p|audio)\/index\.m3u8)$/.test(path)) throw new NotFoundException();
+    if (!/^(master(-full)?\.m3u8|((av1-)?\d{3,4}p|audio(-low)?)\/index\.m3u8)$/.test(path)) throw new NotFoundException();
     const v = await this.viewable(id, auth);
     // Every quality is for Premium members and the owner; everyone else gets the limited master playlist.
     if (path === 'master-full.m3u8' && v.channel.userId !== auth?.user.id && !(auth && await hasPlus(this.prisma, auth.user))) throw new NotFoundException();
@@ -122,7 +122,9 @@ export class PlaybackController {
     // Generous per address: many people in Rwanda share one address through their mobile operator.
     await this.limits.consume(`play:${clientIp(req) ?? 'unknown'}`, 3000, 3600);
     await hotViewable(this.prisma, id, auth);
-    return { ticket: playTicket(this.config.sessionSecret, id, ticketHolder(auth?.user.id ?? null, userAgent(req) ?? null)) };
+    // `viewed`: this viewer's view was already counted (6 hours): a player coming back (resuming, rewatching the end)
+    // reports watch time from the first second instead of waiting 30 seconds for a view that will not count again.
+    return { ticket: playTicket(this.config.sessionSecret, id, ticketHolder(auth?.user.id ?? null, userAgent(req) ?? null)), viewed: await this.views.hasView(id, viewerKey(auth, req)) };
   }
 
   @Post(':id/views')

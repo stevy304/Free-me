@@ -10,6 +10,7 @@ import { AdBreak, type AdSlot } from './AdBreak';
 import { DATA_SAVER_MAX, dataSaverActive } from '@/lib/datasaver';
 import { av1Preferred, codecFamily } from '@/lib/codecs';
 import { QoeSession } from '@/lib/qoe';
+import { hlsSettings, networkRecoveries, weakConnection } from '@/lib/network';
 
 export interface CaptionTrack { language: string; auto: boolean; url: string }
 
@@ -32,8 +33,8 @@ const label = (h: number, w: number) => `${Math.min(h, w)}p`;
 /** How long autoplay waits to learn whether an ad plays first. */
 const ADS_WAIT_MS = 1500;
 
-export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange, storyboard, captions = [], withAds = false, markers = [] }: {
-  src: string; poster?: string | null; videoId?: string; durationHint?: number; autoPlay?: boolean; theater?: boolean; onTheater?: () => void; onEnded?: () => void;
+export function VideoPlayer({ src, poster: fullPoster, posterSmall, videoId, durationHint, autoPlay = true, theater, onTheater, onEnded, startAt = 0, onProgress, onPlayingChange, storyboard, captions = [], withAds = false, markers = [] }: {
+  src: string; poster?: string | null; /** 480 px copy, used on weak connections */ posterSmall?: string | null; videoId?: string; durationHint?: number; autoPlay?: boolean; theater?: boolean; onTheater?: () => void; onEnded?: () => void;
   startAt?: number; onProgress?: (seconds: number, ended: boolean) => void; onPlayingChange?: (playing: boolean) => void;
   /** WebVTT of seek-bar previews (cues point into a sprite sheet with #xywh). */
   storyboard?: string | null;
@@ -99,6 +100,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
   const [full, setFull] = useState(false);
   const [hover, setHover] = useState<{ x: number; t: number; w: number } | null>(null);
   const dragging = useRef(false);
+  // On a weak connection the small picture shows while the video starts (it is a tenth of the bytes).
+  const [poster] = useState(() => (posterSmall && typeof navigator !== 'undefined' && weakConnection() ? posterSmall : fullPoster));
   const cues = useStoryboard(storyboard);
   const [flash, setFlash] = useState<'play' | 'pause' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -278,7 +281,8 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
         // which one when both are there. A device that cannot decode one never sees it (hls.js drops those).
         const family = av1 ? 'av01' : 'avc1';
         // startFragPrefetch: the first segment downloads while the player is still setting up.
-        const h = new H({ capLevelToPlayerSize: true, startLevel: -1, startFragPrefetch: true, maxBufferLength: 30, backBufferLength: 60, videoPreference: { videoCodec: family } });
+        // Weak connections (lib/network.ts): start lowest, a bigger buffer, more patience; else the usual settings.
+        const h = new H({ capLevelToPlayerSize: true, startLevel: -1, startFragPrefetch: true, maxBufferLength: 30, backBufferLength: 60, videoPreference: { videoCodec: family }, ...hlsSettings('vod') });
         hls.current = h;
         h.on(H.Events.MANIFEST_PARSED, () => {
           autoplay();
@@ -307,11 +311,13 @@ export function VideoPlayer({ src, poster, videoId, durationHint, autoPlay = tru
           qoe.current?.setCodec(f === 'av01' ? 'av1' : f === 'avc1' ? 'h264' : 'other');
         });
         let recoveries = 0;
+        const patience = networkRecoveries();
         h.on(H.Events.ERROR, (_e, d) => {
           if (d.details === H.ErrorDetails.MANIFEST_INCOMPATIBLE_CODECS_ERROR) { setError('This browser cannot play H.264 video. Open the video in Chrome, Edge, Safari or Firefox.'); setWaiting(false); return; }
           if (!d.fatal) return;
           if (d.type === H.ErrorTypes.NETWORK_ERROR) {
-            if (navigator.onLine && recoveries++ < 3) h.startLoad();
+            // A weak network gets more tries, a little apart, before the "connection problem" message.
+            if (navigator.onLine && recoveries++ < patience) setTimeout(() => { if (hls.current === h) h.startLoad(); }, Math.min(8000, 500 * 2 ** recoveries));
             else failNetwork();
           }
           else if (d.type === H.ErrorTypes.MEDIA_ERROR && recoveries++ < 3) h.recoverMediaError();
@@ -643,7 +649,8 @@ function useStoryboard(url?: string | null): Cue[] {
         if (m) out.push({ start: sec(m[1]), end: sec(m[2]), url: m[3], x: +m[4], y: +m[5], w: +m[6], h: +m[7] });
       }
       setCues(out);
-      if (out[0]) { const img = new Image(); img.src = out[0].url; } // warm the sheet so the first hover is instant
+      // Warm the sheet so the first hover is instant, except on a weak connection: there the video comes first.
+      if (out[0] && !weakConnection()) { const img = new Image(); img.src = out[0].url; }
     }).catch(() => undefined);
     return () => ctrl.abort();
   }, [url]);

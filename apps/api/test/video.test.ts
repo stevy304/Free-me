@@ -105,6 +105,12 @@ test('upload in parts, resume, process to adaptive HLS, play privately, publish 
   expect(master.match(/#EXT-X-STREAM-INF/g)).toHaveLength(5);
   // Audio is stored once and shared; the private route signs its segments too.
   expect(master).toContain('URI="audio/index.m3u8"');
+  // Weak connections: 144p and 240p take the lighter audio (64 kb/s), the others the full one.
+  expect(master).toContain('GROUP-ID="aud-low"');
+  const groupOf = (rung: string) => new RegExp(`NAME="${rung}",AUDIO="([^"]+)"`).exec(master)?.[1];
+  expect(['144p', '240p', '360p', '720p'].map(groupOf)).toEqual(['aud-low', 'aud-low', 'aud', 'aud']);
+  expect(Number(/BANDWIDTH=(\d+)[^\n]*NAME="144p"/.exec(master)?.[1])).toBeLessThan(400_000);
+  expect((await agent.get(`/api/videos/${id}/hls/audio-low/index.m3u8`).expect(200)).text).toMatch(/#EXT-X-MAP:URI="http[^"]+"/);
   expect(existsSync(join(storageDir, 'prv', id, 'hls', '720p', 'seg_00000.m4s'))).toBe(true);
   const audioList = (await agent.get(`/api/videos/${id}/hls/audio/index.m3u8`).expect(200)).text;
   expect(audioList).toMatch(/#EXT-X-MAP:URI="http[^"]+"/); // signed links (opaque tokens)
@@ -149,7 +155,12 @@ test('upload in parts, resume, process to adaptive HLS, play privately, publish 
   expect(existsSync(join(storageDir, 'prv', id))).toBe(false);
   const feed = (await request(ctx.http).get('/api/videos').expect(200)).body.videos;
   expect(feed).toHaveLength(1);
-  expect(feed[0]).toMatchObject({ id, title: 'Gorillas of Musanze', durationSeconds: 4, thumbnailUrl: `${WEB}/api/storage/local/pub/${id}/thumbs/3.jpg` });
+  expect(feed[0]).toMatchObject({ id, title: 'Gorillas of Musanze', durationSeconds: 4, thumbnailUrl: `${WEB}/api/storage/local/pub/${id}/thumbs/3.jpg`,
+    thumbnailSmallUrl: `${WEB}/api/storage/local/pub/${id}/thumbs/3-s.jpg` });
+  // The small copy for lists and weak connections: a fraction of the bytes, and not offered as a thumbnail choice.
+  const big = readFileSync(join(storageDir, 'pub', id, 'thumbs', '3.jpg')).length;
+  const small = readFileSync(join(storageDir, 'pub', id, 'thumbs', '3-s.jpg')).length;
+  expect(small).toBeLessThan(big / 2);
   const watch = (await request(ctx.http).get(`/api/videos/${id}`).expect(200)).body.video;
   expect(watch.playbackUrl).toBe(`${WEB}/api/storage/local/pub/${id}/hls/master.m3u8`);
   expect((await request(ctx.http).get(path(watch.playbackUrl)).expect(200)).text).toContain('720p/index.m3u8');
@@ -166,6 +177,8 @@ test('upload in parts, resume, process to adaptive HLS, play privately, publish 
   const jpg = readFileSync(join(storageDir, 'pub', id, 'thumbs', '1.jpg'));
   const custom = await agent.put(`/api/hub/videos/${id}/thumbnail`).set('Origin', WEB).set('Content-Type', 'image/jpeg').send(jpg).expect(200);
   expect(custom.body.video.customThumbnail).toBe(true);
+  // A creator's own picture has no small copy: lists use it as it is.
+  expect((await request(ctx.http).get('/api/videos').expect(200)).body.videos[0].thumbnailSmallUrl).toBeNull();
 
   // Someone else cannot touch it; deleting removes every file.
   const other = await creator('other@example.com', 'other.channel');
@@ -212,11 +225,11 @@ test('repair: files left in the other storage place are reported, then brought b
   const { STORAGE } = await import('../src/media/queue');
   const jobs = new MediaJobs(ctx.prisma, ctx.app.get(STORAGE), ctx.config, null);
   const report = await jobs.repair(id, false);
-  expect(report).toMatchObject({ location: 'PRIVATE', leftovers: 4, toCopy: 4, copied: 0 }); // 3 frames + the seek-preview sheet
+  expect(report).toMatchObject({ location: 'PRIVATE', leftovers: 7, toCopy: 7, copied: 0 }); // 3 frames, their small copies and the seek-preview sheet
   expect(report!.missing).toEqual(expect.arrayContaining(['thumbs/1.jpg', 'thumbs/2.jpg', 'thumbs/3.jpg']));
   expect(existsSync(join(storageDir, 'prv', id, 'thumbs'))).toBe(false); // report only
   const fixed = await jobs.repair(id, true);
-  expect(fixed).toMatchObject({ copied: 4 });
+  expect(fixed).toMatchObject({ copied: 7 });
   expect(existsSync(join(storageDir, 'prv', id, 'thumbs', '2.jpg'))).toBe(true);
   expect(existsSync(join(storageDir, 'pub', id))).toBe(false);
   expect(await jobs.repair(id, false)).toMatchObject({ missing: [], leftovers: 0 });

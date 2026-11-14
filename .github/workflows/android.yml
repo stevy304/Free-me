@@ -1,7 +1,8 @@
 name: Android app
 
-# Builds the Free Me Android app (android/, ANDROID.md) and keeps the APK as the run's "free-me-apk" result.
-# Upload it in Administration → Android app; people then download it from Free Me.
+# Builds the Free Me Android app (android/, ANDROID.md) and keeps the APK as the run's "free-me-apk" result. On main
+# (with FREEME_HOST set) it also publishes it as the release "android-latest", which Free Me's Download button offers
+# (/app, the account menu, the You page) unless an administrator uploaded another APK.
 #
 # Repository settings (Settings → Secrets and variables → Actions):
 # - variable FREEME_HOST: the site's address without https:// (for example freeme.rw);
@@ -26,6 +27,8 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write  # publishing the release on main
     timeout-minutes: 30
     env:
       FREEME_HOST: ${{ vars.FREEME_HOST }}
@@ -72,3 +75,18 @@ jobs:
           name: free-me-apk
           path: ${{ runner.temp }}/free-me-${{ env.VERSION }}.apk
           if-no-files-found: error
+      - name: Publish (main)
+        # Only a build for the real site: a localhost test build is never offered to people.
+        if: github.ref == 'refs/heads/main' && env.FREEME_HOST != 'localhost'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp "$RUNNER_TEMP/free-me-$VERSION.apk" "$RUNNER_TEMP/free-me.apk"
+          notes="Free Me for Android, version $VERSION, for https://$FREEME_HOST. Download free-me.apk on an Android phone, open it and tap Install."
+          if ! gh release view android-latest >/dev/null 2>&1; then
+            gh release create android-latest --title "Free Me for Android" --notes "$notes" --latest "$RUNNER_TEMP/free-me.apk"
+          else
+            gh release upload android-latest "$RUNNER_TEMP/free-me.apk" --clobber
+            gh release edit android-latest --notes "$notes"
+          fi
+          echo "Published: https://github.com/${{ github.repository }}/releases/download/android-latest/free-me.apk" >> "$GITHUB_STEP_SUMMARY"

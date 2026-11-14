@@ -4,6 +4,7 @@ import type Hls from 'hls.js';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import * as Icon from '@/components/icons';
+import { hlsSettings } from '@/lib/network';
 
 /** What keeps playing after the viewer leaves the watch page. */
 export interface DockVideo {
@@ -66,7 +67,7 @@ function Dock({ v }: { v: DockVideo }) {
     } else {
       import('hls.js').then(({ default: H }) => {
         if (off || !H.isSupported()) return;
-        hls = new H({ startPosition: v.time, maxBufferLength: 20 });
+        hls = new H({ startPosition: v.time, maxBufferLength: 20, ...hlsSettings('vod') });
         hls.on(H.Events.MANIFEST_PARSED, start);
         hls.loadSource(v.src);
         hls.attachMedia(video);

@@ -290,6 +290,8 @@ model Video {
   width                 Int?              // display size after rotation
   height                Int?
   thumbnailKey          String?           // storage key of the chosen thumbnail
+  /// A 480-pixel copy of the thumbnail for lists and weak connections (thumbs/2-s.jpg); null: only the full one
+  thumbnailSmallKey     String?
   thumbnailCandidates   String[]          // storage keys of generated frames the creator can choose from
   /// Seek-bar previews: { key, interval, count, cols, rows, width, height } of one sprite sheet under thumbs/.
   storyboard            Json?

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type Hls from 'hls.js';
 import * as Icon from '@/components/icons';
+import { hlsSettings } from '@/lib/network';
 
 export interface AdSlot {
   at: number;
@@ -44,7 +45,7 @@ export function AdBreak({ slot, videoId, muted, onDone }: { slot: AdSlot; videoI
     else import('hls.js').then(({ default: H }) => {
       if (cancelled) return;
       if (!H.isSupported()) { onDone(); return; }
-      h = new H({ capLevelToPlayerSize: true, maxBufferLength: 20, startFragPrefetch: true });
+      h = new H({ capLevelToPlayerSize: true, maxBufferLength: 20, startFragPrefetch: true, ...hlsSettings('short') });
       h.on(H.Events.ERROR, (_e, d) => { if (d.fatal) finish('SKIP'); });
       h.loadSource(src); h.attachMedia(v);
     });

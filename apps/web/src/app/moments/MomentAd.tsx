@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type Hls from 'hls.js';
 import * as Icon from '@/components/icons';
+import { hlsSettings } from '@/lib/network';
 
 export interface MomentAdData { campaignId: string; headline: string; businessName: string; destinationUrl: string; playbackUrl: string | null; thumbnailUrl: string | null; durationSeconds: number }
 
@@ -39,7 +40,7 @@ export function MomentAd({ ad, after, active, muted, setMuted }: { ad: MomentAdD
     if (video.canPlayType('application/vnd.apple.mpegurl') && !/Chrome|Firefox|Edg/.test(navigator.userAgent)) { video.src = ad.playbackUrl; go(); }
     else import('hls.js').then(({ default: H }) => {
       if (cancelled || !H.isSupported()) return;
-      const h = new H({ capLevelToPlayerSize: true, maxBufferLength: 15 });
+      const h = new H({ capLevelToPlayerSize: true, maxBufferLength: 15, ...hlsSettings('short') });
       hls.current = h; h.loadSource(ad.playbackUrl!); h.attachMedia(video); go();
     });
     return () => { cancelled = true; };
