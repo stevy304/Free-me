@@ -6,7 +6,7 @@ import { forgetHotVideo } from '../engagement/hot-video';
 import { feedsChanged } from '../catalog/feed-cache';
 import { announceVideo } from '../notifications/notify';
 import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
-import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import type { Video, Visibility } from '@prisma/client';
 import { isLanguageCode } from '@free-me/shared';
 import { PrismaService } from '../database/prisma.service';
@@ -29,6 +29,9 @@ class UpdateVideoDto {
   @ApiPropertyOptional({ description: 'Made for kids: personalised features and comments are limited' }) @IsOptional() @IsBoolean() madeForKids?: boolean;
   @ApiPropertyOptional({ description: 'Allow comments (always off for videos made for kids)' }) @IsOptional() @IsBoolean() commentsEnabled?: boolean;
   @ApiPropertyOptional({ description: 'Choose a generated thumbnail (0, 1 or 2)' }) @IsOptional() @IsInt() @Min(0) thumbnail?: number;
+  @ApiPropertyOptional({ description: 'Moments: the sound used (a song title); empty = original sound', nullable: true }) @IsOptional() @IsString() @MaxLength(100) soundTitle?: string | null;
+  @ApiPropertyOptional({ description: 'Moments: the series this is an episode of (one of mine), or null', nullable: true }) @IsOptional() @IsString() seriesId?: string | null;
+  @ApiPropertyOptional({ description: 'Its episode number in the series (default: after the last one)' }) @IsOptional() @IsInt() @Min(1) @Max(9999) episodeNumber?: number;
 }
 
 const IMAGE: Array<[string, number[], string]> = [['image/jpeg', [0xff, 0xd8, 0xff], '.jpg'], ['image/png', [0x89, 0x50, 0x4e, 0x47], '.png'], ['image/webp', [0x52, 0x49, 0x46, 0x46], '.webp']];
@@ -53,6 +56,7 @@ export class HubController {
     return {
       id: v.id, title: v.title, description: v.description, visibility: v.visibility, status: v.status, madeForKids: v.madeForKids, isShort: v.isShort, isPodcast: v.isPodcast, isAd: v.isAd,
       language: v.language, category: v.category ? { slug: v.category.slug, name: v.category.name } : null, tags: v.tags?.map((t) => t.tag.name) ?? [],
+      soundTitle: v.soundTitle, seriesId: v.seriesId, episodeNumber: v.episodeNumber,
       durationSeconds: v.durationSeconds, width: v.width, height: v.height, processingProgress: v.processingProgress, processingStage: v.processingStage,
       // The automatic safety decision (safety/ai.ts), what the creator reads, and whether they can still appeal.
       // A block by a rights claim (Content ID) is disputed with the owner (Creator Hub → Rights), not appealed.
@@ -96,6 +100,23 @@ export class HubController {
       if (body.category === null || body.category === '') data.categoryId = null;
       else { const c = await this.prisma.category.findUnique({ where: { slug: body.category } }); if (!c) throw new BadRequestException('Choose a category from the list.'); data.categoryId = c.id; }
     }
+    if (body.soundTitle !== undefined) data.soundTitle = body.soundTitle?.trim() || null;
+    if (body.seriesId !== undefined) {
+      if (!body.seriesId) { data.seriesId = null; data.episodeNumber = null; }
+      else {
+        const s = await this.prisma.series.findFirst({ where: { id: body.seriesId, channelId: v.channelId }, select: { id: true } });
+        if (!s) throw new BadRequestException('Choose one of your series.');
+        data.seriesId = s.id;
+        if (body.episodeNumber === undefined && v.seriesId !== s.id) {
+          const last = await this.prisma.video.aggregate({ where: { seriesId: s.id }, _max: { episodeNumber: true } });
+          data.episodeNumber = (last._max.episodeNumber ?? 0) + 1;
+        }
+      }
+    }
+    if (body.episodeNumber !== undefined) {
+      if (!(data.seriesId ?? v.seriesId)) throw new BadRequestException('Put the video in a series first.');
+      data.episodeNumber = body.episodeNumber;
+    }
     if (body.madeForKids !== undefined) data.madeForKids = body.madeForKids;
     if (body.commentsEnabled !== undefined) data.commentsEnabled = body.commentsEnabled;
     if (body.thumbnail !== undefined) {
@@ -111,9 +132,9 @@ export class HubController {
     // Changed words are checked before they are saved (safety/): over the line, the video is hidden at the same moment
     // (reviewHoldAt) and a moderator is asked, so it is never shown with them.
     let flagged: Awaited<ReturnType<typeof checkText>> | null = null;
-    if (body.title !== undefined || body.description !== undefined || body.tags !== undefined) {
+    if (body.title !== undefined || body.description !== undefined || body.tags !== undefined || body.soundTitle) {
       const tags = body.tags ?? (await this.prisma.videoTag.findMany({ where: { videoId: id }, select: { tag: { select: { name: true } } } })).map((t) => t.tag.name);
-      const verdict = await checkText(this.prisma, this.config, videoText({ title: (data.title as string | undefined) ?? v.title, description: body.description !== undefined ? (data.description as string | null) : v.description, tags }), undefined, { kind: 'edit' });
+      const verdict = await checkText(this.prisma, this.config, videoText({ title: (data.title as string | undefined) ?? v.title, description: body.description !== undefined ? (data.description as string | null) : v.description, tags: body.soundTitle ? [...tags, body.soundTitle] : tags }), undefined, { kind: 'edit' });
       // The AI moderator decided: the words are not saved, and the creator is told why.
       if (verdict.hold && verdict.ai) throw new BadRequestException(refusal(verdict, 'title'));
       if (verdict.hold && !v.reviewHoldAt) { data.reviewHoldAt = new Date(); flagged = verdict; }

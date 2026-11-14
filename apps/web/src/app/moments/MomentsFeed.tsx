@@ -9,11 +9,12 @@ import { Comments } from '@/components/engagement/Comments';
 import type Hls from 'hls.js';
 import { Avatar } from '@/components/Avatar';
 import { useShell } from '@/components/shell/ShellContext';
-import { compactNumber, viewsLabel } from '@/lib/format';
+import { compactNumber, duration, timeAgo, viewsLabel } from '@/lib/format';
+import { VerifiedBadge } from '@/components/VerifiedBadge';
 import type { VideoCardData, VideoPage } from '@/lib/types';
 
 /** One Moment: plays when it fills the screen, pauses when scrolled away, reports a view after real watching. */
-function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boolean; setMuted: (m: boolean) => void; active: boolean }) {
+function Moment({ v, muted, setMuted, active, jump }: { v: VideoCardData; muted: boolean; setMuted: (m: boolean) => void; active: boolean; jump: (id: string) => void }) {
   const el = useRef<HTMLVideoElement>(null);
   const hls = useRef<Hls | null>(null);
   const [paused, setPaused] = useState(false);
@@ -56,13 +57,20 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
   const [comments, setComments] = useState<number | null>(null);
   // The conversation opens inside the Moment: beside it on computers, as a sheet from the bottom on phones.
   const [talk, setTalk] = useState(false);
+  const [episodes, setEpisodes] = useState(false);
+  const [more, setMore] = useState(false);
+  // "more" only when the description is cut off.
+  const descBox = useRef<HTMLSpanElement>(null);
+  const [cut, setCut] = useState(false);
+  useEffect(() => { const el = descBox.current; if (el && !more) setCut(el.scrollHeight > el.clientHeight + 1); }, [more, v.id]);
+  const m = v.moment;
   useEffect(() => { if (!active) setTalk(false); }, [active]);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!active || votes) return;
     fetch(`/api/videos/${v.id}`).then((r) => r.ok ? r.json() : null).then((d) => { if (!d) return; setVotes({ mine: d.viewer?.reaction ?? 'none', likes: d.video.likeCount, dislikes: d.video.dislikeCount ?? 0 }); setComments(d.video.commentCount ?? 0); }).catch(() => undefined);
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
-  const signIn = () => { window.location.href = `/login?returnTo=${encodeURIComponent(`/moments#${v.id}`)}`; };
+  const signIn = () => { window.location.href = `/login?returnTo=${encodeURIComponent(`/moments?first=${v.id}`)}`; };
   // One reaction at a time: a second tap waits for the first to finish (counts stay exact).
   const voting = useRef(false);
   const vote = async (value: 'like' | 'dislike') => {
@@ -95,12 +103,31 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
           <button type="button" onClick={() => { const x = el.current!; if (x.paused) x.play().catch(() => undefined); else x.pause(); }} aria-label={paused ? 'Play' : 'Pause'} className="grid h-9 w-9 place-items-center text-white [filter:drop-shadow(0_1px_2px_rgb(0_0_0/0.6))] sm:facet-sm sm:bg-[rgb(20_17_15/0.55)] sm:backdrop-blur sm:[filter:none]">{paused ? <Icon.Play size={20} /> : <Icon.Pause size={20} />}</button>
           <button type="button" onClick={() => setMuted(!muted)} aria-label={muted ? 'Unmute' : 'Mute'} className="grid h-9 w-9 place-items-center text-white [filter:drop-shadow(0_1px_2px_rgb(0_0_0/0.6))] sm:facet-sm sm:bg-[rgb(20_17_15/0.55)] sm:backdrop-blur sm:[filter:none]">{muted ? <Icon.VolumeOff size={20} /> : <Icon.VolumeHigh size={20} />}</button>
         </div>
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-4 pr-[84px] pt-20 text-white sm:pr-4">
-          <div className="flex items-center gap-2">
-            <Link href={`/@${v.channel.handle}`} className="flex min-w-0 items-center gap-2 text-[14px] font-semibold"><Avatar name={v.channel.name} src={v.channel.avatarUrl} size={36} /><span className="min-w-0"><span className="block truncate text-[15px] font-bold">{v.channel.name}</span><span className="block truncate text-[12px] font-normal opacity-80">@{v.channel.handle}</span></span></Link>
-          </div>
-          <p className="mt-2 line-clamp-2 text-[14px]">{v.title}</p>
-          <p className="mt-1 text-[12px] opacity-80" suppressHydrationWarning>{viewsLabel(v.viewCount, locale)}</p>
+        {/* Who, what, which sound, and which episode. The creator's picture (right) is the one way to their Space. */}
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-4 pb-5 pr-[76px] pt-24 text-white [text-shadow:0_1px_3px_rgb(0_0_0/0.45)] sm:pr-4">
+          <p className="flex items-center gap-1 text-[15px] font-bold">@{v.channel.handle}{v.channel.isVerified && <VerifiedBadge size={15} kind={v.channel.badge} />}</p>
+          <p className="mt-1 text-[14px] font-semibold leading-snug">{v.title}</p>
+          {(m?.description || !!m?.tags.length) && (
+            <button type="button" onClick={() => (cut || more) && setMore((x) => !x)} aria-expanded={cut || more ? more : undefined} className="mt-1 block w-full text-left text-[13px] leading-snug opacity-90">
+              <span ref={descBox} className={more ? 'block max-h-[40dvh] overflow-y-auto whitespace-pre-line' : 'line-clamp-2'}>
+                {m?.description}{m?.tags.length ? <span className="font-semibold">{m.description ? ' ' : ''}{m.tags.map((x) => `#${x.replace(/\s+/g, '')}`).join(' ')}</span> : null}
+              </span>
+              {cut && !more && <span className="font-semibold">more</span>}{more && <span className="font-semibold">less</span>}
+            </button>
+          )}
+          <p className="mt-2 flex min-w-0 items-center gap-1.5 text-[12.5px]">
+            <Icon.Music size={15} className="shrink-0" />
+            <span className="truncate">{!m || m.sound.kind === 'original' ? `Original sound · @${v.channel.handle}` : m.sound.kind === 'named' ? m.sound.title : `${m.sound.title} · @${m.sound.owner}`}</span>
+          </p>
+          {m?.series && (
+            <div className="mt-2 flex items-center gap-2">
+              <button type="button" onClick={() => { setTalk(false); setEpisodes(true); }} className="facet-sm flex min-w-0 items-center gap-1.5 bg-white/[0.16] px-2.5 py-1.5 text-[12.5px] font-semibold backdrop-blur [text-shadow:none]">
+                <Icon.Following size={15} className="shrink-0" /><span className="truncate">Episode {m.series.episode} of {m.series.count} · {m.series.title}</span><Icon.ChevronRight size={14} className="shrink-0" />
+              </button>
+              {m.series.nextId && <button type="button" onClick={() => jump(m.series!.nextId!)} aria-label={`Next episode: ${m.series.episode + 1}`} className="facet-sm flex shrink-0 items-center gap-0.5 bg-[#d65f36] py-1.5 pl-2.5 pr-1.5 text-[12.5px] font-semibold text-[#fffaf3] [text-shadow:none]">Next<span className="hidden sm:inline">&nbsp;episode</span><Icon.ChevronRight size={14} /></button>}
+            </div>
+          )}
+          <p className="mt-1.5 text-[12px] opacity-80" suppressHydrationWarning>{viewsLabel(v.viewCount, locale)}{v.publishedAt ? ` · ${timeAgo(v.publishedAt, locale)}` : ''}</p>
         </div>
         <div className="absolute inset-x-4 bottom-2 h-1 overflow-hidden bg-white/25"><div className="h-full bg-[#f4ede3]" style={{ width: `${progress * 100}%` }} /></div>
       </div>
@@ -116,7 +143,7 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
             <Icon.Dislike size={26} filled={votes?.mine === 'dislike'} className="h-[21px] w-[21px] sm:h-[26px] sm:w-[26px]" />
             <span suppressHydrationWarning>{votes && votes.dislikes > 0 ? compactNumber(votes.dislikes, locale) : 'Dislike'}</span>
           </button>
-          <button type="button" onClick={() => setTalk((x) => !x)} aria-expanded={talk} aria-label={`Comments (${comments ?? 0})`} className={action}>
+          <button type="button" onClick={() => { setEpisodes(false); setTalk((x) => !x); }} aria-expanded={talk} aria-label={`Comments (${comments ?? 0})`} className={action}>
             <Icon.Comment size={26} filled={talk} className={`h-[21px] w-[21px] sm:h-[26px] sm:w-[26px] ${talk ? 'text-[#22ada2]' : ''}`} />
             <span suppressHydrationWarning>{comments ? compactNumber(comments, locale) : 'Comments'}</span>
           </button>
@@ -136,6 +163,14 @@ function Moment({ v, muted, setMuted, active }: { v: VideoCardData; muted: boole
             <button type="button" onClick={() => setTalk(false)} aria-label="Close comments" className="absolute right-3 top-2 z-10 grid h-8 w-8 place-items-center rounded-full bg-white/10 hover:bg-white/20 sm:hidden"><Icon.Close size={18} /></button>
             <div className="mx-auto mb-7 mt-1 h-1.5 w-10 rounded-full bg-white/25 sm:hidden" aria-hidden />
             <div className="h-[calc(100%-2.75rem)] sm:h-full"><Comments videoId={v.id} initialCount={comments ?? 0} variant="card" /></div>
+          </aside>
+        </>
+      )}
+      {episodes && m?.series && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/50 sm:hidden" onClick={() => setEpisodes(false)} />
+          <aside aria-label="Episodes" className="fixed inset-x-0 bottom-0 z-50 h-[72dvh] rounded-t-2xl bg-[#1e1916] p-5 pt-3 text-white shadow-[0_-12px_40px_rgb(0_0_0/0.45)] sm:static sm:z-auto sm:h-full sm:max-h-[calc(100dvh-8rem)] sm:w-[380px] sm:shrink-0 sm:pt-5 sm:facet sm:shadow-none">
+            <Episodes seriesId={m.series.id} current={v.id} onPick={(id) => { setEpisodes(false); jump(id); }} onClose={() => setEpisodes(false)} />
           </aside>
         </>
       )}
@@ -191,6 +226,12 @@ export function MomentsFeed({ first }: { first: VideoPage }) {
     if (!cursor || active < list.length - 3) return;
     fetch(`/api/videos?moments=true&limit=12&cursor=${encodeURIComponent(cursor)}`).then((r) => r.json()).then((d: VideoPage) => { setItems((x) => [...x, ...d.videos]); setCursor(d.nextCursor); }).catch(() => undefined);
   }, [active, cursor, list.length]);
+  // Another Moment by id (the next episode, one picked from its series): here if it is loaded, else the feed opens at it.
+  const jump = (id: string) => {
+    const i = list.findIndex((x) => x.kind === 'moment' && x.v.id === id);
+    if (i >= 0) box.current?.querySelector(`[data-index="${i}"]`)?.scrollIntoView({ behavior: 'smooth' });
+    else window.location.assign(`/moments?first=${id}`);
+  };
   const go = (d: number) => box.current?.querySelector(`[data-index="${Math.max(0, Math.min(list.length - 1, active + d))}"]`)?.scrollIntoView({ behavior: 'smooth' });
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if ((e.target as HTMLElement).closest('input, textarea')) return; if (e.key === 'ArrowDown') { e.preventDefault(); go(1); } if (e.key === 'ArrowUp') { e.preventDefault(); go(-1); } };
@@ -201,7 +242,7 @@ export function MomentsFeed({ first }: { first: VideoPage }) {
     <div className="relative">
       <div ref={box} className="no-scrollbar mx-auto h-[calc(100dvh-6.5rem)] snap-y snap-mandatory overflow-y-auto md:h-[calc(100dvh-4rem-2.5rem)]">
         {list.map((x, i) => x.kind === 'moment'
-          ? <div key={x.v.id} data-index={i} className="h-full"><Moment v={x.v} muted={muted} setMuted={setMuted} active={i === active} /></div>
+          ? <div key={x.v.id} data-index={i} className="h-full"><Moment v={x.v} muted={muted} setMuted={setMuted} active={i === active} jump={jump} /></div>
           : <div key={`ad-${x.slot}`} data-index={i} className="h-full"><MomentAd ad={x.ad} after={x.after} muted={muted} setMuted={setMuted} active={i === active} /></div>)}
       </div>
       {/* Phones: no app bar here, only the page's name and search, over the video. */}
@@ -213,6 +254,45 @@ export function MomentsFeed({ first }: { first: VideoPage }) {
         <button type="button" onClick={() => go(-1)} disabled={active === 0} aria-label="Previous Moment" className="facet-sm grid h-12 w-12 place-items-center bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronUp size={24} /></button>
         <button type="button" onClick={() => go(1)} disabled={active >= list.length - 1} aria-label="Next Moment" className="facet-sm grid h-12 w-12 place-items-center bg-surface hover:bg-surface-hover disabled:opacity-30"><Icon.ChevronDown size={24} /></button>
       </div>
+    </div>
+  );
+}
+
+interface SeriesPage { series: { id: string; title: string; channel: { handle: string; name: string } }; episodes: Array<VideoCardData & { episode: number }> }
+
+/** The episodes of a series, in order: the one playing is marked; picking one plays it. */
+function Episodes({ seriesId, current, onPick, onClose }: { seriesId: string; current: string; onPick: (id: string) => void; onClose: () => void }) {
+  const [page, setPage] = useState<SeriesPage | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => { fetch(`/api/series/${seriesId}`).then((r) => (r.ok ? r.json() : Promise.reject())).then(setPage).catch(() => setError(true)); }, [seriesId]);
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-[19px] font-extrabold">{page?.series.title ?? 'Episodes'}</h2>
+          {page && <p className="text-[13px] text-[#b0a397]">{page.episodes.length} episodes · @{page.series.channel.handle}</p>}
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close episodes" className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/10 hover:bg-white/20"><Icon.Close size={18} /></button>
+      </div>
+      <div className="zigzag mb-2 mt-3" aria-hidden />
+      {error && <p className="py-6 text-center text-[14px] text-[#b0a397]">The episodes could not be loaded.</p>}
+      {!page && !error && <Icon.Spinner className="mx-auto mt-8 animate-spin text-[#b0a397]" />}
+      <ol className="no-scrollbar -mx-2 min-h-0 flex-1 space-y-1 overflow-y-auto px-2">
+        {page?.episodes.map((e) => (
+          <li key={e.id}>
+            <button type="button" onClick={() => onPick(e.id)} aria-current={e.id === current ? 'true' : undefined} className={`flex w-full items-center gap-3 rounded-lg p-2 text-left ${e.id === current ? 'bg-white/[0.1]' : 'hover:bg-white/[0.06]'}`}>
+              <span className="facet-sm relative block h-[72px] w-[48px] shrink-0 overflow-hidden bg-white/10">
+                {e.thumbnailUrl && <img src={e.thumbnailUrl} alt="" loading="lazy" className="h-full w-full object-cover" />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[12px] font-bold uppercase tracking-wide text-[#e8b04a]">Episode {e.episode}{e.id === current ? ' · playing' : ''}</span>
+                <span className="line-clamp-2 text-[14px] font-semibold leading-snug">{e.title}</span>
+                <span className="text-[12px] text-[#b0a397]">{duration(e.durationSeconds)}</span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

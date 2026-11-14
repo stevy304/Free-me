@@ -265,6 +265,7 @@ model Channel {
   @@index([handle])
   @@index([isVerified])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Channel_name_trgm_idx")
+  series                Series[]
 }
 
 model Video {
@@ -273,6 +274,13 @@ model Video {
   channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
   title                 String
   description           String?
+  /// The sound a Moment uses, as its creator names it (a song, "Original sound" when null). A sound matched by
+  /// Content ID to a verified rights holder's licensed work is shown with that work's title instead.
+  soundTitle            String?
+  /// A Moment that is one episode of a series (Series), and its number in it (1, 2, 3...).
+  seriesId              String?
+  series                Series?           @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  episodeNumber         Int?
   categoryId            String?
   category              Category?         @relation(fields: [categoryId], references: [id])
   language              String?           // BCP 47
@@ -379,6 +387,7 @@ model Video {
   @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "Video_title_trgm_idx")
   @@index([sourceSha256])
   @@index([safetyLimitedAt])
+  @@index([seriesId, episodeNumber])
 }
 
 model VideoRendition {
@@ -1295,4 +1304,18 @@ model ContentClaim {
   @@unique([videoId, referenceVideoId])
   @@index([ownerChannelId, createdAt])
   @@index([videoId, status])
+}
+
+/// A series of Moments (episodes) by one Space: a story told in parts. Each episode is a Video with seriesId and its
+/// episodeNumber; the Moments feed shows "Episode 2 of 5" and lists the others.
+model Series {
+  id                    String            @id @default(uuid())
+  channelId             String
+  channel               Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  title                 String
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  videos                Video[]
+
+  @@index([channelId])
 }
